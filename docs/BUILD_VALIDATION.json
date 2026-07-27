@@ -1,0 +1,44 @@
+{
+  "version": "3.0.0",
+  "build_date": "2026-07-27",
+  "database_integrity": "ok",
+  "kaspi_products": 890,
+  "kaspi_details": 890,
+  "market_candidates": 20921,
+  "status_distribution": {
+    "REVIEW_REQUIRED": 611,
+    "INSUFFICIENT_DATA": 235,
+    "EXACT_LOWEST": 12,
+    "EXACT_HIGHEST": 4,
+    "EXACT_COMPETITIVE": 4,
+    "SEGMENT_LOWEST": 4,
+    "SEGMENT_BELOW": 1,
+    "SEGMENT_IN_MARKET": 12,
+    "SEGMENT_ABOVE": 1,
+    "SEGMENT_HIGHEST": 6
+  },
+  "continental_105775186": {
+    "status": "REVIEW_REQUIRED",
+    "reference_count": 0,
+    "market_median_price_kzt": null,
+    "difference_pct": null,
+    "potential_margin_per_unit_kzt": 0.0
+  },
+  "offline_tests": {
+    "mvp_self_test": "passed",
+    "ozon_self_test": "passed",
+    "python_compile": "passed",
+    "javascript_syntax": "passed",
+    "flask_runtime": "not_executed_in_build_environment_missing_flask_dependency",
+    "live_kaspi": "not_executed_requires_local_profile",
+    "live_ozon": "not_executed_requires_local_chrome_vpn_session",
+    "matching_determinism": "passed_with_two_independent_python_hash_seeds"
+  },
+  "excluded_runtime_directories": [
+    ".venv",
+    ".playwright",
+    ".kaspi_profile",
+    "chrome_vpn_profile",
+    "__pycache__"
+  ]
+}

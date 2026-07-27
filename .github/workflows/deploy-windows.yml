@@ -1,0 +1,27 @@
+name: Deploy ITP Market Intelligence
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: itp-market-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Windows, X64, itpmarket-demo]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Deploy to demo computer
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\deploy\deploy_from_runner.ps1 `
+            -SourceRoot "${{ github.workspace }}" `
+            -InstallRoot "C:\ITPMarket" `
+            -ServerIp "192.168.1.75"

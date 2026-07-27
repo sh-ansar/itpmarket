@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Код восстановления — Unityre</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <main class="auth-shell setup-shell">
+    <section class="auth-brand">
+      <img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP" class="auth-logo">
+      <div class="brand-kicker"><span></span> RECOVERY KEY</div>
+      <h1>Сохраните код восстановления.</h1>
+      <p>Он потребуется для сброса пароля без доступа к электронной почте. После перехода далее код больше не будет показан.</p>
+      <div class="setup-steps">
+        <div class="done"><i>✓</i><span>Учётная запись</span></div><b class="done"></b>
+        <div class="active"><i>2</i><span>Код восстановления</span></div><b></b>
+        <div><i>3</i><span>Синхронизация</span></div>
+      </div>
+    </section>
+    <section class="auth-card wide-card">
+      <div class="card-head"><span class="eyebrow">ШАГ 2 ИЗ 3</span><h2>Ключ восстановления</h2><p>Скопируйте и храните отдельно от компьютера.</p></div>
+      <div class="recovery-box"><code id="recoveryCode">{{ recovery_code }}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('recoveryCode').textContent);this.textContent='Скопировано'">Копировать</button></div>
+      <div class="warning-note"><strong>Важно.</strong> Код хранится в базе только в виде защищённого хэша. Восстановить его отображение позже невозможно — можно только выпустить новый.</div>
+      <a class="primary-button link-button" href="{{ url_for('index') }}"><span>Перейти в систему</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    </section>
+  </main>
+</body>
+</html>

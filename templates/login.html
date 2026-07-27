@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Вход — ITP Market Intelligence</title>
+  <link rel="icon" href="{{ url_for('static', filename='images/itp-logo.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <main class="auth-shell">
+    <section class="auth-brand">
+      <img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP" class="auth-logo">
+      <div class="brand-kicker"><span></span> MARKET INTELLIGENCE</div>
+      <h1>Контроль цен и рыночной позиции в одном интерфейсе.</h1>
+      <p>Каталог, цены, предложения конкурентов и история изменений — в защищённой локальной системе.</p>
+      <div class="feature-grid">
+        <div><b>Точный контроль</b><span>Выборочные и массовые операции</span></div>
+        <div><b>Надёжное хранение</b><span>Хранение исторических данных и профиля компании</span></div>
+        <div><b>Живой прогресс</b><span>Отдельный статус каждой операции</span></div>
+      </div>
+    </section>
+    <section class="auth-card">
+      <div class="card-head">
+        <span class="eyebrow">ITP CONTROL ROOM</span>
+        <h2>Вход в систему</h2>
+        <p>Используйте рабочую учётную запись.</p>
+      </div>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+      {% endwith %}
+      <form method="post" autocomplete="on">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Электронная почта<input type="email" name="email" required autofocus autocomplete="username" placeholder="name@itp.ge"></label>
+        <label>Пароль<input type="password" name="password" required autocomplete="current-password" placeholder="Введите пароль"></label>
+        <button type="submit" class="primary-button"><span>Войти</span><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </form>
+      <a class="secondary-link" href="{{ url_for('forgot_password') }}">Восстановить пароль</a>
+    </section>
+  </main>
+</body>
+</html>

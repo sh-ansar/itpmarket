@@ -1,0 +1,6 @@
+Flask==3.1.1
+waitress==3.0.2
+playwright==1.53.0
+psutil==7.0.0
+selenium==4.46.0
+selenium-stealth==1.0.6

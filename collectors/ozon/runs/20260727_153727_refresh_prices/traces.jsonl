@@ -1,0 +1,33 @@
+{"stage": "product", "index": 1, "article": "178597676", "status": "JSON_OK", "elapsed_ms": 60547, "events": [{"event": "poll", "attempt": 1, "blocked": false}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}, {"event": "poll", "attempt": 1, "blocked": true}]}
+{"stage": "product", "index": 2, "article": "2868558477", "status": "JSON_OK", "elapsed_ms": 563, "events": []}
+{"stage": "product", "index": 3, "article": "2868559508", "status": "JSON_OK", "elapsed_ms": 531, "events": []}
+{"stage": "product", "index": 4, "article": "2868559990", "status": "JSON_OK", "elapsed_ms": 594, "events": []}
+{"stage": "product", "index": 5, "article": "2868561153", "status": "JSON_OK", "elapsed_ms": 3016, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 6, "article": "2868561995", "status": "JSON_OK", "elapsed_ms": 2859, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 7, "article": "2868562113", "status": "JSON_OK", "elapsed_ms": 578, "events": []}
+{"stage": "product", "index": 8, "article": "2946336416", "status": "JSON_OK", "elapsed_ms": 2891, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 9, "article": "2946338515", "status": "JSON_OK", "elapsed_ms": 2985, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 10, "article": "2946342402", "status": "JSON_OK", "elapsed_ms": 438, "events": []}
+{"stage": "product", "index": 11, "article": "2946346318", "status": "JSON_OK", "elapsed_ms": 579, "events": []}
+{"stage": "product", "index": 12, "article": "2946351812", "status": "JSON_OK", "elapsed_ms": 1390, "events": []}
+{"stage": "product", "index": 13, "article": "2946353002", "status": "JSON_OK", "elapsed_ms": 1203, "events": []}
+{"stage": "product", "index": 14, "article": "2946363199", "status": "JSON_OK", "elapsed_ms": 593, "events": []}
+{"stage": "product", "index": 15, "article": "3451042740", "status": "JSON_OK", "elapsed_ms": 797, "events": []}
+{"stage": "product", "index": 16, "article": "3538682553", "status": "JSON_OK", "elapsed_ms": 3250, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 17, "article": "3538903187", "status": "JSON_OK", "elapsed_ms": 1328, "events": []}
+{"stage": "product", "index": 18, "article": "178597719", "status": "JSON_OK", "elapsed_ms": 1110, "events": []}
+{"stage": "product", "index": 19, "article": "178873851", "status": "JSON_OK", "elapsed_ms": 1047, "events": []}
+{"stage": "product", "index": 20, "article": "178873850", "status": "JSON_OK", "elapsed_ms": 1500, "events": []}
+{"stage": "product", "index": 21, "article": "178968640", "status": "JSON_OK", "elapsed_ms": 1282, "events": []}
+{"stage": "product", "index": 22, "article": "740466966", "status": "JSON_OK", "elapsed_ms": 1360, "events": []}
+{"stage": "product", "index": 23, "article": "178873843", "status": "JSON_OK", "elapsed_ms": 1531, "events": []}
+{"stage": "product", "index": 24, "article": "178873838", "status": "JSON_OK", "elapsed_ms": 1156, "events": []}
+{"stage": "product", "index": 25, "article": "178873852", "status": "JSON_OK", "elapsed_ms": 891, "events": []}
+{"stage": "product", "index": 26, "article": "178873839", "status": "JSON_OK", "elapsed_ms": 859, "events": []}
+{"stage": "product", "index": 27, "article": "263506065", "status": "JSON_OK", "elapsed_ms": 3109, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 28, "article": "178873849", "status": "JSON_OK", "elapsed_ms": 656, "events": []}
+{"stage": "product", "index": 29, "article": "178597686", "status": "JSON_OK", "elapsed_ms": 718, "events": []}
+{"stage": "product", "index": 30, "article": "178873860", "status": "JSON_OK", "elapsed_ms": 657, "events": []}
+{"stage": "product", "index": 31, "article": "178873836", "status": "JSON_OK", "elapsed_ms": 766, "events": []}
+{"stage": "product", "index": 32, "article": "199621954", "status": "JSON_OK", "elapsed_ms": 563, "events": []}
+{"stage": "product", "index": 33, "article": "178873841", "status": "JSON_OK", "elapsed_ms": 813, "events": []}

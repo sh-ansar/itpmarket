@@ -1,0 +1,44 @@
+{
+  "version": "3.1.0",
+  "checks": {
+    "python_syntax": {
+      "status": "OK",
+      "files": 28
+    },
+    "javascript_syntax": {
+      "status": "OK",
+      "stderr": ""
+    },
+    "windows_bat": {
+      "status": "OK",
+      "files": 28,
+      "format": "ASCII_CRLF_NO_BOM"
+    },
+    "database": {
+      "status": "OK",
+      "integrity": "ok",
+      "counts": {
+        "catalog_products": 890,
+        "product_details": 890,
+        "market_candidates": 20921,
+        "market_seller_offers": 2771,
+        "exact_offer_scans": 0,
+        "exact_offer_snapshots": 0,
+        "app_users": 0
+      },
+      "credentials_sanitized": true
+    },
+    "self_test": {
+      "status": "OK",
+      "stdout": "ITP MARKET INTELLIGENCE MVP SELF TEST: OK\nKaspi: 890 products and 890 detail cards\nMatching: deterministic across independent Python hash seeds\nContinental 105775186: exact-only by Kaspi product_code; cross-brand analogs excluded\nOzon: fixture registry, seller, price, link and RUB/KZT conversion verified\nReports: combined HTML, CSV and JSON generated\n",
+      "stderr": ""
+    },
+    "exact_only_wiring": {
+      "status": "OK",
+      "collector": "engine/exact_offer_refresh.py",
+      "method": "KASPI_PRODUCT_CODE",
+      "legacy_candidates_deleted": false,
+      "legacy_candidates_used_in_analytics": false
+    }
+  }
+}

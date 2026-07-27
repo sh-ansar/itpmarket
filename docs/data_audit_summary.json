@@ -1,0 +1,36 @@
+{
+  "products": 890,
+  "accepted_old": 559,
+  "brand_mismatch_estimate": 342,
+  "brand_mismatch_pct": 61.2,
+  "spec_avg": 11.13,
+  "old_statuses": {
+    "ANALOG_LOSE": 180,
+    "ANALOG_WIN": 108,
+    "NO_ACCEPTED_MATCH": 566,
+    "ANALOG_TIE": 19,
+    "ANALOG_NEAR": 17
+  },
+  "new_statuses": {
+    "REVIEW_REQUIRED": 611,
+    "INSUFFICIENT_DATA": 235,
+    "EXACT_LOWEST": 12,
+    "EXACT_HIGHEST": 4,
+    "EXACT_COMPETITIVE": 4,
+    "SEGMENT_LOWEST": 4,
+    "SEGMENT_BELOW": 1,
+    "SEGMENT_IN_MARKET": 12,
+    "SEGMENT_ABOVE": 1,
+    "SEGMENT_HIGHEST": 6
+  },
+  "continental_new": {
+    "price_status": "REVIEW_REQUIRED",
+    "status_label": "Требует проверки сопоставления",
+    "reference_type": "NONE",
+    "reference_count": 0,
+    "market_median_price_kzt": null,
+    "difference_kzt": null,
+    "potential_margin_per_unit_kzt": 0.0
+  },
+  "matching_deterministic": true
+}
