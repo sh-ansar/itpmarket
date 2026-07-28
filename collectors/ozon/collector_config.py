@@ -60,6 +60,11 @@ class Settings:
     blocked_stop_after: int
     max_task_attempts: int
     raw_json_policy: str
+    market_search_batch_limit: int
+    market_search_max_pages: int
+    market_search_candidate_limit: int
+    market_search_detail_limit: int
+    market_search_delay_seconds: tuple[float, float]
     database_path: Path
     runs_dir: Path
     reports_dir: Path
@@ -122,6 +127,11 @@ def load_settings() -> Settings:
         blocked_stop_after=max(2, int(config.get("blocked_stop_after", 5))),
         max_task_attempts=max(1, int(config.get("max_task_attempts", 3))),
         raw_json_policy=str(config.get("raw_json_policy", "first_success_and_errors")),
+        market_search_batch_limit=max(1, int(config.get("market_search_batch_limit", 30))),
+        market_search_max_pages=max(1, min(3, int(config.get("market_search_max_pages", 1)))),
+        market_search_candidate_limit=max(3, min(30, int(config.get("market_search_candidate_limit", 12)))),
+        market_search_detail_limit=max(2, min(15, int(config.get("market_search_detail_limit", 8)))),
+        market_search_delay_seconds=_pair(config.get("market_search_delay_seconds"), (4.0, 7.0)),
         database_path=ROOT / str(config.get("database_path", "data/ozon_registry.db")),
         runs_dir=ROOT / str(config.get("runs_dir", "runs")),
         reports_dir=ROOT / str(config.get("reports_dir", "reports")),

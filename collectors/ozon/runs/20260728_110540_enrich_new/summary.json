@@ -1,0 +1,11 @@
+{
+  "run_id": "20260728_110540_enrich_new",
+  "mode": "enrich-new",
+  "status": "PARTIAL",
+  "pages_loaded": 0,
+  "items_total": 24,
+  "items_success": 22,
+  "items_failed": 2,
+  "items_blocked": 0,
+  "duration_seconds": 96.28
+}

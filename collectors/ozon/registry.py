@@ -111,6 +111,71 @@ CREATE TABLE IF NOT EXISTS catalog_snapshots (
     PRIMARY KEY(run_id, article)
 );
 
+
+CREATE TABLE IF NOT EXISTS catalog_sources (
+    source_url TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL DEFAULT 'MARKET_CATEGORY',
+    label TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_sources_type ON catalog_sources(source_type, active);
+
+CREATE TABLE IF NOT EXISTS product_sources (
+    article TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'MARKET_CATEGORY',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_run_id TEXT NOT NULL DEFAULT '',
+    page_no INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(article, source_url),
+    FOREIGN KEY(article) REFERENCES products(article) ON DELETE CASCADE,
+    FOREIGN KEY(source_url) REFERENCES catalog_sources(source_url) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_product_sources_type ON product_sources(source_type, article);
+
+
+CREATE TABLE IF NOT EXISTS market_search_jobs (
+    client_article TEXT PRIMARY KEY,
+    query_text TEXT NOT NULL DEFAULT '',
+    query_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'NEW',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    candidates_found INTEGER NOT NULL DEFAULT 0,
+    exact_found INTEGER NOT NULL DEFAULT 0,
+    comparable_found INTEGER NOT NULL DEFAULT 0,
+    last_search_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    last_run_id TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(client_article) REFERENCES products(article) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_market_search_jobs_status ON market_search_jobs(status,last_search_at);
+
+CREATE TABLE IF NOT EXISTS market_search_candidates (
+    client_article TEXT NOT NULL,
+    candidate_article TEXT NOT NULL,
+    query_text TEXT NOT NULL DEFAULT '',
+    query_url TEXT NOT NULL DEFAULT '',
+    catalog_rank INTEGER NOT NULL DEFAULT 0,
+    match_level TEXT NOT NULL DEFAULT 'REJECTED',
+    match_score REAL NOT NULL DEFAULT 0,
+    match_method TEXT NOT NULL DEFAULT '',
+    match_reason TEXT NOT NULL DEFAULT '',
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_checked_at TEXT NOT NULL,
+    last_run_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(client_article,candidate_article),
+    FOREIGN KEY(client_article) REFERENCES products(article) ON DELETE CASCADE,
+    FOREIGN KEY(candidate_article) REFERENCES products(article) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_market_search_candidates_level
+ON market_search_candidates(client_article,active,match_level,match_score DESC);
+
 CREATE TABLE IF NOT EXISTS crawl_queue (
     article TEXT NOT NULL,
     task_type TEXT NOT NULL,
@@ -148,6 +213,19 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+
+def canonical_source_url(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.split("#", 1)[0]
+
+
+def source_type_for_url(value: Any) -> str:
+    text = canonical_source_url(value).casefold()
+    return "CLIENT_CATALOG" if "/seller/" in text else "MARKET_SEARCH" if "/search/" in text else "MARKET_CATEGORY"
+
+
 def stable_hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -168,10 +246,49 @@ class Registry:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self.backfill_source_memberships()
         self.reset_stale_running_tasks()
 
     def close(self) -> None:
         self.conn.close()
+
+
+    def backfill_source_memberships(self) -> None:
+        """Create source memberships for registries produced before version 3.2.4."""
+        timestamp = now_iso()
+        rows = self.conn.execute(
+            "SELECT article,discovery_url,first_seen_at,last_seen_at FROM products"
+        ).fetchall()
+        with self.conn:
+            for row in rows:
+                source_url = canonical_source_url(row["discovery_url"])
+                if not source_url:
+                    continue
+                source_type = source_type_for_url(source_url)
+                first_seen = str(row["first_seen_at"] or timestamp)
+                last_seen = str(row["last_seen_at"] or timestamp)
+                self.conn.execute(
+                    """
+                    INSERT INTO catalog_sources(source_url,source_type,label,first_seen_at,last_seen_at,active)
+                    VALUES(?,?,?,?,?,1)
+                    ON CONFLICT(source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=MAX(catalog_sources.last_seen_at, excluded.last_seen_at),
+                        active=1
+                    """,
+                    (source_url, source_type, "", first_seen, last_seen),
+                )
+                self.conn.execute(
+                    """
+                    INSERT INTO product_sources(
+                        article,source_url,source_type,first_seen_at,last_seen_at,last_run_id,page_no
+                    ) VALUES(?,?,?,?,?,'',0)
+                    ON CONFLICT(article,source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=MAX(product_sources.last_seen_at, excluded.last_seen_at)
+                    """,
+                    (str(row["article"]), source_url, source_type, first_seen, last_seen),
+                )
 
     def reset_stale_running_tasks(self) -> None:
         cutoff = (datetime.now() - timedelta(hours=12)).isoformat(timespec="seconds")
@@ -248,7 +365,21 @@ class Registry:
         new_price = int(item.get("catalog_card_price") or 0)
         price_changed = bool(current and new_price and old_price and new_price != old_price)
         timestamp = collected_at
+        source_url = canonical_source_url(discovery_url)
+        source_type = source_type_for_url(source_url)
         with self.conn:
+            if source_url:
+                self.conn.execute(
+                    """
+                    INSERT INTO catalog_sources(source_url,source_type,label,first_seen_at,last_seen_at,active)
+                    VALUES(?,?,?,?,?,1)
+                    ON CONFLICT(source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=excluded.last_seen_at,
+                        active=1
+                    """,
+                    (source_url, source_type, "", timestamp, timestamp),
+                )
             self.conn.execute(
                 """
                 INSERT INTO products(
@@ -278,6 +409,20 @@ class Registry:
                     "NEW",
                 ),
             )
+            if source_url:
+                self.conn.execute(
+                    """
+                    INSERT INTO product_sources(
+                        article,source_url,source_type,first_seen_at,last_seen_at,last_run_id,page_no
+                    ) VALUES(?,?,?,?,?,?,?)
+                    ON CONFLICT(article,source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=excluded.last_seen_at,
+                        last_run_id=excluded.last_run_id,
+                        page_no=excluded.page_no
+                    """,
+                    (article, source_url, source_type, timestamp, timestamp, run_id, int(page_no)),
+                )
             self.conn.execute(
                 """
                 INSERT OR REPLACE INTO catalog_snapshots(
@@ -518,6 +663,112 @@ class Registry:
                 ),
             )
 
+
+    def client_products_for_market_search(self, limit: int = 0) -> list[dict[str, Any]]:
+        sql = """
+            SELECT p.*,j.last_search_at,j.exact_found,j.comparable_found
+            FROM products p
+            JOIN product_sources ps ON ps.article=p.article AND ps.source_type='CLIENT_CATALOG'
+            LEFT JOIN market_search_jobs j ON j.client_article=p.article
+            WHERE p.active=1 AND p.detail_status='COMPLETE'
+              AND TRIM(p.brand)<>'' AND TRIM(p.tire_size)<>''
+            GROUP BY p.article
+            ORDER BY CASE WHEN j.last_search_at IS NULL THEN 0 ELSE 1 END,
+                     COALESCE(j.exact_found,0),COALESCE(j.comparable_found,0),
+                     COALESCE(j.last_search_at,''),p.article
+        """
+        params: list[Any] = []
+        if limit > 0:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+
+    def primary_offer(self, article: str) -> dict[str, Any]:
+        row = self.conn.execute(
+            """
+            SELECT * FROM offers WHERE article=? AND active=1
+            ORDER BY CASE WHEN card_price>0 THEN 0 ELSE 1 END,last_checked_at DESC LIMIT 1
+            """, (str(article),)
+        ).fetchone()
+        return dict(row) if row else {}
+
+    def begin_market_search(self, client_article: str, run_id: str) -> None:
+        stamp = now_iso()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO market_search_jobs(client_article,status,attempts,last_search_at,last_run_id)
+                VALUES(?,'RUNNING',1,?,?)
+                ON CONFLICT(client_article) DO UPDATE SET
+                    status='RUNNING',attempts=market_search_jobs.attempts+1,
+                    last_search_at=excluded.last_search_at,last_run_id=excluded.last_run_id,
+                    last_error=''
+                """, (str(client_article), stamp, run_id)
+            )
+            self.conn.execute(
+                "UPDATE market_search_candidates SET active=0 WHERE client_article=?",
+                (str(client_article),)
+            )
+
+    def save_market_candidate(
+        self, client_article: str, candidate_article: str, query_text: str,
+        query_url: str, catalog_rank: int, match: dict[str, Any], run_id: str,
+    ) -> None:
+        stamp = now_iso()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO market_search_candidates(
+                    client_article,candidate_article,query_text,query_url,catalog_rank,
+                    match_level,match_score,match_method,match_reason,reasons_json,
+                    active,first_seen_at,last_seen_at,last_checked_at,last_run_id
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)
+                ON CONFLICT(client_article,candidate_article) DO UPDATE SET
+                    query_text=excluded.query_text,query_url=excluded.query_url,
+                    catalog_rank=MIN(market_search_candidates.catalog_rank,excluded.catalog_rank),
+                    match_level=CASE WHEN excluded.match_score>=market_search_candidates.match_score
+                        THEN excluded.match_level ELSE market_search_candidates.match_level END,
+                    match_score=MAX(market_search_candidates.match_score,excluded.match_score),
+                    match_method=CASE WHEN excluded.match_score>=market_search_candidates.match_score
+                        THEN excluded.match_method ELSE market_search_candidates.match_method END,
+                    match_reason=CASE WHEN excluded.match_score>=market_search_candidates.match_score
+                        THEN excluded.match_reason ELSE market_search_candidates.match_reason END,
+                    reasons_json=CASE WHEN excluded.match_score>=market_search_candidates.match_score
+                        THEN excluded.reasons_json ELSE market_search_candidates.reasons_json END,
+                    active=1,last_seen_at=excluded.last_seen_at,last_checked_at=excluded.last_checked_at,
+                    last_run_id=excluded.last_run_id
+                """,
+                (
+                    str(client_article), str(candidate_article), query_text, query_url,
+                    int(catalog_rank), str(match.get('level') or 'REJECTED'),
+                    float(match.get('score') or 0), str(match.get('method') or ''),
+                    str(match.get('reason') or ''), json.dumps(match.get('reasons') or [], ensure_ascii=False),
+                    stamp, stamp, stamp, run_id,
+                )
+            )
+
+    def finish_market_search(
+        self, client_article: str, query_text: str, query_url: str,
+        status: str, candidates: int, exact: int, comparable: int,
+        run_id: str, error: str = '',
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO market_search_jobs(
+                    client_article,query_text,query_url,status,attempts,candidates_found,
+                    exact_found,comparable_found,last_search_at,last_error,last_run_id
+                ) VALUES(?,?,?,?,1,?,?,?,?,?,?)
+                ON CONFLICT(client_article) DO UPDATE SET
+                    query_text=excluded.query_text,query_url=excluded.query_url,status=excluded.status,
+                    candidates_found=excluded.candidates_found,exact_found=excluded.exact_found,
+                    comparable_found=excluded.comparable_found,last_search_at=excluded.last_search_at,
+                    last_error=excluded.last_error,last_run_id=excluded.last_run_id
+                """,
+                (str(client_article),query_text,query_url,status,int(candidates),int(exact),
+                 int(comparable),now_iso(),str(error)[:2000],run_id)
+            )
+
     def counts(self) -> dict[str, int]:
         queries = {
             "products": "SELECT COUNT(*) FROM products",
@@ -527,6 +778,9 @@ class Registry:
             "price_points": "SELECT COUNT(*) FROM price_history",
             "pending_tasks": "SELECT COUNT(*) FROM crawl_queue WHERE status IN ('PENDING','RUNNING')",
             "failed_tasks": "SELECT COUNT(*) FROM crawl_queue WHERE status IN ('FAILED','BLOCKED')",
+            "market_search_products": "SELECT COUNT(*) FROM market_search_jobs",
+            "market_exact_matches": "SELECT COUNT(*) FROM market_search_candidates WHERE active=1 AND match_level IN ('EXACT','STRONG')",
+            "market_comparable_matches": "SELECT COUNT(*) FROM market_search_candidates WHERE active=1 AND match_level='COMPARABLE'",
         }
         return {name: int(self.conn.execute(sql).fetchone()[0]) for name, sql in queries.items()}
 

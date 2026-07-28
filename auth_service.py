@@ -14,6 +14,8 @@ from schema import ensure_database
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ROLES = {"admin", "operator", "viewer"}
+PLATFORM_ROLES = {"", "superadmin", "support", "technical"}
+MARKETPLACE_CODES = {"kaspi", "ozon", "forte_market", "halyk_market"}
 
 
 def now_iso() -> str:
@@ -67,17 +69,58 @@ class AuthService:
             "email": value["email"],
             "display_name": value["display_name"],
             "role": value["role"],
+            "platform_role": value.get("platform_role") or "",
+            "is_platform_user": bool(value.get("platform_role")),
             "is_active": bool(value["is_active"]),
+            "tenant_id": int(value["tenant_id"]) if value.get("tenant_id") is not None else None,
+            "tenant_name": value.get("tenant_name") or "",
+            "tenant_slug": value.get("tenant_slug") or "",
+            "tenant_role": value.get("tenant_role") or value.get("role") or "viewer",
+            "marketplaces": value.get("marketplaces") if isinstance(value.get("marketplaces"), dict) else {},
             "created_at": value.get("created_at"),
             "updated_at": value.get("updated_at"),
             "last_login_at": value.get("last_login_at"),
         }
 
+    @staticmethod
+    def _user_select() -> str:
+        return """
+            SELECT u.*,tu.tenant_id,tu.tenant_role,t.name AS tenant_name,t.slug AS tenant_slug
+            FROM app_users u
+            LEFT JOIN tenant_users tu ON tu.user_id=u.id AND tu.is_active=1 AND tu.is_primary=1
+            LEFT JOIN tenants t ON t.id=tu.tenant_id
+        """
+
+    @staticmethod
+    def _attach_marketplaces(
+        conn: sqlite3.Connection, row: sqlite3.Row | dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        value = dict(row)
+        access = {code: False for code in MARKETPLACE_CODES}
+        tenant_id = value.get("tenant_id")
+        if tenant_id is not None:
+            rows = conn.execute(
+                """
+                SELECT marketplace_code,is_enabled
+                FROM user_marketplace_access
+                WHERE tenant_id=? AND user_id=?
+                """,
+                (int(tenant_id), int(value["id"])),
+            ).fetchall()
+            for item in rows:
+                code = str(item["marketplace_code"])
+                if code in access:
+                    access[code] = bool(item["is_enabled"])
+        value["marketplaces"] = access
+        return value
+
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         conn = self._connect()
         try:
-            row = conn.execute("SELECT * FROM app_users WHERE id=?", (int(user_id),)).fetchone()
-            return self.public_user(row)
+            row = conn.execute(self._user_select()+" WHERE u.id=? LIMIT 1",(int(user_id),)).fetchone()
+            return self.public_user(self._attach_marketplaces(conn, row))
         finally:
             conn.close()
 
@@ -85,19 +128,20 @@ class AuthService:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT * FROM app_users WHERE email=? COLLATE NOCASE",
+                self._user_select()+" WHERE u.email=? COLLATE NOCASE LIMIT 1",
                 (normalize_email(email),),
             ).fetchone()
             if row is None:
                 return None
-            return dict(row) if include_secret else self.public_user(row)
+            value = self._attach_marketplaces(conn, row)
+            return value if include_secret else self.public_user(value)
         finally:
             conn.close()
 
     def create_initial_admin(self, email: str, display_name: str, password: str) -> tuple[dict[str, Any], str]:
         if self.has_users():
             raise ValueError("Первичная настройка уже выполнена.")
-        return self.create_user(email, display_name, password, "admin", actor_user_id=None)
+        return self.create_user(email, display_name, password, "admin", actor_user_id=None, tenant_id=None, platform_role="superadmin")
 
     def create_user(
         self,
@@ -106,6 +150,8 @@ class AuthService:
         password: str,
         role: str,
         actor_user_id: int | None,
+        tenant_id: int | None = None,
+        platform_role: str = "",
     ) -> tuple[dict[str, Any], str]:
         email_value = normalize_email(email)
         name_value = (display_name or "").strip()
@@ -116,6 +162,9 @@ class AuthService:
             raise ValueError("Укажите имя пользователя.")
         if role_value not in ROLES:
             raise ValueError("Неизвестная роль пользователя.")
+        platform_role_value = str(platform_role or "").casefold()
+        if platform_role_value not in PLATFORM_ROLES:
+            raise ValueError("Неизвестная платформенная роль.")
         validate_password(password)
         recovery_code = generate_recovery_code()
         stamp = now_iso()
@@ -124,9 +173,9 @@ class AuthService:
             cursor = conn.execute(
                 """
                 INSERT INTO app_users(
-                    email,display_name,password_hash,recovery_hash,role,is_active,
+                    email,display_name,password_hash,recovery_hash,role,platform_role,is_active,
                     created_at,updated_at,password_changed_at
-                ) VALUES(?,?,?,?,?,1,?,?,?)
+                ) VALUES(?,?,?,?,?,?,1,?,?,?)
                 """,
                 (
                     email_value,
@@ -134,19 +183,58 @@ class AuthService:
                     generate_password_hash(password),
                     generate_password_hash(recovery_code),
                     role_value,
+                    platform_role_value,
                     stamp,
                     stamp,
                     stamp,
                 ),
             )
             user_id = int(cursor.lastrowid)
+            resolved_tenant_id = tenant_id
+            if resolved_tenant_id is None and actor_user_id is not None:
+                membership = conn.execute(
+                    "SELECT tenant_id FROM tenant_users WHERE user_id=? AND is_active=1 ORDER BY is_primary DESC,tenant_id LIMIT 1",
+                    (int(actor_user_id),),
+                ).fetchone()
+                resolved_tenant_id = int(membership["tenant_id"]) if membership else None
+            if resolved_tenant_id is None:
+                tenant_row = conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()
+                resolved_tenant_id = int(tenant_row["id"]) if tenant_row else None
+            if resolved_tenant_id is not None:
+                conn.execute(
+                    """
+                    INSERT INTO tenant_users(tenant_id,user_id,tenant_role,is_primary,is_active,created_at)
+                    VALUES(?,?,?,?,1,?)
+                    ON CONFLICT(tenant_id,user_id) DO UPDATE SET tenant_role=excluded.tenant_role,is_active=1
+                    """,
+                    (resolved_tenant_id,user_id,role_value,1,stamp),
+                )
+                integrations = conn.execute(
+                    "SELECT integration_code,status FROM tenant_integrations WHERE tenant_id=?",
+                    (resolved_tenant_id,),
+                ).fetchall()
+                for integration in integrations:
+                    enabled = 1 if str(integration["status"]) in {"active", "setup"} else 0
+                    conn.execute(
+                        """
+                        INSERT INTO user_marketplace_access(
+                            tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?)
+                        ON CONFLICT(tenant_id,user_id,marketplace_code) DO UPDATE SET
+                            is_enabled=excluded.is_enabled,updated_at=excluded.updated_at
+                        """,
+                        (
+                            resolved_tenant_id,user_id,str(integration["integration_code"]),
+                            enabled,stamp,stamp,
+                        ),
+                    )
             self._event(conn, actor_user_id or user_id, "user_created", "user", str(user_id), {
                 "email": email_value,
                 "role": role_value,
             })
             conn.commit()
-            row = conn.execute("SELECT * FROM app_users WHERE id=?", (user_id,)).fetchone()
-            return self.public_user(row) or {}, recovery_code
+            row = conn.execute(self._user_select()+" WHERE u.id=? LIMIT 1", (user_id,)).fetchone()
+            return self.public_user(self._attach_marketplaces(conn, row)) or {}, recovery_code
         except sqlite3.IntegrityError as exc:
             raise ValueError("Пользователь с такой почтой уже существует.") from exc
         finally:
@@ -168,15 +256,31 @@ class AuthService:
             conn.close()
         return self.public_user(value)
 
-    def list_users(self) -> list[dict[str, Any]]:
+    def list_users(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM app_users ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END, display_name"
-            ).fetchall()
-            return [self.public_user(row) or {} for row in rows]
+            query = self._user_select()
+            params: list[Any] = []
+            if tenant_id is not None:
+                query += " WHERE tu.tenant_id=?"
+                params.append(int(tenant_id))
+            query += " ORDER BY CASE u.role WHEN 'admin' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END,u.display_name"
+            return [
+                self.public_user(self._attach_marketplaces(conn, row)) or {}
+                for row in conn.execute(query,params).fetchall()
+            ]
         finally:
             conn.close()
+
+    def set_platform_role(self,user_id:int,platform_role:str,actor_user_id:int)->dict[str,Any]:
+        value=str(platform_role or "").casefold()
+        if value not in PLATFORM_ROLES: raise ValueError("Неизвестная платформенная роль.")
+        conn=self._connect()
+        try:
+            conn.execute("UPDATE app_users SET platform_role=?,updated_at=? WHERE id=?",(value,now_iso(),int(user_id)))
+            self._event(conn,actor_user_id,"platform_role_updated","user",str(user_id),{"platform_role":value}); conn.commit()
+            row=conn.execute(self._user_select()+" WHERE u.id=? LIMIT 1",(int(user_id),)).fetchone(); return self.public_user(self._attach_marketplaces(conn,row)) or {}
+        finally:conn.close()
 
     def update_user(self, user_id: int, changes: dict[str, Any], actor_user_id: int) -> dict[str, Any]:
         target = self.get_user(user_id)
@@ -202,18 +306,55 @@ class AuthService:
                 raise ValueError("Нельзя отключить собственную учётную запись.")
             fields.append("is_active=?")
             params.append(active)
-        if not fields:
+        access_changes: dict[str, bool] | None = None
+        if "marketplaces" in changes:
+            raw = changes.get("marketplaces")
+            if isinstance(raw, dict):
+                access_changes = {
+                    code: bool(raw.get(code, False)) for code in MARKETPLACE_CODES
+                }
+            else:
+                enabled = {
+                    str(value).strip() for value in (raw or [])
+                    if str(value).strip() in MARKETPLACE_CODES
+                }
+                access_changes = {code: code in enabled for code in MARKETPLACE_CODES}
+        if not fields and access_changes is None:
             return target
-        fields.append("updated_at=?")
-        params.append(now_iso())
-        params.append(int(user_id))
         conn = self._connect()
         try:
-            conn.execute(f"UPDATE app_users SET {', '.join(fields)} WHERE id=?", params)
+            stamp = now_iso()
+            if fields:
+                fields.append("updated_at=?")
+                params.append(stamp)
+                params.append(int(user_id))
+                conn.execute(f"UPDATE app_users SET {', '.join(fields)} WHERE id=?", params)
+            if "role" in changes:
+                conn.execute(
+                    "UPDATE tenant_users SET tenant_role=? WHERE user_id=?",
+                    (str(changes["role"] or "viewer").casefold(), int(user_id)),
+                )
+            if access_changes is not None:
+                tenant_id = target.get("tenant_id")
+                if tenant_id is None:
+                    raise ValueError("Пользователь не связан с компанией.")
+                for code, enabled in access_changes.items():
+                    conn.execute(
+                        """
+                        INSERT INTO user_marketplace_access(
+                            tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?)
+                        ON CONFLICT(tenant_id,user_id,marketplace_code) DO UPDATE SET
+                            is_enabled=excluded.is_enabled,updated_at=excluded.updated_at
+                        """,
+                        (int(tenant_id),int(user_id),code,1 if enabled else 0,stamp,stamp),
+                    )
             self._event(conn, actor_user_id, "user_updated", "user", str(user_id), changes)
             conn.commit()
-            row = conn.execute("SELECT * FROM app_users WHERE id=?", (int(user_id),)).fetchone()
-            return self.public_user(row) or {}
+            row = conn.execute(
+                self._user_select()+" WHERE u.id=? LIMIT 1", (int(user_id),)
+            ).fetchone()
+            return self.public_user(self._attach_marketplaces(conn, row)) or {}
         finally:
             conn.close()
 
