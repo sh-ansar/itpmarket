@@ -50,7 +50,7 @@ try {
     & .\INSTALL.bat
     if ($LASTEXITCODE -ne 0) { throw "Runtime installation failed" }
 
-    & .\CONFIGURE_SERVER.bat $ServerIp
+    & powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\configure_server.ps1" -ServerIp $ServerIp -Port 8765
     if ($LASTEXITCODE -ne 0) { Write-Warning "Server setup returned $LASTEXITCODE" }
 
     $migrations = @(
