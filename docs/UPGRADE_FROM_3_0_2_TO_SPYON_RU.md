@@ -11,7 +11,15 @@ New-Item -ItemType Directory -Force C:\Temp | Out-Null
 ```
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sh-ansar/itpmarket/feature/spyon-admin-panel/UPGRADE_SERVER_FROM_3_0_2.ps1" -OutFile "C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1"
+cd C:\ITPMarket\app
+```
+
+```powershell
+git fetch --prune origin +refs/heads/feature/spyon-admin-panel:refs/remotes/origin/feature/spyon-admin-panel
+```
+
+```powershell
+git show origin/feature/spyon-admin-panel:UPGRADE_SERVER_FROM_3_0_2.ps1 | Set-Content -Path C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1 -Encoding UTF8
 ```
 
 ```powershell
@@ -27,7 +35,7 @@ C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1 -ProjectRoot C:\ITPMarket\app -Branch feat
 - останавливает сервер;
 - делает backup базы, Ozon-базы и config-файлов;
 - сохраняет локальные изменения рабочей папки в `backups\pre_upgrade_worktree_*`;
-- приводит код к состоянию ветки `feature/spyon-admin-panel`;
+- точечно скачивает `feature/spyon-admin-panel`, приводит код к состоянию этой ветки и не делает лишний `pull`;
 - сохраняет рабочие данные: `data`, `collectors\ozon\data`, `.runtime`, `.venv`, `.kaspi_profile`, `.playwright`, `logs`, `output`, `backups`;
 - запускает миграции `migrate_3_1_0.py` ... `migrate_3_4_1.py`;
 - чистит `__pycache__`;

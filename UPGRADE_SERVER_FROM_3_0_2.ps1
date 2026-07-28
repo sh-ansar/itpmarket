@@ -2,7 +2,9 @@ param(
     [string]$ProjectRoot = "",
     [string]$Branch = "feature/spyon-admin-panel",
     [string]$Remote = "origin",
+    [string]$RemoteUrl = "",
     [string]$ServerUrl = "http://127.0.0.1:8765",
+    [int]$FetchRetries = 3,
     [switch]$InternalRelaunched
 )
 
@@ -32,6 +34,39 @@ function Invoke-Native {
     }
 }
 
+function Invoke-NativeStatus {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+    & $FilePath @Arguments
+    return $LASTEXITCODE
+}
+
+function Invoke-GitFetchBranch {
+    param(
+        [Parameter(Mandatory=$true)][string]$RemoteName,
+        [Parameter(Mandatory=$true)][string]$BranchName,
+        [int]$Retries = 3
+    )
+    $remoteRef = "refs/remotes/$RemoteName/$BranchName"
+    $refspec = "+refs/heads/${BranchName}:$remoteRef"
+    for ($attempt = 1; $attempt -le [Math]::Max(1, $Retries); $attempt++) {
+        Write-Host "Fetching $RemoteName/$BranchName (attempt $attempt/$Retries)..."
+        $exitCode = Invoke-NativeStatus "git" @("fetch", "--prune", $RemoteName, $refspec)
+        if ($exitCode -eq 0) {
+            return $remoteRef
+        }
+        Start-Sleep -Seconds ([Math]::Min(10, 2 * $attempt))
+    }
+    & git show-ref --verify --quiet $remoteRef
+    if ($LASTEXITCODE -eq 0) {
+        Write-Warning "Fetch failed, but $RemoteName/$BranchName already exists locally. Continuing from cached remote ref."
+        return $remoteRef
+    }
+    throw "git fetch failed and $RemoteName/$BranchName is not available locally"
+}
+
 function Copy-IfExists {
     param(
         [Parameter(Mandatory=$true)][string]$Source,
@@ -58,7 +93,7 @@ if (-not $InternalRelaunched -and (Test-Path ".git")) {
             $tempScript = Join-Path $env:TEMP ("spyon_upgrade_{0}.ps1" -f $Timestamp)
             Copy-Item $resolvedScript $tempScript -Force
             Write-Host "Relaunching upgrade script from $tempScript so Git can clean the project folder." -ForegroundColor Yellow
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $tempScript -ProjectRoot $Root -Branch $Branch -Remote $Remote -ServerUrl $ServerUrl -InternalRelaunched
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $tempScript -ProjectRoot $Root -Branch $Branch -Remote $Remote -RemoteUrl $RemoteUrl -ServerUrl $ServerUrl -FetchRetries $FetchRetries -InternalRelaunched
             exit $LASTEXITCODE
         }
     }
@@ -90,6 +125,11 @@ Invoke-Step "Update code from Git" {
     if (-not (Test-Path ".git")) {
         throw "This folder is not a Git checkout. Deploy a fresh checkout first, then copy the data folder into it."
     }
+    if ($RemoteUrl) {
+        Invoke-Native "git" @("remote", "set-url", $Remote, $RemoteUrl)
+    }
+    $currentRemoteUrl = git remote get-url $Remote
+    Write-Host "Remote $Remote -> $currentRemoteUrl"
     $worktreeBackup = Join-Path $BackupRoot "pre_upgrade_worktree_$Timestamp"
     $dirty = git status --porcelain --untracked-files=all
     if ($dirty) {
@@ -105,7 +145,7 @@ Invoke-Step "Update code from Git" {
         }
         Write-Host "Local worktree changes were backed up to $worktreeBackup" -ForegroundColor Yellow
     }
-    Invoke-Native "git" @("fetch", $Remote)
+    $remoteRef = Invoke-GitFetchBranch -RemoteName $Remote -BranchName $Branch -Retries $FetchRetries
     Invoke-Native "git" @("reset", "--hard", "HEAD")
     Invoke-Native "git" @(
         "clean", "-fd",
@@ -121,8 +161,7 @@ Invoke-Step "Update code from Git" {
         "-e", "collectors/ozon/data/",
         "-e", "collectors/ozon/chrome_vpn_profile/"
     )
-    Invoke-Native "git" @("checkout", "-B", $Branch, "$Remote/$Branch")
-    Invoke-Native "git" @("pull", "--ff-only", $Remote, $Branch)
+    Invoke-Native "git" @("checkout", "-B", $Branch, $remoteRef)
     $configBackup = Get-ChildItem $BackupRoot -Filter "pre_spyon_3_4_1_${Timestamp}_config.json" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($configBackup -and -not (Test-Path ".\config.local.json")) {
         Copy-Item $configBackup.FullName ".\config.local.json" -Force
