@@ -1,0 +1,40 @@
+/* 3.4.1 platform adaptive pass */
+.platform-header,
+.platform-main{
+  width:min(100%,1500px);
+  margin-left:auto;
+  margin-right:auto;
+}
+.platform-header{
+  max-width:none;
+}
+html[data-theme="dark"] .platform-header img:not([src*="itp-logo"]){
+  filter:brightness(0) invert(1) !important;
+  opacity:.9 !important;
+}
+@media(max-width:1024px){
+  .platform-header{grid-template-columns:auto 1fr;gap:12px;padding:0 18px}
+  .platform-header nav{display:none}
+  .platform-actions{justify-self:end}
+  .platform-actions>span,.platform-link{display:none}
+  .platform-main{padding:24px 18px 60px}
+  .tenant-grid{grid-template-columns:1fr}
+  .platform-kpis{grid-template-columns:repeat(2,1fr)}
+  .catalog-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:640px){
+  .platform-header{padding:0 10px}
+  .platform-header>a span{display:none}
+  .platform-actions{gap:4px}
+  .platform-actions .languages button{min-width:22px;padding:5px 4px}
+  .platform-main{padding:18px 10px 45px}
+  .platform-title{align-items:flex-start}
+  .platform-title h1{font-size:24px;line-height:31px}
+  .platform-title>button{display:none}
+  .platform-kpis,.catalog-grid{grid-template-columns:1fr}
+  .platform-panel{padding:15px}
+  .public-settings-form{grid-template-columns:1fr}
+  .public-settings-form .wide{grid-column:1}
+  .request-row{grid-template-columns:1fr}
+  .tenant-detail-drawer{width:100vw;padding:16px}
+}

@@ -144,14 +144,181 @@
   async function loadSettings(){try{const d=await api('/api/settings');state.settings=d;const p=d.preferences||{};$('#prefLocale').value=p.locale||'ru';state.theme=p.theme||window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:true,emit:false});$('#prefCurrency').value=p.display_currency||'KZT';$('#prefUnits').value=p.default_monthly_units??1;$('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;const n=d.network||{};if($('#cfgLocalUrl')){$('#cfgLocalUrl').value=n.local_url||'';$('#cfgLanUrl').value=(n.lan_urls||[]).join(', ');$('#cfgLanPort').value=n.port||'';$('#cfgLanState').value=n.lan_enabled?'Включён':'Выключен';}if(d.config){const c=d.config;$('#cfgSellerId').value=c.kaspi?.seller_id||'';$('#cfgSellerName').value=c.kaspi?.seller_name||'';$('#cfgCityId').value=c.kaspi?.city_id||'';$('#cfgExpected').value=c.kaspi?.expected_count||0;$('#cfgDiscover').value=c.analysis?.discover_workers||1;$('#cfgPrice').value=c.analysis?.price_workers||1;if($('#cfgOzonClientUrls')){$('#cfgOzonClientUrls').value=c.ozon?.client_catalog_urls||c.ozon?.seller_catalog_url||'';$('#cfgOzonMarketUrls').value=c.ozon?.market_category_urls||c.ozon?.category_urls||'';$('#cfgOzonExpectedSeller').value=c.ozon?.expected_seller||'';$('#cfgOzonCurrentSeller').value=c.ozon?.current_seller_name||'';$('#cfgOzonCurrentSellerUrl').value=c.ozon?.current_seller_url||'';$('#cfgOzonCurrentProducts').value=c.ozon?.current_products??0;$('#cfgOzonMarketProducts').value=c.ozon?.current_market_products??0;$('#cfgOzonCurrentOffers').value=c.ozon?.current_offers??0;}}}catch(e){toast(e.message,true)}}
   async function saveSettings(){const preferences={locale:$('#prefLocale').value,theme:window.ITPUI?.getTheme()||'system',display_currency:$('#prefCurrency').value,default_monthly_units:Number($('#prefUnits').value),rub_to_kzt:Number($('#prefRub').value),usd_to_kzt:Number($('#prefUsd').value),eur_to_kzt:Number($('#prefEur').value)};const body={preferences};if(user.role==='admin'&&state.settings?.config)body.config={kaspi:{...state.settings.config.kaspi,seller_id:$('#cfgSellerId').value,seller_name:$('#cfgSellerName').value,city_id:$('#cfgCityId').value,expected_count:Number($('#cfgExpected').value)},analysis:{...state.settings.config.analysis,discover_workers:Number($('#cfgDiscover').value),price_workers:Number($('#cfgPrice').value)},app:state.settings.config.app,ozon:{...state.settings.config.ozon,client_catalog_urls:$('#cfgOzonClientUrls')?$('#cfgOzonClientUrls').value:'',market_category_urls:$('#cfgOzonMarketUrls')?$('#cfgOzonMarketUrls').value:'',expected_seller:$('#cfgOzonExpectedSeller')?$('#cfgOzonExpectedSeller').value:''}};try{await api('/api/settings',{method:'PUT',body});applyI18n(preferences.locale);toast(t('settings_saved','Настройки сохранены'));loadOverview();loadProducts();}catch(e){toast(e.message,true)}}
 
-  const scheduleStatus=v=>({completed:'Окончено',failed:'Ошибка',running:'Выполняется',queued:'В очереди',stopped:'Остановлено'}[v]||v||'—');
-  const recurrenceText=s=>s.recurrence_type==='interval'?`Каждые ${Math.max(1,Number(s.interval_minutes||60)/60)} ч`:s.recurrence_type==='weekly'?`По дням недели · ${s.time_of_day||'03:00'}`:`Ежедневно · ${s.time_of_day||'03:00'}`;
-  async function loadSchedules(){try{const d=await api('/api/schedules'),schedules=d.schedules||[],runs=d.runs||[];state.scheduleActions=d.actions||[];const enabled=schedules.filter(x=>x.is_enabled),next=enabled.map(x=>x.next_run_at).filter(Boolean).sort()[0],last=runs[0];$('#scheduleSummary').innerHTML=`<article><small>Активных заданий</small><b>${enabled.length}</b></article><article><small>Следующий запуск</small><b>${next?dateText(next):'—'}</b></article><article><small>Последний результат</small><b>${last?scheduleStatus(last.status):'—'}</b></article>`;$('#scheduleList').innerHTML=schedules.length?schedules.map(x=>`<article class="schedule-card"><div><h3>${esc(x.name)}</h3><p>${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).name||x.action)} · ${esc(recurrenceText(x))}</p><div class="schedule-card-meta"><span>Следующий: ${x.next_run_at?dateText(x.next_run_at):'—'}</span><span>Последний: ${x.last_run_at?dateText(x.last_run_at):'не запускалось'}</span><span>${esc(scheduleStatus(x.last_status))}</span></div></div><div class="schedule-card-actions"><button class="toggle ${x.is_enabled?'active':''}" data-toggle-schedule="${x.id}" data-enabled="${x.is_enabled?1:0}">${x.is_enabled?'Включено':'Выключено'}</button>${user.role==='admin'?`<button class="delete" data-delete-schedule="${x.id}">${esc(t('delete','Удалить'))}</button>`:''}</div></article>`).join(''):'<div class="empty">Расписания ещё не созданы</div>';$('#scheduleRuns').innerHTML=runs.length?runs.map(r=>`<div class="schedule-run"><div><b>${esc(r.schedule_name)}</b><small>${dateText(r.started_at)}${r.message?` · ${esc(r.message)}`:''}</small></div><span class="schedule-run-status ${esc(r.status)}">${esc(scheduleStatus(r.status))}</span></div>`).join(''):'<div class="empty">Плановых запусков ещё не было</div>';$$('[data-toggle-schedule]').forEach(b=>b.onclick=()=>toggleSchedule(Number(b.dataset.toggleSchedule),b.dataset.enabled!=='1'));$$('[data-delete-schedule]').forEach(b=>b.onclick=()=>deleteSchedule(Number(b.dataset.deleteSchedule)));}catch(e){toast(e.message,true)}}
-  function openScheduleModal(){const select=$('#scheduleAction');select.innerHTML=(state.scheduleActions||[]).map(x=>`<option value="${esc(x.code)}">${esc(x.platform)} — ${esc(x.name)}</option>`).join('');showModal('scheduleModal')}
-  async function toggleSchedule(id,is_enabled){try{await api(`/api/schedules/${id}`,{method:'PUT',body:{is_enabled}});loadSchedules()}catch(e){toast(e.message,true)}}
-  async function deleteSchedule(id){if(!confirm('Удалить расписание?'))return;try{await api(`/api/schedules/${id}`,{method:'DELETE'});toast('Расписание удалено');loadSchedules()}catch(e){toast(e.message,true)}}
-  function updateScheduleFields(){const type=$('#scheduleRecurrence').value;$('#scheduleTimeField').hidden=type==='interval';$('#scheduleIntervalField').hidden=type!=='interval';$('#scheduleWeekdays').hidden=type!=='weekly'}
-  async function createSchedule(e){e.preventDefault();const form=e.target,fd=new FormData(form),body=Object.fromEntries(fd);body.weekdays=fd.getAll('weekdays').map(Number);body.is_enabled=fd.has('is_enabled');body.interval_minutes=Number(body.interval_minutes||360);try{await api('/api/schedules',{method:'POST',body});toast('Расписание создано');hideModals();form.reset();loadSchedules()}catch(err){toast(err.message,true)}}
+  const scheduleStatus=v=>({
+    completed:t('task_completed','Окончено'),
+    failed:t('task_failed','Ошибка'),
+    running:t('task_running','Выполняется'),
+    queued:t('task_queued','В очереди'),
+    stopped:t('task_stopped','Остановлено')
+  }[v]||v||'—');
+
+  const weekdayKeys=['weekday_mon','weekday_tue','weekday_wed','weekday_thu','weekday_fri','weekday_sat','weekday_sun'];
+  const weekdayFallback=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+  function scheduleWeekdayName(day){
+    const index=Number(day);
+    return t(weekdayKeys[index],weekdayFallback[index]||String(day));
+  }
+
+  function recurrenceText(s){
+    const type=String(s.recurrence_type||'daily');
+    if(type==='once'){
+      const raw=s.run_date?`${s.run_date}T${s.time_of_day||'03:00'}`:s.next_run_at;
+      return raw?`${t('schedule_once','Однократно')} · ${dateText(raw)}`:t('schedule_once','Однократно');
+    }
+    if(type==='interval'){
+      const hours=Math.max(1,Number(s.interval_minutes||60)/60);
+      return `${t('schedule_every','Каждые')} ${Number.isInteger(hours)?hours:hours.toFixed(1)} ${t('hours_short','ч')}`;
+    }
+    if(type==='weekly'){
+      const days=(s.weekdays||[]).map(scheduleWeekdayName).join(' · ');
+      return `${days||t('schedule_weekly','По дням недели')} · ${s.time_of_day||'03:00'}`;
+    }
+    return `${t('schedule_daily','Ежедневно')} · ${s.time_of_day||'03:00'}`;
+  }
+
+  function scheduleRuleHtml(s){
+    const type=String(s.recurrence_type||'daily');
+    if(type==='weekly'){
+      return `<div class="schedule-days">${(s.weekdays||[]).map(day=>`<span>${esc(scheduleWeekdayName(day))}</span>`).join('')}</div>`;
+    }
+    if(type==='once'){
+      return `<div class="schedule-rule-badge once">${esc(t('schedule_no_repeat','Без повторения'))}</div>`;
+    }
+    if(type==='interval'){
+      return `<div class="schedule-rule-badge">${esc(t('schedule_repeats','Повторяется'))}</div>`;
+    }
+    return `<div class="schedule-rule-badge">${esc(t('schedule_every_day','Каждый день'))}</div>`;
+  }
+
+  async function loadSchedules(){
+    try{
+      const d=await api('/api/schedules');
+      const schedules=d.schedules||[],runs=d.runs||[];
+      state.scheduleActions=d.actions||[];
+      state.schedules=schedules;
+      const enabled=schedules.filter(x=>x.is_enabled);
+      const next=enabled.map(x=>x.next_run_at).filter(Boolean).sort()[0];
+      const last=runs[0];
+
+      $('#scheduleSummary').innerHTML=`
+        <article><small>${esc(t('schedule_active','Активных заданий'))}</small><b>${enabled.length}</b></article>
+        <article><small>${esc(t('schedule_next','Следующий запуск'))}</small><b>${next?dateText(next):'—'}</b></article>
+        <article><small>${esc(t('schedule_last','Последний результат'))}</small><b>${last?esc(scheduleStatus(last.status)):'—'}</b></article>`;
+
+      $('#scheduleList').innerHTML=schedules.length?schedules.map(x=>`
+        <article class="schedule-card">
+          <div class="schedule-card-main">
+            <div class="schedule-card-title-row">
+              <h3>${esc(x.name)}</h3>
+              <span class="schedule-platform">${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).platform||x.platform||'')}</span>
+            </div>
+            <p>${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).name||x.action)}</p>
+            <div class="schedule-rule-row">
+              ${scheduleRuleHtml(x)}
+              <strong>${esc(recurrenceText(x))}</strong>
+            </div>
+            <div class="schedule-card-meta">
+              <span><small>${esc(t('schedule_next','Следующий запуск'))}</small><b>${x.next_run_at?dateText(x.next_run_at):'—'}</b></span>
+              <span><small>${esc(t('schedule_last_run','Последний запуск'))}</small><b>${x.last_run_at?dateText(x.last_run_at):esc(t('schedule_never_run','Не запускалось'))}</b></span>
+              <span><small>${esc(t('status','Статус'))}</small><b>${esc(scheduleStatus(x.last_status))}</b></span>
+            </div>
+          </div>
+          <div class="schedule-card-actions">
+            <button class="secondary edit" data-edit-schedule="${x.id}">${esc(t('edit','Изменить'))}</button>
+            <button class="toggle ${x.is_enabled?'active':''}" data-toggle-schedule="${x.id}" data-enabled="${x.is_enabled?1:0}">${x.is_enabled?esc(t('enabled','Включено')):esc(t('disabled','Выключено'))}</button>
+            ${user.role==='admin'?`<button class="delete" data-delete-schedule="${x.id}">${esc(t('delete','Удалить'))}</button>`:''}
+          </div>
+        </article>`).join(''):`<div class="empty">${esc(t('schedule_empty','Расписания ещё не созданы'))}</div>`;
+
+      $('#scheduleRuns').innerHTML=runs.length?runs.map(r=>`
+        <div class="schedule-run">
+          <div><b>${esc(r.schedule_name)}</b><small>${dateText(r.started_at)}${r.message?` · ${esc(r.message)}`:''}</small></div>
+          <span class="schedule-run-status ${esc(r.status)}">${esc(scheduleStatus(r.status))}</span>
+        </div>`).join(''):`<div class="empty">${esc(t('schedule_runs_empty','Плановых запусков ещё не было'))}</div>`;
+
+      $$('[data-edit-schedule]').forEach(b=>b.onclick=()=>openScheduleModal(Number(b.dataset.editSchedule)));
+      $$('[data-toggle-schedule]').forEach(b=>b.onclick=()=>toggleSchedule(Number(b.dataset.toggleSchedule),b.dataset.enabled!=='1'));
+      $$('[data-delete-schedule]').forEach(b=>b.onclick=()=>deleteSchedule(Number(b.dataset.deleteSchedule)));
+    }catch(e){toast(e.message,true)}
+  }
+
+  function openScheduleModal(id=null){
+    const select=$('#scheduleAction');
+    select.innerHTML=(state.scheduleActions||[]).map(x=>`<option value="${esc(x.code)}">${esc(x.platform)} — ${esc(x.name)}</option>`).join('');
+    const form=$('#scheduleForm');
+    form.reset();
+    form.dataset.editId=id?String(id):'';
+    form.elements.is_enabled.checked=true;
+    const today=new Date();
+    const minDate=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    $('#scheduleRunDate').min=minDate;
+
+    const item=id?(state.schedules||[]).find(x=>Number(x.id)===Number(id)):null;
+    $('#scheduleModalTitle').textContent=item?t('schedule_modal_edit','Изменить расписание'):t('schedule_modal_new','Новое расписание');
+    if(item){
+      form.elements.name.value=item.name||'';
+      form.elements.action.value=item.action||'';
+      form.elements.recurrence_type.value=item.recurrence_type||'daily';
+      form.elements.run_date.value=item.run_date||'';
+      form.elements.time_of_day.value=item.time_of_day||'03:00';
+      form.elements.interval_minutes.value=String(item.interval_minutes||360);
+      form.elements.is_enabled.checked=Boolean(item.is_enabled);
+      const days=new Set((item.weekdays||[]).map(Number));
+      form.querySelectorAll('[name="weekdays"]').forEach(node=>node.checked=days.has(Number(node.value)));
+    }else{
+      form.elements.recurrence_type.value='weekly';
+      form.elements.time_of_day.value='03:00';
+    }
+    updateScheduleFields();
+    showModal('scheduleModal');
+  }
+
+  async function toggleSchedule(id,is_enabled){
+    try{
+      await api(`/api/schedules/${id}`,{method:'PUT',body:{is_enabled}});
+      loadSchedules();
+    }catch(e){toast(e.message,true)}
+  }
+
+  async function deleteSchedule(id){
+    if(!confirm(t('schedule_delete_confirm','Удалить расписание?')))return;
+    try{
+      await api(`/api/schedules/${id}`,{method:'DELETE'});
+      toast(t('schedule_deleted','Расписание удалено'));
+      loadSchedules();
+    }catch(e){toast(e.message,true)}
+  }
+
+  function updateScheduleFields(){
+    const type=$('#scheduleRecurrence').value;
+    $('#scheduleDateField').hidden=type!=='once';
+    $('#scheduleTimeField').hidden=type==='interval';
+    $('#scheduleIntervalField').hidden=type!=='interval';
+    $('#scheduleWeekdays').hidden=type!=='weekly';
+  }
+
+  async function createSchedule(e){
+    e.preventDefault();
+    const form=e.target,fd=new FormData(form),body=Object.fromEntries(fd);
+    body.weekdays=fd.getAll('weekdays').map(Number);
+    body.is_enabled=fd.has('is_enabled');
+    body.interval_minutes=Number(body.interval_minutes||360);
+    const editId=Number(form.dataset.editId||0);
+    try{
+      if(editId){
+        await api(`/api/schedules/${editId}`,{method:'PUT',body});
+        toast(t('schedule_updated','Расписание обновлено'));
+      }else{
+        await api('/api/schedules',{method:'POST',body});
+        toast(t('schedule_created','Расписание создано'));
+      }
+      hideModals();
+      form.reset();
+      form.dataset.editId='';
+      loadSchedules();
+    }catch(err){toast(err.message,true)}
+  }
 
   const roleLabel=v=>({admin:t('role_admin','Администратор'),operator:t('role_operator','Оператор'),viewer:t('role_viewer','Наблюдатель')}[v]||v);
   const marketplaceNames={kaspi:'Kaspi',ozon:'Ozon',forte_market:'Forte Market',halyk_market:'Halyk Market'};

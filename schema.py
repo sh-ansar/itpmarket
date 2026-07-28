@@ -351,6 +351,7 @@ CREATE TABLE IF NOT EXISTS operation_schedules (
     scope TEXT NOT NULL DEFAULT 'all',
     recurrence_type TEXT NOT NULL DEFAULT 'daily',
     time_of_day TEXT,
+    run_date TEXT,
     weekdays_json TEXT NOT NULL DEFAULT '[]',
     interval_minutes INTEGER,
     is_enabled INTEGER NOT NULL DEFAULT 1,
@@ -466,6 +467,8 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE registration_requests ADD COLUMN locale TEXT NOT NULL DEFAULT 'ru'")
         if "source_page" not in _columns(conn, "registration_requests"):
             conn.execute("ALTER TABLE registration_requests ADD COLUMN source_page TEXT NOT NULL DEFAULT 'public_site'")
+        if "run_date" not in _columns(conn, "operation_schedules"):
+            conn.execute("ALTER TABLE operation_schedules ADD COLUMN run_date TEXT")
         if "platform_role" not in _columns(conn, "app_users"):
             conn.execute("ALTER TABLE app_users ADD COLUMN platform_role TEXT NOT NULL DEFAULT ''")
         if "tenant_id" not in _columns(conn, "app_events"):

@@ -214,21 +214,61 @@ class SaaSService:
         finally: conn.close()
 
     @staticmethod
-    def next_run_for(recurrence_type:str,time_of_day:str|None,weekdays:list[int]|None,interval_minutes:int|None,base:datetime|None=None)->str:
-        now=base or datetime.now().astimezone(); recurrence=str(recurrence_type or "daily").casefold()
-        if recurrence=="interval": return (now+timedelta(minutes=max(60,int(interval_minutes or 360)))).isoformat(timespec="seconds")
-        try: hour,minute=[int(x) for x in str(time_of_day or "03:00").split(":",1)]
-        except (TypeError,ValueError): hour,minute=3,0
-        hour=max(0,min(hour,23)); minute=max(0,min(minute,59))
-        if recurrence=="weekly":
-            days=sorted({max(0,min(int(x),6)) for x in (weekdays or [0])})
+    def next_run_for(
+        recurrence_type: str,
+        time_of_day: str | None,
+        weekdays: list[int] | None,
+        interval_minutes: int | None,
+        run_date: str | None = None,
+        base: datetime | None = None,
+    ) -> str | None:
+        now = base or datetime.now().astimezone()
+        recurrence = str(recurrence_type or "daily").casefold()
+
+        if recurrence == "interval":
+            return (
+                now + timedelta(minutes=max(60, int(interval_minutes or 360)))
+            ).isoformat(timespec="seconds")
+
+        try:
+            hour, minute = [int(x) for x in str(time_of_day or "03:00").split(":", 1)]
+        except (TypeError, ValueError):
+            hour, minute = 3, 0
+        hour = max(0, min(hour, 23))
+        minute = max(0, min(minute, 59))
+
+        if recurrence == "once":
+            value = str(run_date or "").strip()
+            if not value:
+                return None
+            try:
+                day = datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                return None
+            candidate = day.replace(
+                hour=hour,
+                minute=minute,
+                second=0,
+                microsecond=0,
+                tzinfo=now.tzinfo,
+            )
+            return candidate.isoformat(timespec="seconds") if candidate > now else None
+
+        if recurrence == "weekly":
+            days = sorted({max(0, min(int(x), 6)) for x in (weekdays or [0])})
             for offset in range(8):
-                day=now+timedelta(days=offset)
-                if day.weekday() not in days: continue
-                candidate=day.replace(hour=hour,minute=minute,second=0,microsecond=0)
-                if candidate>now: return candidate.isoformat(timespec="seconds")
-        candidate=now.replace(hour=hour,minute=minute,second=0,microsecond=0)
-        if candidate<=now: candidate+=timedelta(days=1)
+                day = now + timedelta(days=offset)
+                if day.weekday() not in days:
+                    continue
+                candidate = day.replace(
+                    hour=hour, minute=minute, second=0, microsecond=0
+                )
+                if candidate > now:
+                    return candidate.isoformat(timespec="seconds")
+
+        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
         return candidate.isoformat(timespec="seconds")
 
     def schedules(self,tenant_id:int)->list[dict[str,Any]]:
@@ -256,39 +296,132 @@ class SaaSService:
             return item
         finally: conn.close()
 
-    def create_schedule(self,tenant_id:int,payload:dict[str,Any],actor_user_id:int)->dict[str,Any]:
-        name=str(payload.get("name") or "").strip(); action=str(payload.get("action") or "").strip(); recurrence=str(payload.get("recurrence_type") or "daily").casefold()
-        if len(name)<2: raise ValueError("Укажите название задания.")
-        if action not in SCHEDULE_ACTIONS: raise ValueError("Выберите поддерживаемую операцию.")
-        if recurrence not in {"daily","weekly","interval"}: raise ValueError("Неизвестный тип расписания.")
-        weekdays=payload.get("weekdays") if isinstance(payload.get("weekdays"),list) else []
-        interval=max(60,min(int(payload.get("interval_minutes") or 360),10080)); tod=str(payload.get("time_of_day") or "03:00")
-        platform="ozon" if action.startswith("ozon_") else "system" if action in {"export_report","backup_database"} else "kaspi"
-        stamp=now_iso(); conn=self._connect()
-        try:
-            cur=conn.execute(
-                """
-                INSERT INTO operation_schedules(tenant_id,name,action,platform,scope,recurrence_type,time_of_day,weekdays_json,interval_minutes,is_enabled,retry_count,max_duration_minutes,next_run_at,created_by,created_at,updated_at)
-                VALUES(?,?,?,?, 'all',?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (int(tenant_id),name,action,platform,recurrence,tod,json.dumps(weekdays),interval,1 if bool(payload.get("is_enabled",True)) else 0,max(0,min(int(payload.get("retry_count") or 1),5)),max(10,min(int(payload.get("max_duration_minutes") or 180),1440)),self.next_run_for(recurrence,tod,weekdays,interval),int(actor_user_id),stamp,stamp),
-            )
-            conn.commit(); return self.schedule(int(cur.lastrowid),tenant_id) or {}
-        finally: conn.close()
+    def create_schedule(
+        self, tenant_id: int, payload: dict[str, Any], actor_user_id: int
+    ) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        action = str(payload.get("action") or "").strip()
+        recurrence = str(payload.get("recurrence_type") or "daily").casefold()
 
-    def update_schedule(self,schedule_id:int,tenant_id:int,payload:dict[str,Any],actor_user_id:int)->dict[str,Any]:
-        current=self.schedule(schedule_id,tenant_id)
-        if not current: raise ValueError("Расписание не найдено.")
-        merged={**current,**payload}; recurrence=str(merged.get("recurrence_type") or "daily"); weekdays=merged.get("weekdays") if isinstance(merged.get("weekdays"),list) else []; interval=max(60,int(merged.get("interval_minutes") or 360)); tod=str(merged.get("time_of_day") or "03:00")
-        conn=self._connect()
+        if len(name) < 2:
+            raise ValueError("Укажите название задания.")
+        if action not in SCHEDULE_ACTIONS:
+            raise ValueError("Выберите поддерживаемую операцию.")
+        if recurrence not in {"once", "daily", "weekly", "interval"}:
+            raise ValueError("Неизвестный тип расписания.")
+
+        weekdays = payload.get("weekdays") if isinstance(payload.get("weekdays"), list) else []
+        if recurrence == "weekly" and not weekdays:
+            raise ValueError("Выберите хотя бы один день недели.")
+
+        try:
+            interval = max(60, min(int(payload.get("interval_minutes") or 360), 10080))
+        except (TypeError, ValueError):
+            interval = 360
+
+        tod = str(payload.get("time_of_day") or "03:00")
+        run_date = str(payload.get("run_date") or "").strip() or None
+        next_run = self.next_run_for(
+            recurrence, tod, weekdays, interval, run_date=run_date
+        )
+        enabled = bool(payload.get("is_enabled", True))
+        if recurrence == "once" and enabled and next_run is None:
+            raise ValueError("Для однократного запуска выберите будущую дату и время.")
+
+        platform = (
+            "ozon" if action.startswith("ozon_")
+            else "system" if action in {"export_report", "backup_database"}
+            else "kaspi"
+        )
+        stamp = now_iso()
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO operation_schedules(
+                    tenant_id,name,action,platform,scope,recurrence_type,time_of_day,
+                    run_date,weekdays_json,interval_minutes,is_enabled,retry_count,
+                    max_duration_minutes,next_run_at,created_by,created_at,updated_at
+                )
+                VALUES(?,?,?,?, 'all',?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(tenant_id), name, action, platform, recurrence, tod,
+                    run_date, json.dumps(weekdays), interval,
+                    1 if enabled else 0,
+                    max(0, min(int(payload.get("retry_count") or 1), 5)),
+                    max(10, min(int(payload.get("max_duration_minutes") or 180), 1440)),
+                    next_run if enabled else None,
+                    int(actor_user_id), stamp, stamp,
+                ),
+            )
+            conn.commit()
+            return self.schedule(int(cur.lastrowid), tenant_id) or {}
+        finally:
+            conn.close()
+
+    def update_schedule(
+        self,
+        schedule_id: int,
+        tenant_id: int,
+        payload: dict[str, Any],
+        actor_user_id: int,
+    ) -> dict[str, Any]:
+        current = self.schedule(schedule_id, tenant_id)
+        if not current:
+            raise ValueError("Расписание не найдено.")
+
+        merged = {**current, **payload}
+        recurrence = str(merged.get("recurrence_type") or "daily").casefold()
+        if recurrence not in {"once", "daily", "weekly", "interval"}:
+            raise ValueError("Неизвестный тип расписания.")
+
+        weekdays = merged.get("weekdays") if isinstance(merged.get("weekdays"), list) else []
+        if recurrence == "weekly" and not weekdays:
+            raise ValueError("Выберите хотя бы один день недели.")
+
+        try:
+            interval = max(60, min(int(merged.get("interval_minutes") or 360), 10080))
+        except (TypeError, ValueError):
+            interval = 360
+
+        tod = str(merged.get("time_of_day") or "03:00")
+        run_date = str(merged.get("run_date") or "").strip() or None
+        enabled = bool(merged.get("is_enabled"))
+        next_run = self.next_run_for(
+            recurrence, tod, weekdays, interval, run_date=run_date
+        ) if enabled else None
+
+        if recurrence == "once" and enabled and next_run is None:
+            raise ValueError("Для однократного запуска выберите будущую дату и время.")
+
+        conn = self._connect()
         try:
             conn.execute(
                 """
-                UPDATE operation_schedules SET name=?,recurrence_type=?,time_of_day=?,weekdays_json=?,interval_minutes=?,is_enabled=?,retry_count=?,max_duration_minutes=?,next_run_at=?,updated_at=? WHERE id=? AND tenant_id=?
+                UPDATE operation_schedules
+                SET name=?,recurrence_type=?,time_of_day=?,run_date=?,
+                    weekdays_json=?,interval_minutes=?,is_enabled=?,retry_count=?,
+                    max_duration_minutes=?,next_run_at=?,updated_at=?
+                WHERE id=? AND tenant_id=?
                 """,
-                (str(merged.get("name") or current["name"]).strip(),recurrence,tod,json.dumps(weekdays),interval,1 if bool(merged.get("is_enabled")) else 0,max(0,min(int(merged.get("retry_count") or 1),5)),max(10,min(int(merged.get("max_duration_minutes") or 180),1440)),self.next_run_for(recurrence,tod,weekdays,interval),now_iso(),int(schedule_id),int(tenant_id)),
-            ); conn.commit(); return self.schedule(schedule_id,tenant_id) or {}
-        finally: conn.close()
+                (
+                    str(merged.get("name") or current["name"]).strip(),
+                    recurrence, tod, run_date, json.dumps(weekdays), interval,
+                    1 if enabled else 0,
+                    max(0, min(int(merged.get("retry_count") or 1), 5)),
+                    max(10, min(int(merged.get("max_duration_minutes") or 180), 1440)),
+                    next_run, now_iso(), int(schedule_id), int(tenant_id),
+                ),
+            )
+            self._audit(
+                conn, actor_user_id, "schedule_updated", tenant_id,
+                "schedule", str(schedule_id), payload,
+            )
+            conn.commit()
+            return self.schedule(schedule_id, tenant_id) or {}
+        finally:
+            conn.close()
 
     def delete_schedule(self,schedule_id:int,tenant_id:int,actor_user_id:int)->None:
         conn=self._connect()
@@ -307,14 +440,49 @@ class SaaSService:
         try:return [dict(r) for r in conn.execute("SELECT * FROM operation_schedules WHERE is_enabled=1 AND next_run_at IS NOT NULL AND datetime(next_run_at)<=datetime('now','localtime') ORDER BY next_run_at LIMIT 10").fetchall()]
         finally:conn.close()
 
-    def begin_schedule_run(self,schedule:dict[str,Any])->int:
-        try:weekdays=json.loads(schedule.get("weekdays_json") or "[]")
-        except json.JSONDecodeError:weekdays=[]
-        next_run=self.next_run_for(schedule.get("recurrence_type"),schedule.get("time_of_day"),weekdays,schedule.get("interval_minutes")); stamp=now_iso(); conn=self._connect()
+    def begin_schedule_run(self, schedule: dict[str, Any]) -> int:
         try:
-            cur=conn.execute("INSERT INTO schedule_runs(schedule_id,tenant_id,status,message,started_at) VALUES(?,?,'queued','Ожидает запуска',?)",(int(schedule["id"]),int(schedule["tenant_id"]),stamp))
-            conn.execute("UPDATE operation_schedules SET next_run_at=?,last_status='queued',updated_at=? WHERE id=?",(next_run,stamp,int(schedule["id"]))); conn.commit(); return int(cur.lastrowid)
-        finally:conn.close()
+            weekdays = json.loads(schedule.get("weekdays_json") or "[]")
+        except json.JSONDecodeError:
+            weekdays = []
+
+        recurrence = str(schedule.get("recurrence_type") or "daily").casefold()
+        if recurrence == "once":
+            next_run = None
+            enabled = 0
+        else:
+            next_run = self.next_run_for(
+                recurrence,
+                schedule.get("time_of_day"),
+                weekdays,
+                schedule.get("interval_minutes"),
+                run_date=schedule.get("run_date"),
+            )
+            enabled = 1
+
+        stamp = now_iso()
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO schedule_runs(
+                    schedule_id,tenant_id,status,message,started_at
+                ) VALUES(?,?,'queued','Ожидает запуска',?)
+                """,
+                (int(schedule["id"]), int(schedule["tenant_id"]), stamp),
+            )
+            conn.execute(
+                """
+                UPDATE operation_schedules
+                SET next_run_at=?,is_enabled=?,last_status='queued',updated_at=?
+                WHERE id=?
+                """,
+                (next_run, enabled, stamp, int(schedule["id"])),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
 
     def attach_task_to_run(self,run_id:int,task_id:str)->None:
         conn=self._connect(); conn.execute("UPDATE schedule_runs SET task_id=?,status='running',message='Операция запущена' WHERE id=?",(str(task_id),int(run_id))); conn.commit(); conn.close()
