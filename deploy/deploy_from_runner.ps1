@@ -53,10 +53,26 @@ try {
     & .\SERVER_SETUP_192_168_1_75.bat
     if ($LASTEXITCODE -ne 0) { Write-Warning "Server setup returned $LASTEXITCODE" }
 
-    if (Test-Path ".\migrate_3_1_0.py") {
-        & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\migrate_3_1_0.py"
-        if ($LASTEXITCODE -ne 0) { throw "Database migration failed" }
+    $migrations = @(
+        "migrate_3_1_0.py",
+        "migrate_3_2_4.py",
+        "migrate_3_3_0.py",
+        "migrate_3_3_1.py",
+        "migrate_3_3_2.py",
+        "migrate_3_3_3.py",
+        "migrate_3_4_0.py",
+        "migrate_3_4_1.py"
+    )
+    foreach ($migration in $migrations) {
+        if (Test-Path ".\$migration") {
+            Write-Host "Running $migration..."
+            & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\$migration"
+            if ($LASTEXITCODE -ne 0) { throw "Database migration failed: $migration" }
+        }
     }
+
+    Get-ChildItem -Path $AppRoot -Directory -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     & ".\.runtime\venv_3_2_0\Scripts\python.exe" -m compileall -q .
     if ($LASTEXITCODE -ne 0) { throw "Python compile check failed" }
