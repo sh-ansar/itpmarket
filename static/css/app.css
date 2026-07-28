@@ -2059,3 +2059,5 @@ html[data-theme="dark"] .schedule-modal-note{
     padding-right:10px !important;
   }
 }
+img[src*="spyon-logo.svg"]{object-fit:contain}
+html[data-theme="dark"] img[src*="spyon-logo.svg"]{content:url("../images/spyon-logo-dark.svg")}

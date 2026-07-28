@@ -48,3 +48,306 @@ html[data-theme="dark"] .platform-header img:not([src*="spyon-logo"]){
   .request-row{grid-template-columns:1fr}
   .tenant-detail-drawer{width:100vw;padding:16px}
 }
+
+/* Spyon admin refresh */
+:root{
+  --surface:#fff;
+  --surface-2:#f7fafc;
+  --surface-3:#eef5f8;
+  --shadow-soft:0 16px 44px rgba(9,43,61,.08);
+  --shadow-lift:0 18px 50px rgba(9,43,61,.12);
+  --accent:#079bd0;
+  --accent-2:#16b8d7;
+}
+body{
+  background:
+    linear-gradient(180deg,#f7fbfd 0,#eef5f8 420px,#f4f8fa 100%);
+}
+img[src*="spyon-logo.svg"]{
+  object-fit:contain;
+}
+html[data-theme="dark"] img[src*="spyon-logo.svg"]{
+  content:url("../images/spyon-logo-dark.svg");
+}
+.platform-header{
+  width:100%;
+  height:72px;
+  padding:0 28px;
+  background:rgba(255,255,255,.92);
+  border-bottom:1px solid rgba(176,203,215,.62);
+  box-shadow:0 10px 30px rgba(21,54,70,.05);
+  backdrop-filter:blur(18px);
+}
+.platform-header>a{
+  min-width:190px;
+  gap:12px;
+}
+.platform-header>a>img{
+  width:42px;
+  height:42px;
+  padding:7px;
+  border:1px solid rgba(7,155,208,.14);
+  border-radius:8px;
+  background:#eaf8fc;
+}
+.platform-header b{
+  font-size:15px;
+  line-height:18px;
+}
+.platform-header small{
+  margin-top:1px;
+  letter-spacing:.04em;
+}
+.platform-header nav{
+  gap:8px;
+  justify-content:flex-start;
+}
+.platform-header nav a{
+  min-height:36px;
+  padding:8px 12px;
+  border-radius:8px;
+  color:#536875;
+  font-weight:600;
+}
+.platform-header nav a.active,
+.platform-header nav a:hover{
+  background:#eaf7fc;
+  color:#047faf;
+}
+.platform-actions{
+  justify-content:flex-end;
+}
+.platform-actions>span{
+  min-width:max-content;
+  font-weight:700;
+}
+.platform-link{
+  border-radius:8px;
+  background:#fff;
+  font-weight:600;
+}
+.theme-switch{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:space-between;
+  width:58px;
+  height:32px;
+  padding:3px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#fff;
+  overflow:hidden;
+}
+.theme-switch .theme-icon{
+  width:24px;
+  height:24px;
+  display:grid;
+  place-items:center;
+  z-index:2;
+  pointer-events:none;
+}
+.theme-switch .theme-icon img{
+  width:15px;
+  height:15px;
+  object-fit:contain;
+}
+.theme-switch i{
+  position:absolute;
+  left:3px;
+  top:3px;
+  width:24px!important;
+  height:24px!important;
+  border-radius:7px;
+  background:#eaf7fc;
+  transition:transform .18s ease;
+  box-shadow:0 4px 10px rgba(9,43,61,.12);
+}
+.theme-switch[data-theme="dark"] i{
+  transform:translateX(26px);
+}
+.platform-main{
+  max-width:1480px;
+  padding:34px 28px 72px;
+}
+.platform-title{
+  align-items:flex-start;
+  gap:22px;
+  padding:6px 0 0;
+}
+.platform-title span,
+.panel-head span{
+  color:#0788bf;
+  letter-spacing:.08em;
+}
+.platform-title h1{
+  max-width:880px;
+  font-size:32px;
+  line-height:38px;
+}
+.platform-title p{
+  max-width:780px;
+}
+.platform-title button,
+.tenant-actions button,
+.request-actions button,
+.form-actions a,
+.form-actions button,
+.platform-modal button{
+  border-radius:8px;
+  font-weight:700;
+}
+.platform-title button:hover,
+.tenant-actions button:hover,
+.request-actions button:hover,
+.form-actions a:hover{
+  border-color:#9bd7eb;
+  box-shadow:0 8px 22px rgba(7,155,208,.08);
+}
+.platform-kpis{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+}
+.platform-kpis article{
+  min-height:86px;
+  padding:17px 18px;
+  border-radius:8px;
+  border-color:#cfe2eb;
+  background:linear-gradient(180deg,#fff,#f9fdff);
+  box-shadow:0 8px 24px rgba(19,55,72,.04);
+}
+.platform-kpis article:nth-child(2){
+  border-color:#c8eadb;
+}
+.platform-kpis article:nth-child(4){
+  border-color:#e7dca9;
+}
+.platform-kpis b{
+  margin-top:5px;
+  line-height:32px;
+  letter-spacing:0;
+}
+.platform-panel{
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+.panel-head{
+  padding:20px 0 12px;
+  border-bottom:1px solid rgba(188,211,222,.72);
+}
+.panel-head h2{
+  font-size:24px;
+  line-height:30px;
+}
+.panel-note{
+  max-width:480px;
+  text-align:right;
+}
+.tenant-grid{
+  grid-template-columns:repeat(auto-fit,minmax(420px,1fr));
+  gap:14px;
+}
+.tenant-card,
+.request-row,
+.catalog-card{
+  border-radius:8px;
+  border-color:#cfe0e8;
+  background:#fff;
+  box-shadow:0 8px 24px rgba(19,55,72,.045);
+}
+.tenant-card{
+  padding:20px;
+}
+.tenant-card:hover{
+  transform:translateY(-2px);
+  border-color:#8dcfe7;
+  box-shadow:var(--shadow-lift);
+}
+.tenant-status,
+.health-chip,
+.integration-tag,
+.request-capabilities span,
+.legal-readiness{
+  border-radius:8px;
+}
+.tenant-metrics div{
+  border-radius:8px;
+  background:#f3f8fb;
+}
+.tenant-actions .primary,
+.request-actions .approve,
+.form-actions button{
+  background:linear-gradient(135deg,var(--accent),#087fb5);
+}
+.request-list,
+.catalog-grid{
+  margin-top:14px;
+}
+.request-row{
+  padding:18px;
+}
+.public-settings-form{
+  padding:18px 0 0;
+}
+.public-settings-form input,
+.public-settings-form textarea,
+.platform-modal input{
+  border-radius:8px;
+  background:#fff;
+}
+.offer-settings{
+  border-radius:8px;
+}
+.tenant-detail-drawer,
+.platform-modal>div{
+  border-radius:0;
+}
+html[data-theme="dark"] body{
+  background:linear-gradient(180deg,#091924 0,#07131b 420px,#08151d 100%);
+}
+html[data-theme="dark"] .platform-header{
+  background:rgba(11,30,41,.92);
+}
+html[data-theme="dark"] .platform-header>a>img{
+  background:#102936;
+  border-color:#234452;
+}
+html[data-theme="dark"] .platform-header nav a{
+  color:#9cb0ba;
+}
+html[data-theme="dark"] .platform-header nav a.active,
+html[data-theme="dark"] .platform-header nav a:hover{
+  background:#123141;
+  color:#65d7f5;
+}
+html[data-theme="dark"] .platform-kpis article,
+html[data-theme="dark"] .tenant-card,
+html[data-theme="dark"] .request-row,
+html[data-theme="dark"] .catalog-card{
+  background:#0d202b;
+  border-color:#27414d;
+}
+html[data-theme="dark"] .tenant-metrics div{
+  background:#112a36;
+}
+html[data-theme="dark"] .theme-switch{
+  background:#102630;
+}
+html[data-theme="dark"] .theme-switch i{
+  background:#1b3b48;
+}
+@media(max-width:900px){
+  .platform-header>a{min-width:0}
+  .platform-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tenant-grid{grid-template-columns:1fr}
+  .panel-note{text-align:left}
+}
+@media(max-width:640px){
+  .platform-main{padding:20px 12px 48px}
+  .platform-title{display:grid}
+  .platform-title h1{font-size:25px;line-height:31px}
+  .platform-kpis{grid-template-columns:1fr 1fr}
+  .tenant-grid{grid-template-columns:minmax(0,1fr)}
+}

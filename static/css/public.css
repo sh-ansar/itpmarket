@@ -26,3 +26,5 @@
   .public-cta{margin-left:12px;margin-right:12px}
   .registration-layout,.legal-layout{padding-left:12px;padding-right:12px}
 }
+img[src*="spyon-logo.svg"]{object-fit:contain}
+html[data-theme="dark"] img[src*="spyon-logo.svg"]{content:url("../images/spyon-logo-dark.svg")}
