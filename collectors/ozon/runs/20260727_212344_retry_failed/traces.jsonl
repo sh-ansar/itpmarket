@@ -1,0 +1,2 @@
+{"stage": "product", "index": 1, "article": "2946351812", "status": "JSON_OK", "elapsed_ms": 4125, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 2, "article": "2868561995", "status": "JSON_OK", "elapsed_ms": 3625, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}

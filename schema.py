@@ -186,6 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_app_reports_time ON app_reports(created_at DESC);
 CREATE TABLE IF NOT EXISTS app_user_preferences (
     user_id INTEGER PRIMARY KEY,
     locale TEXT NOT NULL DEFAULT 'ru',
+    theme TEXT NOT NULL DEFAULT 'system',
     display_currency TEXT NOT NULL DEFAULT 'KZT',
     rub_to_kzt REAL NOT NULL DEFAULT 5.50,
     usd_to_kzt REAL NOT NULL DEFAULT 520.00,
@@ -220,6 +221,189 @@ CREATE TABLE IF NOT EXISTS app_market_links (
     PRIMARY KEY(internal_product_code,platform,source_product_code)
 );
 CREATE INDEX IF NOT EXISTS idx_app_market_links_source ON app_market_links(platform,source_product_code);
+
+
+CREATE TABLE IF NOT EXISTS tenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    registration_number TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    plan_code TEXT NOT NULL DEFAULT 'demo',
+    contact_email TEXT,
+    contact_phone TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status, name);
+
+CREATE TABLE IF NOT EXISTS tenant_users (
+    tenant_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    tenant_role TEXT NOT NULL DEFAULT 'viewer',
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id, user_id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_users_user ON tenant_users(user_id, is_primary, is_active);
+
+CREATE TABLE IF NOT EXISTS tenant_integrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    integration_code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'disabled',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    product_count INTEGER NOT NULL DEFAULT 0,
+    last_sync_at TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id, integration_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_integrations_status ON tenant_integrations(tenant_id, status, integration_code);
+
+
+CREATE TABLE IF NOT EXISTS user_marketplace_access (
+    tenant_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,user_id,marketplace_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_marketplace_access_user
+ON user_marketplace_access(user_id,tenant_id,is_enabled,marketplace_code);
+
+CREATE TABLE IF NOT EXISTS registration_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    registration_number TEXT,
+    contact_name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    phone TEXT,
+    integrations_json TEXT NOT NULL DEFAULT '[]',
+    estimated_products INTEGER NOT NULL DEFAULT 0,
+    comment TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    tenant_id INTEGER,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id),
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_registration_requests_status ON registration_requests(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS product_attribute_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    product_type TEXT NOT NULL,
+    attribute_key TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    data_type TEXT NOT NULL DEFAULT 'text',
+    unit TEXT,
+    is_identity INTEGER NOT NULL DEFAULT 0,
+    is_required INTEGER NOT NULL DEFAULT 0,
+    normalization_rule TEXT,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id, product_type, attribute_key),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_definitions_type ON product_attribute_definitions(tenant_id, product_type, display_order);
+
+CREATE TABLE IF NOT EXISTS product_attribute_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    source_product_code TEXT NOT NULL,
+    definition_id INTEGER NOT NULL,
+    raw_value TEXT,
+    normalized_text TEXT,
+    normalized_number REAL,
+    normalized_boolean INTEGER,
+    source TEXT,
+    collected_at TEXT NOT NULL,
+    UNIQUE(tenant_id, platform, source_product_code, definition_id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(definition_id) REFERENCES product_attribute_definitions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_values_product ON product_attribute_values(tenant_id, platform, source_product_code);
+
+CREATE TABLE IF NOT EXISTS operation_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'all',
+    recurrence_type TEXT NOT NULL DEFAULT 'daily',
+    time_of_day TEXT,
+    weekdays_json TEXT NOT NULL DEFAULT '[]',
+    interval_minutes INTEGER,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    retry_count INTEGER NOT NULL DEFAULT 1,
+    max_duration_minutes INTEGER NOT NULL DEFAULT 180,
+    last_run_at TEXT,
+    next_run_at TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_operation_schedules_due ON operation_schedules(is_enabled, next_run_at, tenant_id);
+
+CREATE TABLE IF NOT EXISTS schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    task_id TEXT,
+    status TEXT NOT NULL,
+    message TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    FOREIGN KEY(schedule_id) REFERENCES operation_schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_time ON schedule_runs(schedule_id, started_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    setting_key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL DEFAULT '{}',
+    updated_by INTEGER,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(updated_by) REFERENCES app_users(id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id INTEGER,
+    action TEXT NOT NULL,
+    tenant_id INTEGER,
+    entity_type TEXT,
+    entity_id TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(actor_user_id) REFERENCES app_users(id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_audit_time ON platform_audit_log(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS exact_offer_scans (
     product_code TEXT PRIMARY KEY,
@@ -270,6 +454,98 @@ def ensure_database(path: Path) -> None:
         conn.executescript(BASE_SCHEMA)
         if "expected_monthly_units" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN expected_monthly_units INTEGER")
+        if "theme" not in _columns(conn, "app_user_preferences"):
+            conn.execute("ALTER TABLE app_user_preferences ADD COLUMN theme TEXT NOT NULL DEFAULT 'system'")
+        if "capabilities_json" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'")
+        if "consent_version" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN consent_version TEXT NOT NULL DEFAULT ''")
+        if "consent_at" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN consent_at TEXT")
+        if "locale" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN locale TEXT NOT NULL DEFAULT 'ru'")
+        if "source_page" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN source_page TEXT NOT NULL DEFAULT 'public_site'")
+        if "platform_role" not in _columns(conn, "app_users"):
+            conn.execute("ALTER TABLE app_users ADD COLUMN platform_role TEXT NOT NULL DEFAULT ''")
+        if "tenant_id" not in _columns(conn, "app_events"):
+            conn.execute("ALTER TABLE app_events ADD COLUMN tenant_id INTEGER")
+        if "tenant_id" not in _columns(conn, "app_reports"):
+            conn.execute("ALTER TABLE app_reports ADD COLUMN tenant_id INTEGER")
+        if "tenant_id" not in _columns(conn, "app_product_state"):
+            conn.execute("ALTER TABLE app_product_state ADD COLUMN tenant_id INTEGER")
+
+        stamp = conn.execute("SELECT datetime('now')").fetchone()[0]
+        tenant = conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()
+        if tenant is None:
+            cursor = conn.execute(
+                """
+                INSERT INTO tenants(name,slug,status,plan_code,contact_email,created_at,updated_at,approved_at)
+                VALUES('Current Workspace','current-workspace','active','demo','',?,?,?)
+                """,
+                (stamp, stamp, stamp),
+            )
+            default_tenant_id = int(cursor.lastrowid)
+        else:
+            default_tenant_id = int(tenant[0])
+
+        integrations = (
+            ('kaspi','Kaspi','active'),
+            ('ozon','Ozon','active'),
+            ('forte_market','Forte Market','coming_soon'),
+            ('halyk_market','Halyk Market','coming_soon'),
+        )
+        for code,title,status in integrations:
+            conn.execute(
+                """
+                INSERT INTO tenant_integrations(tenant_id,integration_code,display_name,status,created_at,updated_at)
+                VALUES(?,?,?,?,?,?)
+                ON CONFLICT(tenant_id,integration_code) DO NOTHING
+                """,
+                (default_tenant_id,code,title,status,stamp,stamp),
+            )
+
+        users = conn.execute("SELECT id,role FROM app_users").fetchall()
+        for user_id,role in users:
+            conn.execute(
+                """
+                INSERT INTO tenant_users(tenant_id,user_id,tenant_role,is_primary,is_active,created_at)
+                VALUES(?,?,?,?,1,?)
+                ON CONFLICT(tenant_id,user_id) DO NOTHING
+                """,
+                (default_tenant_id,int(user_id),str(role or 'viewer'),1,stamp),
+            )
+        memberships = conn.execute(
+            "SELECT tenant_id,user_id FROM tenant_users WHERE is_active=1"
+        ).fetchall()
+        for membership in memberships:
+            tenant_id = int(membership[0])
+            user_id = int(membership[1])
+            integrations = conn.execute(
+                "SELECT integration_code,status FROM tenant_integrations WHERE tenant_id=?",
+                (tenant_id,),
+            ).fetchall()
+            for integration_code, integration_status in integrations:
+                enabled = 1 if str(integration_status) in {"active", "setup"} else 0
+                conn.execute(
+                    """
+                    INSERT INTO user_marketplace_access(
+                        tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(tenant_id,user_id,marketplace_code) DO NOTHING
+                    """,
+                    (tenant_id,user_id,str(integration_code),enabled,stamp,stamp),
+                )
+
+        first_admin = conn.execute("SELECT id FROM app_users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
+        if first_admin is not None:
+            conn.execute(
+                "UPDATE app_users SET platform_role='superadmin' WHERE id=? AND COALESCE(platform_role,'')=''",
+                (int(first_admin[0]),),
+            )
+        conn.execute("UPDATE app_events SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
+        conn.execute("UPDATE app_reports SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
+        conn.execute("UPDATE app_product_state SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
         conn.commit()
     finally:
         conn.close()

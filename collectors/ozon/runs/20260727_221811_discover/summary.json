@@ -1,0 +1,35 @@
+{
+  "run_id": "20260727_221811_discover",
+  "mode": "discover",
+  "start_url": "https://www.ozon.ru/seller/alfa-tires-3381444/",
+  "start_urls": [
+    "https://www.ozon.ru/seller/alfa-tires-3381444/",
+    "https://www.ozon.ru/category/shiny-zimnie-8803/?__rr=1"
+  ],
+  "sources": [
+    {
+      "index": 1,
+      "url": "https://www.ozon.ru/seller/alfa-tires-3381444/",
+      "status": "PASSED",
+      "pages_loaded": 2,
+      "unique_products_added": 16
+    },
+    {
+      "index": 2,
+      "url": "https://www.ozon.ru/category/shiny-zimnie-8803/?__rr=1",
+      "status": "PASSED",
+      "pages_loaded": 2,
+      "unique_products_added": 16
+    }
+  ],
+  "products_seen": 32,
+  "new_products": 24,
+  "catalog_price_changed": 7,
+  "sources_total": 2,
+  "sources_completed": 2,
+  "pages_loaded": 4,
+  "items_total": 32,
+  "items_success": 32,
+  "items_failed": 0,
+  "items_blocked": 0
+}

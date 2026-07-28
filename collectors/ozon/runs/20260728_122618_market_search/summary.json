@@ -1,0 +1,14 @@
+{
+  "run_id": "20260728_122618_market_search",
+  "mode": "market-search",
+  "status": "PASSED",
+  "pages_loaded": 48,
+  "items_total": 30,
+  "items_success": 30,
+  "items_failed": 0,
+  "items_blocked": 0,
+  "candidates_found": 266,
+  "exact_found": 18,
+  "comparable_found": 9,
+  "duration_seconds": 1512.67
+}

@@ -1,0 +1,1680 @@
+{
+  "layout": [
+    {
+      "component": "header",
+      "params": "{}",
+      "stateId": "header-7278143-default-1",
+      "version": 2,
+      "vertical": "cms",
+      "widgetTrackingInfo": "{\"name\":\"cms.header\", \"vertical\":\"cms\", \"component\":\"header\", \"version\":2, \"id\":7278143, \"revisionId\":7865751, \"index\":1, \"provider\":\"shell-api\"}",
+      "placeholders": [
+        {
+          "name": "catalogMenu",
+          "widgets": [
+            {
+              "component": "catalogMenu",
+              "params": "{}",
+              "stateId": "catalogMenu-7278490-default-1",
+              "version": 3,
+              "vertical": "cms",
+              "widgetTrackingInfo": "{\"name\":\"cms.catalogMenu\", \"vertical\":\"cms\", \"component\":\"catalogMenu\", \"version\":3, \"id\":7278490, \"revisionId\":7865320, \"index\":2, \"provider\":\"catalog-menu-api\"}",
+              "widgetToken": "0xuh1Sz_nr98I8NSXMX32y4xlI4poC77",
+              "timeSpent": 1,
+              "name": "cms.catalogMenu",
+              "id": 7278490,
+              "isTrackingOn": true
+            }
+          ]
+        },
+        {
+          "name": "searchBar",
+          "widgets": [
+            {
+              "component": "searchBarDesktop",
+              "params": "{}",
+              "stateId": "searchBarDesktop-3414131-default-1",
+              "version": 2,
+              "vertical": "catalog",
+              "widgetTrackingInfo": "{\"name\":\"catalog.searchBarDesktop\", \"vertical\":\"catalog\", \"component\":\"searchBarDesktop\", \"version\":2, \"id\":3414131, \"revisionId\":3835502, \"index\":3, \"provider\":\"catalog-api\"}",
+              "placeholders": [
+                {
+                  "name": "bottom",
+                  "widgets": [
+                    {
+                      "component": "tapTags",
+                      "params": "{}",
+                      "stateId": "tapTags-3419971-default-1",
+                      "version": 2,
+                      "vertical": "search",
+                      "widgetTrackingInfo": "{\"name\":\"search.tapTags\", \"vertical\":\"search\", \"component\":\"tapTags\", \"version\":2, \"id\":3419971, \"revisionId\":3843395, \"index\":4, \"provider\":\"suggest-widgets\"}",
+                      "widgetToken": "0xuh1RkazARMyV12eoX0hRGVARlso1cv",
+                      "name": "search.tapTags",
+                      "id": 3419971,
+                      "isTrackingOn": true
+                    }
+                  ]
+                }
+              ],
+              "widgetToken": "0xuh1P3GIPejJOAnfhvYys3pOXGEEnpJ",
+              "timeSpent": 4,
+              "name": "catalog.searchBarDesktop",
+              "id": 3414131,
+              "isTrackingOn": true
+            }
+          ]
+        },
+        {
+          "name": "userMenu",
+          "widgets": [
+            {
+              "component": "profileMenuAnonymous",
+              "params": "{}",
+              "stateId": "profileMenuAnonymous-7278492-default-1",
+              "version": 2,
+              "vertical": "csma",
+              "widgetTrackingInfo": "{}",
+              "id": 7278492
+            },
+            {
+              "component": "orderInfo",
+              "params": "{\"url\":\"/my/orderlist\"}",
+              "stateId": "orderInfo-7278501-default-1",
+              "version": 2,
+              "vertical": "csma",
+              "widgetTrackingInfo": "{\"name\":\"csma.orderInfo\", \"vertical\":\"csma\", \"component\":\"orderInfo\", \"version\":2, \"id\":7278501, \"revisionId\":7865331, \"index\":6, \"provider\":\"my-account-api\"}",
+              "placeholders": [
+                {
+                  "name": "tracking",
+                  "widgets": [
+                    {
+                      "component": "orderTracking",
+                      "params": "{\"Preset\":\"1\"}",
+                      "stateId": "orderTracking-5718167-default-1",
+                      "version": 4,
+                      "vertical": "csma",
+                      "widgetTrackingInfo": "{\"name\":\"csma.orderAndDeliveryTracking\", \"vertical\":\"csma\", \"component\":\"orderTracking\", \"version\":4, \"originName\":\"csma.orderAndDeliveryTracking\", \"originVertical\":\"csma\", \"originComponent\":\"orderAndDeliveryTracking\", \"originVersion\":1, \"id\":5718167, \"revisionId\":6278669, \"index\":7, \"provider\":\"my-account-list-widgets\"}",
+                      "asyncType": "onPageLoad",
+                      "asyncData": "eyJjaSI6eyJ2aWV3Ijp7Im5hbWUiOiJvcmRlclRyYWNraW5nIiwidmVydGljYWwiOiJjc21hIiwidmVyc2lvbiI6NH0sInZlcnRpY2FsIjoiY3NtYSIsIm5hbWUiOiJvcmRlckFuZERlbGl2ZXJ5VHJhY2tpbmciLCJwYXJhbXMiOlt7Im5hbWUiOiJQcmVzZXQiLCJ0ZXh0IjoiMSJ9XSwidmVyc2lvbiI6MSwibGF5b3V0SUQiOjExODUyLCJpZCI6NTcxODE2N30sInVybCI6Ii9wcm9kdWN0LzQwNDMxMDQ2NjU/X19ycj0xJnNoPWFqRC1RNEprZVEifQ==",
+                      "trackingOn": true,
+                      "widgetToken": "0xuh1Nd1uvtn7Z7vrL9tUTikFsTIDv2g",
+                      "name": "csma.orderAndDeliveryTracking",
+                      "id": 5718167,
+                      "isTrackView": true,
+                      "isTrackingOn": true
+                    }
+                  ]
+                }
+              ],
+              "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6ImNzbWEiLCJuYW1lIjoib3JkZXJJbmZvIiwicGFyYW1zIjpbeyJuYW1lIjoidXJsIiwidGV4dCI6Ii9teS9vcmRlcmxpc3QifV0sInZlcnNpb24iOjIsImxheW91dElEIjoxMTg1MiwiaWQiOjcyNzg1MDF9LCJ1cmwiOiIvcHJvZHVjdC80MDQzMTA0NjY1P19fcnI9MSZzaD1hakQtUTRKa2VRIn0=",
+              "trackingOn": true,
+              "widgetToken": "0xuh1Qd7tPfC3J1dICXo5TfEjazf_hVi",
+              "name": "csma.orderInfo",
+              "id": 7278501,
+              "isTrackView": true,
+              "isTrackingOn": true
+            },
+            {
+              "component": "favoriteCounter",
+              "params": "{}",
+              "stateId": "favoriteCounter-7278502-default-1",
+              "version": 2,
+              "vertical": "favorites",
+              "widgetTrackingInfo": "{\"name\":\"favorites.favoriteCounter\", \"vertical\":\"favorites\", \"component\":\"favoriteCounter\", \"version\":2, \"id\":7278502, \"revisionId\":7865332, \"index\":8, \"provider\":\"favorite-items-api\"}",
+              "widgetToken": "0xuh1TSTOUKYJqvx1qolvOWocXpLvqkW",
+              "timeSpent": 2,
+              "name": "favorites.favoriteCounter",
+              "id": 7278502,
+              "isTrackingOn": true
+            },
+            {
+              "component": "headerIcon",
+              "params": "{\"icon\":\"ic_m_grocery_cart_filled\",\"subtitle\":\"{{{Корзина|composer@widgets@cart@headerIcon-v2@txt}}}\"}",
+              "stateId": "headerIcon-7278503-default-1",
+              "version": 2,
+              "vertical": "cart",
+              "widgetTrackingInfo": "{\"name\":\"cart.headerIcon\", \"vertical\":\"cart\", \"component\":\"headerIcon\", \"version\":2, \"id\":7278503, \"revisionId\":7865333, \"index\":9, \"provider\":\"cart-go-api\"}",
+              "widgetToken": "0xuh1-wL5JewUE5JAIRIGr0bnP6vpmJU",
+              "name": "cart.headerIcon",
+              "id": 7278503,
+              "isTrackingOn": true,
+              "isStatic": true
+            }
+          ]
+        },
+        {
+          "name": "horizontalMenu",
+          "widgets": [
+            {
+              "component": "horizontalMenu",
+              "params": "{}",
+              "stateId": "horizontalMenu-7302642-default-1",
+              "version": 1,
+              "vertical": "cms",
+              "widgetTrackingInfo": "{\"name\":\"cms.horizontalMenu\", \"vertical\":\"cms\", \"component\":\"horizontalMenu\", \"version\":1, \"id\":7302642, \"revisionId\":7889857, \"index\":10, \"provider\":\"shell-api\"}",
+              "trackingOn": true,
+              "widgetToken": "0xuh1MlbYTfgTjnGiFj9Y5ZG3iPJyvD6",
+              "name": "cms.horizontalMenu",
+              "id": 7302642,
+              "isTrackView": true,
+              "isTrackingOn": true
+            }
+          ]
+        },
+        {
+          "name": "addressBar",
+          "widgets": [
+            {
+              "component": "addressBookBarWeb",
+              "params": "{}",
+              "stateId": "addressBookBarWeb-7278510-default-1",
+              "version": 1,
+              "vertical": "addressBookMap",
+              "widgetTrackingInfo": "{\"name\":\"addressBookMap.addressBookBarWeb\", \"vertical\":\"addressBookMap\", \"component\":\"addressBookBarWeb\", \"version\":1, \"id\":7278510, \"revisionId\":7865340, \"index\":11, \"provider\":\"address-book-map\"}",
+              "widgetToken": "0xuh1NNHNRQtYiA6B8wij9y4FOonzADT",
+              "name": "addressBookMap.addressBookBarWeb",
+              "id": 7278510,
+              "isTrackingOn": true
+            }
+          ]
+        },
+        {
+          "name": "selectedCurrencyLanguage",
+          "widgets": [
+            {
+              "component": "selectedCurrencyLanguage",
+              "params": "{}",
+              "stateId": "selectedCurrencyLanguage-7278511-default-1",
+              "version": 1,
+              "vertical": "cms",
+              "widgetTrackingInfo": "{\"name\":\"cms.selectedCurrencyLanguage\", \"vertical\":\"cms\", \"component\":\"selectedCurrencyLanguage\", \"version\":1, \"id\":7278511, \"revisionId\":7865341, \"index\":12, \"provider\":\"cms-api\"}",
+              "widgetToken": "0xuh1UkBGTAeTGSjRieuRlM9zhk6C96S",
+              "name": "cms.selectedCurrencyLanguage",
+              "id": 7278511,
+              "isTrackingOn": true
+            }
+          ]
+        }
+      ],
+      "widgetToken": "0xuh1Ua_NsGJeFrqO1llK0WDXNLJs4gQ",
+      "name": "cms.header",
+      "id": 7278143,
+      "isTrackingOn": true
+    },
+    {
+      "component": "row",
+      "params": "{}",
+      "stateId": "row-3155454-default-1",
+      "version": 1,
+      "vertical": "layout",
+      "widgetTrackingInfo": "{}",
+      "placeholders": [
+        {
+          "name": "default",
+          "widgets": [
+            {
+              "component": "column",
+              "params": "{\"collapseIfEmpty\":true}",
+              "stateId": "column-3155453-default-1",
+              "version": 1,
+              "vertical": "layout",
+              "widgetTrackingInfo": "{\"name\":\"layout.column\", \"vertical\":\"layout\", \"component\":\"column\", \"version\":1, \"id\":3155453, \"revisionId\":3484889, \"provider\":\"layout-api\"}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "bannerCarousel",
+                      "params": "{}",
+                      "stateId": "bannerCarousel-3583103-default-1",
+                      "version": 1,
+                      "vertical": "cms",
+                      "widgetTrackingInfo": "{\"name\":\"cms.bannerCarousel\", \"vertical\":\"cms\", \"component\":\"bannerCarousel\", \"version\":1, \"id\":3583103, \"revisionId\":13272550, \"index\":14, \"provider\":\"cms-api\"}",
+                      "trackingOn": true,
+                      "widgetToken": "0xuh1R6Act7LH0-q6HTYeFyOm1YaxgFk",
+                      "name": "cms.bannerCarousel",
+                      "id": 3583103,
+                      "isTrackView": true,
+                      "isTrackingOn": true
+                    }
+                  ]
+                }
+              ],
+              "widgetToken": "0xuh1SFBFpflDi6k2flUll5sTWVUMHnF",
+              "name": "layout.column",
+              "id": 3155453,
+              "isTrackingOn": true,
+              "isStatic": true
+            }
+          ]
+        }
+      ],
+      "id": 3155454,
+      "isStatic": true
+    },
+    {
+      "component": "webProductMainWidget",
+      "params": "{}",
+      "stateId": "webProductMainWidget-347746-default-1",
+      "version": 1,
+      "vertical": "pdp",
+      "widgetTrackingInfo": "{\"name\":\"pdp-widget\", \"vertical\":\"pdp\", \"component\":\"webProductMainWidget\", \"version\":1, \"originName\":\"pdp.webProductMainWidget\", \"originVertical\":\"pdp\", \"originComponent\":\"webProductMainWidget\", \"originVersion\":1, \"id\":347746, \"revisionId\":345427, \"index\":15, \"provider\":\"pdp-api\"}",
+      "widgetToken": "0xuh1Qcjl3CAmgedmYPtVe6y2QIP6NzR",
+      "timeSpent": 21,
+      "name": "pdp-widget",
+      "id": 347746,
+      "isTrackingOn": true
+    },
+    {
+      "component": "container",
+      "params": "{}",
+      "stateId": "container-347815-default-1",
+      "version": 1,
+      "vertical": "layout",
+      "widgetTrackingInfo": "{}",
+      "placeholders": [
+        {
+          "name": "default",
+          "widgets": [
+            {
+              "component": "row",
+              "params": "{}",
+              "stateId": "row-347762-default-1",
+              "version": 1,
+              "vertical": "layout",
+              "widgetTrackingInfo": "{}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "column",
+                      "params": "{}",
+                      "stateId": "column-347761-default-1",
+                      "version": 1,
+                      "vertical": "layout",
+                      "widgetTrackingInfo": "{\"name\":\"layout.column\", \"vertical\":\"layout\", \"component\":\"column\", \"version\":1, \"id\":347761, \"revisionId\":345442, \"provider\":\"layout-api\"}",
+                      "widgetToken": "0xuh1O9eT-wcCeVVcu7LKy4-_aFaPTf_",
+                      "name": "layout.column",
+                      "id": 347761,
+                      "isTrackingOn": true,
+                      "isStatic": true
+                    }
+                  ]
+                }
+              ],
+              "id": 347762,
+              "isStatic": true
+            },
+            {
+              "component": "row",
+              "params": "{}",
+              "stateId": "row-347780-default-1",
+              "version": 1,
+              "vertical": "layout",
+              "widgetTrackingInfo": "{}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "column",
+                      "params": "{}",
+                      "stateId": "column-347779-default-1",
+                      "version": 1,
+                      "vertical": "layout",
+                      "widgetTrackingInfo": "{\"name\":\"layout.column\", \"vertical\":\"layout\", \"component\":\"column\", \"version\":1, \"id\":347779, \"revisionId\":345460, \"provider\":\"layout-api\"}",
+                      "placeholders": [
+                        {
+                          "name": "default",
+                          "widgets": [
+                            {
+                              "component": "webPdpGrid",
+                              "params": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"spaceBetween\",\"betweenMargin\":\"12\",\"direction\":\"column\",\"wrap\":\"nowrap\"}",
+                              "stateId": "webPdpGrid-347778-default-1",
+                              "version": 1,
+                              "vertical": "pdp",
+                              "widgetTrackingInfo": "{}",
+                              "placeholders": [
+                                {
+                                  "name": "default",
+                                  "widgets": [
+                                    {
+                                      "component": "webPdpGrid",
+                                      "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"spaceBetween\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"20\"}",
+                                      "stateId": "webPdpGrid-347857-default-1",
+                                      "version": 1,
+                                      "vertical": "pdp",
+                                      "widgetTrackingInfo": "{}",
+                                      "placeholders": [
+                                        {
+                                          "name": "default",
+                                          "widgets": [
+                                            {
+                                              "component": "webPdpGrid",
+                                              "params": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+                                              "stateId": "webPdpGrid-3385918-default-1",
+                                              "version": 1,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "default",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "breadCrumbs",
+                                                      "params": "{}",
+                                                      "stateId": "breadCrumbs-3385917-default-1",
+                                                      "version": 2,
+                                                      "vertical": "common",
+                                                      "widgetTrackingInfo": "{\"name\":\"catalog.breadCrumbsPdp\", \"vertical\":\"common\", \"component\":\"breadCrumbs\", \"version\":2, \"originName\":\"catalog.breadCrumbsPdp\", \"originVertical\":\"catalog\", \"originComponent\":\"breadCrumbsPdp\", \"originVersion\":2, \"id\":3385917, \"revisionId\":3796426, \"index\":25, \"provider\":\"navigation-api\"}",
+                                                      "widgetToken": "0xuh1QW6rtpxpl_hIunDx0qvCU43CESE",
+                                                      "timeSpent": 1,
+                                                      "name": "catalog.breadCrumbsPdp",
+                                                      "id": 3385917,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "id": 3385918,
+                                              "isStatic": true
+                                            },
+                                            {
+                                              "component": "webPdpGrid",
+                                              "params": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"12\",\"backgroundColor\":\"transparent\",\"noContentShrink\":true}",
+                                              "stateId": "webPdpGrid-3385615-default-1",
+                                              "version": 1,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "default",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webDetailSKU",
+                                                      "params": "{\"buttonMode\":\"inline\",\"isFreshColorsEnabled\":true}",
+                                                      "stateId": "webDetailSKU-3385551-default-1",
+                                                      "version": 2,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webDetailSKU\", \"vertical\":\"pdp\", \"component\":\"webDetailSKU\", \"version\":2, \"id\":3385551, \"revisionId\":3795999, \"index\":27, \"provider\":\"pdp-api\"}",
+                                                      "widgetToken": "0xuh1NtQCKMT3zwHHGCEFurVo0e_Rzv9",
+                                                      "timeSpent": 3,
+                                                      "name": "pdp.webDetailSKU",
+                                                      "id": 3385551,
+                                                      "isTrackingOn": true
+                                                    },
+                                                    {
+                                                      "component": "webAddToCompare",
+                                                      "params": "{\"buttonText\":\"В сравнение\",\"buttonTextActive\":\"В сравнении\",\"displayMode\":\"inline\",\"notificationTextSuccess\":\"Добавлено в сравнение\",\"notificationTextManySku\":\"В сравнении много товаров\",\"notificationButtonTextGoTo\":\"Перейти в сравнение\",\"notificationTextTryAgain\":\"Удалите лишние и попробуйте снова\",\"notificationTextBadInternet\":\"Что-то с интернетом\"}",
+                                                      "stateId": "webAddToCompare-3385612-default-1",
+                                                      "version": 4,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webAddToCompare\", \"vertical\":\"pdp\", \"component\":\"webAddToCompare\", \"version\":4, \"id\":3385612, \"revisionId\":3796086, \"index\":28, \"provider\":\"compare-api\"}",
+                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0NvbXBhcmUiLCJwYXJhbXMiOlt7Im5hbWUiOiJidXR0b25UZXh0IiwidGV4dCI6ItCSINGB0YDQsNCy0L3QtdC90LjQtSJ9LHsibmFtZSI6ImJ1dHRvblRleHRBY3RpdmUiLCJ0ZXh0Ijoi0JIg0YHRgNCw0LLQvdC10L3QuNC4In0seyJuYW1lIjoiZGlzcGxheU1vZGUiLCJ0ZXh0IjoiaW5saW5lIn0seyJuYW1lIjoibm90aWZpY2F0aW9uVGV4dFN1Y2Nlc3MiLCJ0ZXh0Ijoi0JTQvtCx0LDQstC70LXQvdC+INCyINGB0YDQsNCy0L3QtdC90LjQtSJ9LHsibmFtZSI6Im5vdGlmaWNhdGlvblRleHRNYW55U2t1IiwidGV4dCI6ItCSINGB0YDQsNCy0L3QtdC90LjQuCDQvNC90L7Qs9C+INGC0L7QstCw0YDQvtCyIn0seyJuYW1lIjoibm90aWZpY2F0aW9uQnV0dG9uVGV4dEdvVG8iLCJ0ZXh0Ijoi0J/QtdGA0LXQudGC0Lgg0LIg0YHRgNCw0LLQvdC10L3QuNC1In0seyJuYW1lIjoibm90aWZpY2F0aW9uVGV4dFRyeUFnYWluIiwidGV4dCI6ItCj0LTQsNC70LjRgtC1INC70LjRiNC90LjQtSDQuCDQv9C+0L/RgNC+0LHRg9C50YLQtSDRgdC90L7QstCwIn0seyJuYW1lIjoibm90aWZpY2F0aW9uVGV4dEJhZEludGVybmV0IiwidGV4dCI6ItCn0YLQvi3RgtC+INGBINC40L3RgtC10YDQvdC10YLQvtC8In1dLCJ2ZXJzaW9uIjo0LCJsYXlvdXRJRCI6MTE4NTIsImlkIjozMzg1NjEyfSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                      "widgetToken": "0xuh1Q0E-MHbPi-smJzdcDBve0YqbMjo",
+                                                      "timeSpent": 1,
+                                                      "name": "pdp.webAddToCompare",
+                                                      "id": 3385612,
+                                                      "isTrackingOn": true
+                                                    },
+                                                    {
+                                                      "component": "webSharingButton",
+                                                      "params": "{\"buttonMode\":\"inline\",\"isFreshColorsEnabled\":true}",
+                                                      "stateId": "webSharingButton-3385613-default-1",
+                                                      "version": 3,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webSharingButton\", \"vertical\":\"pdp\", \"component\":\"webSharingButton\", \"version\":3, \"id\":3385613, \"revisionId\":3796087, \"index\":29, \"provider\":\"pdp-api\"}",
+                                                      "widgetToken": "0xuh1_1L576RiHjDZSG7l4a8uqsofdVs",
+                                                      "timeSpent": 20,
+                                                      "name": "pdp.webSharingButton",
+                                                      "id": 3385613,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "id": 3385615,
+                                              "isStatic": true
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "id": 347857,
+                                      "isStatic": true
+                                    }
+                                  ]
+                                }
+                              ],
+                              "id": 347778,
+                              "isStatic": true
+                            }
+                          ]
+                        }
+                      ],
+                      "widgetToken": "0xuh1WBpPNFL1ipiHoAwYIA9VWORP7BM",
+                      "name": "layout.column",
+                      "id": 347779,
+                      "isTrackingOn": true,
+                      "isStatic": true
+                    }
+                  ]
+                }
+              ],
+              "id": 347780,
+              "isStatic": true
+            },
+            {
+              "component": "webPdpGrid",
+              "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"32\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"100%\"}",
+              "stateId": "webPdpGrid-1040994-default-1",
+              "version": 1,
+              "vertical": "pdp",
+              "widgetTrackingInfo": "{}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "webPdpGrid",
+                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"calc(100% - 420px)\"}",
+                      "stateId": "webPdpGrid-3311650-default-1",
+                      "version": 1,
+                      "vertical": "pdp",
+                      "widgetTrackingInfo": "{}",
+                      "placeholders": [
+                        {
+                          "name": "default",
+                          "widgets": [
+                            {
+                              "component": "webPdpGrid",
+                              "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"24\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"100%\",\"contentGrow\":true}",
+                              "stateId": "webPdpGrid-3572557-default-1",
+                              "version": 1,
+                              "vertical": "pdp",
+                              "widgetTrackingInfo": "{}",
+                              "placeholders": [
+                                {
+                                  "name": "default",
+                                  "widgets": [
+                                    {
+                                      "component": "webPdpGrid",
+                                      "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"57.3%\"}",
+                                      "stateId": "webPdpGrid-3572555-default-1",
+                                      "version": 1,
+                                      "vertical": "pdp",
+                                      "widgetTrackingInfo": "{}",
+                                      "placeholders": [
+                                        {
+                                          "name": "default",
+                                          "widgets": [
+                                            {
+                                              "component": "webStickyColumn",
+                                              "params": "{\"offsetTop\":\"70px\",\"viewportOffset\":64}",
+                                              "stateId": "webStickyColumn-3572560-default-1",
+                                              "version": 1,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "default",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webGallery",
+                                                      "params": "{\"isCoverAutoPlayOn\":true,\"theme\":\"default\",\"markedDownText\":\"уценённый товар\",\"isSimilarItemsButtonEnabled\":true,\"galleryContainerRatio\":\"3x4\",\"imageQuality\":2500}",
+                                                      "stateId": "webGallery-3311626-default-1",
+                                                      "version": 6,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webGallery\", \"vertical\":\"pdp\", \"component\":\"webGallery\", \"version\":6, \"id\":3311626, \"revisionId\":10710765, \"index\":35, \"provider\":\"pdp-api\"}",
+                                                      "placeholders": [
+                                                        {
+                                                          "name": "marketingLabels",
+                                                          "widgets": [
+                                                            {
+                                                              "component": "webMarketingLabels",
+                                                              "params": "{\"theme\":\"default\",\"maxLabelCount\":3}",
+                                                              "stateId": "webMarketingLabels-3311625-default-1",
+                                                              "version": 3,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{\"name\":\"pdp.webMarketingLabels\", \"vertical\":\"pdp\", \"component\":\"webMarketingLabels\", \"version\":3, \"id\":3311625, \"revisionId\":3697962, \"index\":36, \"provider\":\"pdp-api\"}",
+                                                              "widgetToken": "0xuh1XJ8gvoxEcyKcyQAlYy9_zLH-gFo",
+                                                              "timeSpent": 30,
+                                                              "name": "pdp.webMarketingLabels",
+                                                              "id": 3311625,
+                                                              "isTrackingOn": true
+                                                            }
+                                                          ]
+                                                        }
+                                                      ],
+                                                      "widgetToken": "0xuh1UTTl7iZLxp_Fg-jLgGLDllSCYLy",
+                                                      "timeSpent": 30,
+                                                      "name": "pdp.webGallery",
+                                                      "id": 3311626,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "timeSpent": 3,
+                                              "id": 3572560
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "id": 3572555,
+                                      "isStatic": true
+                                    },
+                                    {
+                                      "component": "webPdpGrid",
+                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"calc(100% - 57.3% - 24px)\"}",
+                                      "stateId": "webPdpGrid-3572556-default-1",
+                                      "version": 1,
+                                      "vertical": "pdp",
+                                      "widgetTrackingInfo": "{}",
+                                      "placeholders": [
+                                        {
+                                          "name": "default",
+                                          "widgets": [
+                                            {
+                                              "component": "webStickyColumn",
+                                              "params": "{\"offsetTop\":\"64px\",\"viewportOffset\":64}",
+                                              "stateId": "webStickyColumn-3572561-default-1",
+                                              "version": 1,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "default",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webPdpGrid",
+                                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"12\"}",
+                                                      "stateId": "webPdpGrid-3311645-default-1",
+                                                      "version": 1,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{}",
+                                                      "placeholders": [
+                                                        {
+                                                          "name": "default",
+                                                          "widgets": [
+                                                            {
+                                                              "component": "webProductHeading",
+                                                              "params": "{\"rowsCount\":3}",
+                                                              "stateId": "webProductHeading-3385933-default-1",
+                                                              "version": 3,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{\"name\":\"pdp.webProductHeading\", \"vertical\":\"pdp\", \"component\":\"webProductHeading\", \"version\":3, \"id\":3385933, \"revisionId\":12292654, \"index\":40, \"provider\":\"pdp-api\"}",
+                                                              "widgetToken": "0xuh1Whoba5-EKnXUBdngeCXCHBdyZzF",
+                                                              "timeSpent": 18,
+                                                              "name": "pdp.webProductHeading",
+                                                              "id": 3385933,
+                                                              "isTrackingOn": true
+                                                            },
+                                                            {
+                                                              "component": "webPdpGrid",
+                                                              "params": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+                                                              "stateId": "webPdpGrid-3386314-default-1",
+                                                              "version": 1,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{}",
+                                                              "placeholders": [
+                                                                {
+                                                                  "name": "default",
+                                                                  "widgets": [
+                                                                    {
+                                                                      "component": "webSingleProductScore",
+                                                                      "params": "{\"anchorUrl\":\"?tab=reviews#comments--offset-130\"}",
+                                                                      "stateId": "webSingleProductScore-3386432-default-1",
+                                                                      "version": 1,
+                                                                      "vertical": "rpProduct",
+                                                                      "widgetTrackingInfo": "{\"name\":\"rpProduct.webSingleProductScore\", \"vertical\":\"rpProduct\", \"component\":\"webSingleProductScore\", \"version\":1, \"id\":3386432, \"revisionId\":3797083, \"index\":43, \"provider\":\"product-review-api\"}",
+                                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InJwUHJvZHVjdCIsIm5hbWUiOiJ3ZWJTaW5nbGVQcm9kdWN0U2NvcmUiLCJwYXJhbXMiOlt7Im5hbWUiOiJhbmNob3JVcmwiLCJ0ZXh0IjoiP3RhYj1yZXZpZXdzI2NvbW1lbnRzLS1vZmZzZXQtMTMwIn1dLCJ2ZXJzaW9uIjoxLCJsYXlvdXRJRCI6MTE4NTIsImlkIjozMzg2NDMyfSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                                      "widgetToken": "0xuh1UnCOIPzrpFDAeyNUt4cj-CwigrA",
+                                                                      "name": "rpProduct.webSingleProductScore",
+                                                                      "id": 3386432,
+                                                                      "isTrackingOn": true
+                                                                    },
+                                                                    {
+                                                                      "component": "webQuestionCount",
+                                                                      "params": "{\"anchorUrl\":\"?tab=questions#comments--offset-130\"}",
+                                                                      "stateId": "webQuestionCount-3386433-default-1",
+                                                                      "version": 2,
+                                                                      "vertical": "rpProduct",
+                                                                      "widgetTrackingInfo": "{\"name\":\"rpProduct.webQuestionCount\", \"vertical\":\"rpProduct\", \"component\":\"webQuestionCount\", \"version\":2, \"id\":3386433, \"revisionId\":3797084, \"index\":44, \"provider\":\"ugc-questions-widgets\"}",
+                                                                      "widgetToken": "0xuh1MpDD47zPl4vG_JML7eDkDfhaXEy",
+                                                                      "name": "rpProduct.webQuestionCount",
+                                                                      "id": 3386433,
+                                                                      "isTrackingOn": true
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ],
+                                                              "id": 3386314,
+                                                              "isStatic": true
+                                                            },
+                                                            {
+                                                              "component": "webPdpGrid",
+                                                              "params": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"start\",\"betweenMargin\":\"24\",\"direction\":\"column\",\"wrap\":\"nowrap\",\"backgroundColor\":\"transparent\",\"horizontalPadding\":\"0\",\"verticalPadding\":\"0\"}",
+                                                              "stateId": "webPdpGrid-296982-default-1",
+                                                              "version": 1,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{}",
+                                                              "placeholders": [
+                                                                {
+                                                                  "name": "default",
+                                                                  "widgets": [
+                                                                    {
+                                                                      "component": "webBrand",
+                                                                      "params": "{\"theme\":\"default\",\"showTrustFactor1p\":true,\"showTrustFactor3p\":true,\"title\":\"Оригинал\",\"description\":[\"Официальные поставщики. Гарантия от производителя\"],\"title 3p\":\"Оригинал\"}",
+                                                                      "stateId": "webBrand-8976278-default-1",
+                                                                      "version": 4,
+                                                                      "vertical": "pdp",
+                                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webBrand\", \"vertical\":\"pdp\", \"component\":\"webBrand\", \"version\":4, \"id\":8976278, \"revisionId\":9621275, \"index\":46, \"provider\":\"pdp-api\"}",
+                                                                      "widgetToken": "0xuh1Ox8DjwJ1_M2aw4Ng5VEk6rIwv9l",
+                                                                      "timeSpent": 19,
+                                                                      "name": "pdp.webBrand",
+                                                                      "id": 8976278,
+                                                                      "isTrackingOn": true
+                                                                    },
+                                                                    {
+                                                                      "component": "webShortCharacteristics",
+                                                                      "params": "{\"limit\":5,\"showLongCharacteristics\":true,\"thresholdLength\":60,\"paramsLinkTarget\":\"self\",\"isFreshColorsEnabled\":true,\"offsetScrol\":144,\"linkToDescription\":\"section-description\",\"linkToDescriptionButtonText\":\"Перейти к описанию\",\"linkToCharacteristics\":\"section-characteristics\",\"linkToCharacteristicsButtonText\":\"Перейти к характеристикам\",\"linkToExternalText\":\"Подробнее\",\"isWidgetCharacteristicsOnPage\":true,\"isWidgetDescriptionOnPage\":true}",
+                                                                      "stateId": "webShortCharacteristics-3385952-default-1",
+                                                                      "version": 1,
+                                                                      "vertical": "pdp",
+                                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webShortCharacteristics\", \"vertical\":\"pdp\", \"component\":\"webShortCharacteristics\", \"version\":1, \"id\":3385952, \"revisionId\":3796474, \"index\":49, \"provider\":\"pdp-api\"}",
+                                                                      "widgetToken": "0xuh1PRgeozyyYxwucvFyPpLvatyq9N-",
+                                                                      "timeSpent": 20,
+                                                                      "name": "pdp.webShortCharacteristics",
+                                                                      "id": 3385952,
+                                                                      "isTrackingOn": true
+                                                                    },
+                                                                    {
+                                                                      "component": "row",
+                                                                      "params": "{}",
+                                                                      "stateId": "row-702923-default-1",
+                                                                      "version": 1,
+                                                                      "vertical": "layout",
+                                                                      "widgetTrackingInfo": "{}",
+                                                                      "placeholders": [
+                                                                        {
+                                                                          "name": "default",
+                                                                          "widgets": [
+                                                                            {
+                                                                              "component": "column",
+                                                                              "params": "{\"basis\":9,\"collapseIfEmpty\":true}",
+                                                                              "stateId": "column-702922-default-1",
+                                                                              "version": 1,
+                                                                              "vertical": "layout",
+                                                                              "widgetTrackingInfo": "{\"name\":\"layout.column\", \"vertical\":\"layout\", \"component\":\"column\", \"version\":1, \"id\":702922, \"revisionId\":3435232, \"provider\":\"layout-api\"}",
+                                                                              "widgetToken": "0xuh1YdsK-eTfcyS-J3WsWjI9OSxIhHb",
+                                                                              "name": "layout.column",
+                                                                              "id": 702922,
+                                                                              "isTrackingOn": true,
+                                                                              "isStatic": true
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ],
+                                                                      "id": 702923,
+                                                                      "isStatic": true
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ],
+                                                              "id": 296982,
+                                                              "isStatic": true
+                                                            },
+                                                            {
+                                                              "component": "separator",
+                                                              "params": "{\"height\":24}",
+                                                              "stateId": "separator-3508186-default-1",
+                                                              "version": 1,
+                                                              "vertical": "cms",
+                                                              "widgetTrackingInfo": "{\"name\":\"cms.separator\", \"vertical\":\"cms\", \"component\":\"separator\", \"version\":1, \"id\":3508186, \"revisionId\":3964153, \"provider\":\"cms-api\"}",
+                                                              "etag": "b15506ded8c16ef6",
+                                                              "widgetToken": "0xuh1-Csx46_67eBwrILlkpc3RKKcFzy",
+                                                              "name": "cms.separator",
+                                                              "id": 3508186,
+                                                              "isTrackingOn": true,
+                                                              "isStatic": true
+                                                            }
+                                                          ]
+                                                        }
+                                                      ],
+                                                      "id": 3311645,
+                                                      "isStatic": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "timeSpent": 3,
+                                              "id": 3572561
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "id": 3572556,
+                                      "isStatic": true
+                                    }
+                                  ]
+                                }
+                              ],
+                              "id": 3572557,
+                              "isStatic": true
+                            },
+                            {
+                              "component": "customHtml",
+                              "params": "{}",
+                              "stateId": "customHtml-347935-default-1",
+                              "version": 1,
+                              "vertical": "cms",
+                              "widgetTrackingInfo": "{\"name\":\"cms.customHtml\", \"vertical\":\"cms\", \"component\":\"customHtml\", \"version\":1, \"id\":347935, \"revisionId\":345697, \"index\":54, \"provider\":\"cms-api\"}",
+                              "trackingOn": true,
+                              "widgetToken": "0xuh1S-BhzMuC9Ay1TdofGpx-lbg8Rko",
+                              "name": "cms.customHtml",
+                              "id": 347935,
+                              "isTrackView": true,
+                              "isTrackingOn": true
+                            }
+                          ]
+                        }
+                      ],
+                      "id": 3311650,
+                      "isStatic": true
+                    },
+                    {
+                      "component": "webStickyColumn",
+                      "params": "{\"offsetTop\":\"64px\",\"viewportOffset\":64}",
+                      "stateId": "webStickyColumn-3572634-default-1",
+                      "version": 1,
+                      "vertical": "pdp",
+                      "widgetTrackingInfo": "{}",
+                      "placeholders": [
+                        {
+                          "name": "default",
+                          "widgets": [
+                            {
+                              "component": "webPdpGrid",
+                              "params": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"start\",\"betweenMargin\":\"2\",\"direction\":\"column\",\"wrap\":\"nowrap\",\"width\":\"388px\"}",
+                              "stateId": "webPdpGrid-3292468-default-1",
+                              "version": 1,
+                              "vertical": "pdp",
+                              "widgetTrackingInfo": "{}",
+                              "placeholders": [
+                                {
+                                  "name": "default",
+                                  "widgets": [
+                                    {
+                                      "component": "webPdpGrid",
+                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"4\",\"verticalPadding\":\"8\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"388px\"}",
+                                      "stateId": "webPdpGrid-3292425-default-1",
+                                      "version": 1,
+                                      "vertical": "pdp",
+                                      "widgetTrackingInfo": "{}",
+                                      "placeholders": [
+                                        {
+                                          "name": "default",
+                                          "widgets": [
+                                            {
+                                              "component": "separator",
+                                              "params": "{\"height\":8}",
+                                              "stateId": "separator-3422630-default-1",
+                                              "version": 1,
+                                              "vertical": "cms",
+                                              "widgetTrackingInfo": "{\"name\":\"cms.separator\", \"vertical\":\"cms\", \"component\":\"separator\", \"version\":1, \"id\":3422630, \"revisionId\":3847421, \"provider\":\"cms-api\"}",
+                                              "etag": "1b118d940be42554",
+                                              "widgetToken": "0xuh1ZN4axhpZi9o0rvD1wMHZMmZ5eCb",
+                                              "name": "cms.separator",
+                                              "id": 3422630,
+                                              "isTrackingOn": true,
+                                              "isStatic": true
+                                            },
+                                            {
+                                              "component": "webSale",
+                                              "params": "{\"textProductNotForSale\":\"Товара нет в продаже\",\"textBannedArea\":\"Товар не доставляется в ваш город\",\"textPreOrderComingStart\":\"Скоро старт предзаказа\",\"textPreOrderComingSoon\":\"Скоро в продаже\",\"textPreOrderWillGoOnSale\":\"Товар поступит в продажу\",\"textProductPreRelease\":\"Скоро в продаже\",\"textProductEndedQuickly\":\"Сожалеем, товар быстро закончился. Мы сообщим вам о новых поступлениях.\",\"textProductEnded\":\"Товар закончился\",\"paramRegularDataTitle\":\"Получите скидку прямо сейчас\",\"paramRegularDataDescription\":\"Просто оформите регулярную доставку этого товара. С каждой новой доставкой вы увеличиваете скидку\",\"paramRegularInfoText\":\"Как работает регулярная покупка\",\"theme\":\"default\"}",
+                                              "stateId": "webSale-2111389-default-1",
+                                              "version": 12,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{\"name\":\"pdp.webSale\", \"vertical\":\"pdp\", \"component\":\"webSale\", \"version\":12, \"id\":2111389, \"revisionId\":2374955, \"index\":60, \"provider\":\"pdp-api\"}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "price",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webPrice",
+                                                      "params": "{\"showPpu\":true,\"withOzonAccount\":\"/modal/withOzonAccount\",\"withoutOzonAccount\":\"/modal/withoutOzonAccount\"}",
+                                                      "stateId": "webPrice-3121879-default-1",
+                                                      "version": 6,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webPrice\", \"vertical\":\"pdp\", \"component\":\"webPrice\", \"version\":6, \"id\":3121879, \"revisionId\":3440440, \"index\":61, \"provider\":\"pdp-api\"}",
+                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJQcmljZSIsInBhcmFtcyI6W3sibmFtZSI6InNob3dQcHUiLCJib29sIjp0cnVlfSx7Im5hbWUiOiJ3aXRoT3pvbkFjY291bnQiLCJ0ZXh0IjoiL21vZGFsL3dpdGhPem9uQWNjb3VudCJ9LHsibmFtZSI6IndpdGhvdXRPem9uQWNjb3VudCIsInRleHQiOiIvbW9kYWwvd2l0aG91dE96b25BY2NvdW50In1dLCJ2ZXJzaW9uIjo2LCJsYXlvdXRJRCI6MTE4NTIsImlkIjozMTIxODc5fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                      "widgetToken": "0xuh1V9TzUJNl3oPle5SLddMcbG2ZQjP",
+                                                      "timeSpent": 20,
+                                                      "name": "pdp.webPrice",
+                                                      "id": 3121879,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "name": "topContent",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webInstallmentPurchase",
+                                                      "params": "{\"installmentAnimation\":true,\"BaseAnimationTimer\":10,\"highPriceAnimationTimer\":10,\"onboardingBNPL\":true,\"onboardingTimerBefore\":85,\"onboardingTimerViewing\":20,\"iconBNPLEnableName\":true,\"onboardingCreditCard\":true,\"headerWithBadgeEnable\":true,\"headerTitle\":\"Оплачивайте позже\"}",
+                                                      "stateId": "webInstallmentPurchase-11156568-default-1",
+                                                      "version": 2,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webInstallmentPurchase\", \"vertical\":\"pdp\", \"component\":\"webInstallmentPurchase\", \"version\":2, \"id\":11156568, \"revisionId\":11807224, \"index\":66, \"provider\":\"pdp-api\"}",
+                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJJbnN0YWxsbWVudFB1cmNoYXNlIiwicGFyYW1zIjpbeyJuYW1lIjoiaW5zdGFsbG1lbnRBbmltYXRpb24iLCJib29sIjp0cnVlfSx7Im5hbWUiOiJCYXNlQW5pbWF0aW9uVGltZXIiLCJpbnQiOjEwfSx7Im5hbWUiOiJoaWdoUHJpY2UifSx7Im5hbWUiOiJoaWdoUHJpY2VBbmltYXRpb25UaW1lciIsImludCI6MTB9LHsibmFtZSI6Im9uYm9hcmRpbmdCTlBMIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoib25ib2FyZGluZ1plcm9SdWJsZXNUb2RheSJ9LHsibmFtZSI6Im9uYm9hcmRpbmdXaXRob3V0T3ZlcnBheW1lbnRzIn0seyJuYW1lIjoib25ib2FyZGluZ1RpbWVyQmVmb3JlIiwiaW50Ijo4NX0seyJuYW1lIjoib25ib2FyZGluZ1RpbWVyVmlld2luZyIsImludCI6MjB9LHsibmFtZSI6Imljb25CTlBMRW5hYmxlTmFtZSIsImJvb2wiOnRydWV9LHsibmFtZSI6Im9uYm9hcmRpbmdDcmVkaXRDYXJkIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoiaGVhZGVyV2l0aEJhZGdlRW5hYmxlIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoiaGVhZGVyVGl0bGUiLCJ0ZXh0Ijoi0J7Qv9C70LDRh9C40LLQsNC50YLQtSDQv9C+0LfQttC1In1dLCJ2ZXJzaW9uIjoyLCJsYXlvdXRJRCI6MTE4NTIsImlkIjoxMTE1NjU2OH0sInVybCI6Ii9wcm9kdWN0LzQwNDMxMDQ2NjU/X19ycj0xJnNoPWFqRC1RNEprZVEifQ==",
+                                                      "widgetToken": "0xuh1TLlmT-6qu9q5XnY50LEFpIEAw1-",
+                                                      "timeSpent": 23,
+                                                      "name": "pdp.webInstallmentPurchase",
+                                                      "id": 11156568,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "name": "saleOptions",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webPdpGrid",
+                                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"0\"}",
+                                                      "stateId": "webPdpGrid-3412662-default-1",
+                                                      "version": 1,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{}",
+                                                      "id": 3412662,
+                                                      "isStatic": true
+                                                    },
+                                                    {
+                                                      "component": "webPdpGrid",
+                                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"0\"}",
+                                                      "stateId": "webPdpGrid-3412664-default-1",
+                                                      "version": 1,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{}",
+                                                      "id": 3412664,
+                                                      "isStatic": true
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "name": "addToCart",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webPdpGrid",
+                                                      "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"8\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+                                                      "stateId": "webPdpGrid-3291428-default-1",
+                                                      "version": 1,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{}",
+                                                      "placeholders": [
+                                                        {
+                                                          "name": "default",
+                                                          "widgets": [
+                                                            {
+                                                              "component": "webAddToCart",
+                                                              "params": "{\"quantSaleBadge\":true}",
+                                                              "stateId": "webAddToCart-8707875-default-1",
+                                                              "version": 10,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{\"name\":\"pdp-widget\", \"vertical\":\"pdp\", \"component\":\"webAddToCart\", \"version\":10, \"originName\":\"pdp.webAddToCart\", \"originVertical\":\"pdp\", \"originComponent\":\"webAddToCart\", \"originVersion\":10, \"id\":8707875, \"revisionId\":9322820, \"index\":72, \"provider\":\"pdp-api\"}",
+                                                              "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0NhcnQiLCJwYXJhbXMiOlt7Im5hbWUiOiJpc1N0YXJNb2RlRW5hYmxlZCJ9LHsibmFtZSI6ImhpZGVRdWFudEJ1dHRvbiJ9LHsibmFtZSI6InF1YW50U2FsZUJhZGdlIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoib25Nb2RhbFdpbmRvdyJ9LHsibmFtZSI6ImRvdWJsZUNhcnRBcHBWaWV3In0seyJuYW1lIjoiZGlzYWJsZUFuaW1hdGlvbnMifV0sInZlcnNpb24iOjEwLCJsYXlvdXRJRCI6MTE4NTIsImlkIjo4NzA3ODc1fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                              "widgetToken": "0xuh1VoRWJdMgcI5paqTquu0S7XxPVLb",
+                                                              "timeSpent": 20,
+                                                              "name": "pdp-widget",
+                                                              "id": 8707875,
+                                                              "isTrackingOn": true
+                                                            },
+                                                            {
+                                                              "component": "webAddToFavorite",
+                                                              "params": "{\"btnText\":\"В избранное\",\"btnTextActive\":\"В избранном\",\"theme\":\"apparel\",\"favoriteTooltipIsShow\":true,\"favoriteTooltipTitle\":\"Понравился товар?\",\"favoriteTooltipText\":\"Добавьте в избранное\",\"favoriteTooltipSrcImg\":\"https://ir.ozone.ru/s3/pdp-api/heart-blue_m.png\",\"favoriteTooltipTimeToShow\":210,\"favoriteTooltipTimeForShow\":10}",
+                                                              "stateId": "webAddToFavorite-3291427-default-1",
+                                                              "version": 1,
+                                                              "vertical": "pdp",
+                                                              "widgetTrackingInfo": "{\"name\":\"pdp.webAddToFavorite\", \"vertical\":\"pdp\", \"component\":\"webAddToFavorite\", \"version\":1, \"id\":3291427, \"revisionId\":3714724, \"index\":73, \"provider\":\"pdp-api\"}",
+                                                              "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0Zhdm9yaXRlIiwicGFyYW1zIjpbeyJuYW1lIjoiY2xhc3NpZmllZEFjdGlvbiJ9LHsibmFtZSI6ImJ0blRleHQiLCJ0ZXh0Ijoi0JIg0LjQt9Cx0YDQsNC90L3QvtC1In0seyJuYW1lIjoiYnRuVGV4dEFjdGl2ZSIsInRleHQiOiLQkiDQuNC30LHRgNCw0L3QvdC+0LwifSx7Im5hbWUiOiJ0aGVtZSIsInRleHQiOiJhcHBhcmVsIn0seyJuYW1lIjoiZmF2b3JpdGVUb29sdGlwSXNTaG93IiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoiZmF2b3JpdGVUb29sdGlwVGl0bGUiLCJ0ZXh0Ijoi0J/QvtC90YDQsNCy0LjQu9GB0Y8g0YLQvtCy0LDRgD8ifSx7Im5hbWUiOiJmYXZvcml0ZVRvb2x0aXBUZXh0IiwidGV4dCI6ItCU0L7QsdCw0LLRjNGC0LUg0LIg0LjQt9Cx0YDQsNC90L3QvtC1In0seyJuYW1lIjoiZmF2b3JpdGVUb29sdGlwU3JjSW1nIiwidGV4dCI6Imh0dHBzOi8vY2RuMS5vem9uZS5ydS9zMy9wZHAtYXBpL2hlYXJ0LWJsdWVfbS5wbmcifSx7Im5hbWUiOiJmYXZvcml0ZVRvb2x0aXBUaW1lVG9TaG93IiwiaW50IjoyMTB9LHsibmFtZSI6ImZhdm9yaXRlVG9vbHRpcFRpbWVGb3JTaG93IiwiaW50IjoxMH1dLCJ2ZXJzaW9uIjoxLCJsYXlvdXRJRCI6MTE4NTIsImlkIjozMjkxNDI3fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                              "widgetToken": "0xuh1ZQl_R1-1sohrKrNmGIlpxGDa70o",
+                                                              "timeSpent": 20,
+                                                              "name": "pdp.webAddToFavorite",
+                                                              "id": 3291427,
+                                                              "isTrackingOn": true
+                                                            }
+                                                          ]
+                                                        }
+                                                      ],
+                                                      "id": 3291428,
+                                                      "isStatic": true
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "name": "bestSeller",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webBestSeller",
+                                                      "params": "{\"mode\":\"cheaperOrFasterWithModal\",\"popoverPlacement\":\"top\"}",
+                                                      "stateId": "webBestSeller-4993840-default-1",
+                                                      "version": 2,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.webBestSeller\", \"vertical\":\"pdp\", \"component\":\"webBestSeller\", \"version\":2, \"id\":4993840, \"revisionId\":5542962, \"index\":74, \"provider\":\"pdp-api\"}",
+                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJCZXN0U2VsbGVyIiwicGFyYW1zIjpbeyJuYW1lIjoibW9kZSIsInRleHQiOiJjaGVhcGVyT3JGYXN0ZXJXaXRoTW9kYWwifSx7Im5hbWUiOiJwb3BvdmVyVGV4dCJ9LHsibmFtZSI6InBvcG92ZXJQbGFjZW1lbnQiLCJ0ZXh0IjoidG9wIn1dLCJ2ZXJzaW9uIjoyLCJsYXlvdXRJRCI6MTE4NTIsImlkIjo0OTkzODQwfSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                                                      "widgetToken": "0xuh1SZL3kvxfAH_b6WrzZRSCx_VfeHo",
+                                                      "timeSpent": 49,
+                                                      "name": "pdp.webBestSeller",
+                                                      "id": 4993840,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJTYWxlIiwicGFyYW1zIjpbeyJuYW1lIjoidGV4dFByb2R1Y3ROb3RGb3JTYWxlIiwidGV4dCI6ItCi0L7QstCw0YDQsCDQvdC10YIg0LIg0L/RgNC+0LTQsNC20LUifSx7Im5hbWUiOiJ0ZXh0QmFubmVkQXJlYSIsInRleHQiOiLQotC+0LLQsNGAINC90LUg0LTQvtGB0YLQsNCy0LvRj9C10YLRgdGPINCyINCy0LDRiCDQs9C+0YDQvtC0In0seyJuYW1lIjoidGV4dFByZU9yZGVyQ29taW5nU3RhcnQiLCJ0ZXh0Ijoi0KHQutC+0YDQviDRgdGC0LDRgNGCINC/0YDQtdC00LfQsNC60LDQt9CwIn0seyJuYW1lIjoidGV4dFByZU9yZGVyQ29taW5nU29vbiIsInRleHQiOiLQodC60L7RgNC+INCyINC/0YDQvtC00LDQttC1In0seyJuYW1lIjoidGV4dFByZU9yZGVyV2lsbEdvT25TYWxlIiwidGV4dCI6ItCi0L7QstCw0YAg0L/QvtGB0YLRg9C/0LjRgiDQsiDQv9GA0L7QtNCw0LbRgyJ9LHsibmFtZSI6InRleHRQcm9kdWN0UHJlUmVsZWFzZSIsInRleHQiOiLQodC60L7RgNC+INCyINC/0YDQvtC00LDQttC1In0seyJuYW1lIjoidGV4dFByb2R1Y3RFbmRlZFF1aWNrbHkiLCJ0ZXh0Ijoi0KHQvtC20LDQu9C10LXQvCwg0YLQvtCy0LDRgCDQsdGL0YHRgtGA0L4g0LfQsNC60L7QvdGH0LjQu9GB0Y8uINCc0Ysg0YHQvtC+0LHRidC40Lwg0LLQsNC8INC+INC90L7QstGL0YUg0L/QvtGB0YLRg9C/0LvQtdC90LjRj9GFLiJ9LHsibmFtZSI6InRleHRQcm9kdWN0RW5kZWQiLCJ0ZXh0Ijoi0KLQvtCy0LDRgCDQt9Cw0LrQvtC90YfQuNC70YHRjyJ9LHsibmFtZSI6InBhcmFtUmVndWxhckRhdGFUaXRsZSIsInRleHQiOiLQn9C+0LvRg9GH0LjRgtC1INGB0LrQuNC00LrRgyDQv9GA0Y/QvNC+INGB0LXQudGH0LDRgSJ9LHsibmFtZSI6InBhcmFtUmVndWxhckRhdGFEZXNjcmlwdGlvbiIsInRleHQiOiLQn9GA0L7RgdGC0L4g0L7RhNC+0YDQvNC40YLQtSDRgNC10LPRg9C70Y/RgNC90YPRjiDQtNC+0YHRgtCw0LLQutGDINGN0YLQvtCz0L4g0YLQvtCy0LDRgNCwLiDQoSDQutCw0LbQtNC+0Lkg0L3QvtCy0L7QuSDQtNC+0YHRgtCw0LLQutC+0Lkg0LLRiyDRg9Cy0LXQu9C40YfQuNCy0LDQtdGC0LUg0YHQutC40LTQutGDIn0seyJuYW1lIjoicGFyYW1SZWd1bGFySW5mb1RleHQiLCJ0ZXh0Ijoi0JrQsNC6INGA0LDQsdC+0YLQsNC10YIg0YDQtdCz0YPQu9GP0YDQvdCw0Y8g0L/QvtC60YPQv9C60LAifSx7Im5hbWUiOiJhbHdheXNTaG93UHB1In0seyJuYW1lIjoiY2hlY2tPbGRTa3VPZmZlcnMifSx7Im5hbWUiOiJ0aGVtZSIsInRleHQiOiJkZWZhdWx0In1dLCJ2ZXJzaW9uIjoxMiwibGF5b3V0SUQiOjExODUyLCJpZCI6MjExMTM4OX0sInVybCI6Ii9wcm9kdWN0LzQwNDMxMDQ2NjU/X19ycj0xJnNoPWFqRC1RNEprZVEifQ==",
+                                              "widgetToken": "0xuh1SxYNmX1SChYMqHF_-2-MGik5IM8",
+                                              "timeSpent": 31,
+                                              "name": "pdp.webSale",
+                                              "id": 2111389,
+                                              "isTrackingOn": true
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "id": 3292425,
+                                      "isStatic": true
+                                    },
+                                    {
+                                      "component": "webPdpGrid",
+                                      "params": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"24\",\"verticalPadding\":\"12\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+                                      "stateId": "webPdpGrid-3292467-default-1",
+                                      "version": 1,
+                                      "vertical": "pdp",
+                                      "widgetTrackingInfo": "{}",
+                                      "placeholders": [
+                                        {
+                                          "name": "default",
+                                          "widgets": [
+                                            {
+                                              "component": "webPdpGrid",
+                                              "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"spaceBetween\",\"betweenMargin\":\"4\"}",
+                                              "stateId": "webPdpGrid-3292442-default-1",
+                                              "version": 1,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{}",
+                                              "placeholders": [
+                                                {
+                                                  "name": "default",
+                                                  "widgets": [
+                                                    {
+                                                      "component": "webOneClickButton",
+                                                      "params": "{\"btnText\":\"Купить сейчас\"}",
+                                                      "stateId": "webOneClickButton-8448572-default-1",
+                                                      "version": 3,
+                                                      "vertical": "pdp",
+                                                      "widgetTrackingInfo": "{\"name\":\"pdp.oneClickButton\", \"vertical\":\"pdp\", \"component\":\"webOneClickButton\", \"version\":3, \"originName\":\"pdp.webOneClickButton\", \"originVertical\":\"pdp\", \"originComponent\":\"webOneClickButton\", \"originVersion\":3, \"id\":8448572, \"revisionId\":9058372, \"index\":80, \"provider\":\"pdp-api\"}",
+                                                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJPbmVDbGlja0J1dHRvbiIsInBhcmFtcyI6W3sibmFtZSI6ImJ0blRleHQiLCJ0ZXh0Ijoi0JrRg9C/0LjRgtGMINGB0LXQudGH0LDRgSJ9XSwidmVyc2lvbiI6MywibGF5b3V0SUQiOjExODUyLCJpZCI6ODQ0ODU3Mn0sInVybCI6Ii9wcm9kdWN0LzQwNDMxMDQ2NjU/X19ycj0xJnNoPWFqRC1RNEprZVEifQ==",
+                                                      "widgetToken": "0xuh1T0d0sYmhGkJ8OxwI0DCYXj_lcmE",
+                                                      "timeSpent": 20,
+                                                      "name": "pdp.oneClickButton",
+                                                      "id": 8448572,
+                                                      "isTrackingOn": true
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "id": 3292442,
+                                              "isStatic": true
+                                            },
+                                            {
+                                              "component": "webDelivery",
+                                              "params": "{\"foodPreOrder\":true,\"theme\":\"default\",\"holidaysNotificationText\":\"Сроки доставки увеличены, так как склад продавца не работает в праздники\",\"holidaysNotificationLinkText\":\"Посмотреть товары других продавцов\",\"multipleDeliveries\":true}",
+                                              "stateId": "webDelivery-8727767-default-1",
+                                              "version": 7,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{\"name\":\"pdp.webDelivery\", \"vertical\":\"pdp\", \"component\":\"webDelivery\", \"version\":7, \"originName\":\"pdp.webDelivery\", \"originVertical\":\"pdp\", \"originComponent\":\"webDelivery\", \"originVersion\":8, \"id\":8727767, \"revisionId\":9343008, \"index\":83, \"provider\":\"pdp-api\"}",
+                                              "asyncType": "onPageLoad",
+                                              "asyncData": "eyJjaSI6eyJ2aWV3Ijp7Im5hbWUiOiJ3ZWJEZWxpdmVyeSIsInZlcnRpY2FsIjoicGRwIiwidmVyc2lvbiI6N30sInZlcnRpY2FsIjoicGRwIiwibmFtZSI6IndlYkRlbGl2ZXJ5IiwicGFyYW1zIjpbeyJuYW1lIjoiZm9vZFByZU9yZGVyIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoidGhlbWUiLCJ0ZXh0IjoiZGVmYXVsdCJ9LHsibmFtZSI6ImhvbGlkYXlzTm90aWZpY2F0aW9uVGV4dCIsInRleHQiOiLQodGA0L7QutC4INC00L7RgdGC0LDQstC60Lgg0YPQstC10LvQuNGH0LXQvdGLLCDRgtCw0Log0LrQsNC6INGB0LrQu9Cw0LQg0L/RgNC+0LTQsNCy0YbQsCDQvdC1INGA0LDQsdC+0YLQsNC10YIg0LIg0L/RgNCw0LfQtNC90LjQutC4In0seyJuYW1lIjoiaG9saWRheXNOb3RpZmljYXRpb25MaW5rVGV4dCIsInRleHQiOiLQn9C+0YHQvNC+0YLRgNC10YLRjCDRgtC+0LLQsNGA0Ysg0LTRgNGD0LPQuNGFINC/0YDQvtC00LDQstGG0L7QsiJ9LHsibmFtZSI6ImRpZ2l0YWxQcm9kdWN0TW9kZSJ9LHsibmFtZSI6Im11bHRpcGxlRGVsaXZlcmllcyIsImJvb2wiOnRydWV9LHsibmFtZSI6ImNoZWNrT2xkU2t1T2ZmZXJzIn0seyJuYW1lIjoiaXNTa2VsZXRvbkVuYWJsZWQifSx7Im5hbWUiOiJoaWRkZW5EZWxpdmVyeVdpZGdldCJ9XSwidmVyc2lvbiI6OCwibGF5b3V0SUQiOjExODUyLCJpZCI6ODcyNzc2N30sInVybCI6Ii9wcm9kdWN0LzQwNDMxMDQ2NjU/X19ycj0xJnNoPWFqRC1RNEprZVEifQ==",
+                                              "widgetToken": "0xuh1QCN6T9wZf3NYJ92CpRS-BhNN1ry",
+                                              "name": "pdp.webDelivery",
+                                              "id": 8727767,
+                                              "isTrackingOn": true
+                                            },
+                                            {
+                                              "component": "webCurrentSeller",
+                                              "params": "{\"titleWidget\":\"Магазин\",\"subscribeText\":\"Вы подписаны\",\"unSubscribeText\":\"Подписаться\",\"ordersCountMinOrdersToDisplay\":1000,\"maxCharsInTitle\":21,\"maxCharsInTitleWithIcon\":19,\"ozonRussiaGradientEnable\":true,\"enableOnboarding\":true,\"onboardingShowTime\":20,\"onboardingBeforeShowTime\":5,\"onboardingTitle\":\"Магазин теперь здесь\",\"onboardingBody\":\"Смотрите информацию о нём и подписывайтесь, чтобы не пропустить новинки\",\"loadingWithWebDelivery\":true}",
+                                              "stateId": "webCurrentSeller-7772769-default-1",
+                                              "version": 5,
+                                              "vertical": "pdp",
+                                              "widgetTrackingInfo": "{\"name\":\"pdp.webCurrentSeller\", \"vertical\":\"pdp\", \"component\":\"webCurrentSeller\", \"version\":5, \"id\":7772769, \"revisionId\":8368799, \"index\":84, \"provider\":\"pdp-api\"}",
+                                              "widgetToken": "0xuh1OdA5NudNOPbm9yoOJHBBeTFhaGq",
+                                              "timeSpent": 20,
+                                              "name": "pdp.webCurrentSeller",
+                                              "id": 7772769,
+                                              "isTrackingOn": true
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "id": 3292467,
+                                      "isStatic": true
+                                    }
+                                  ]
+                                }
+                              ],
+                              "id": 3292468,
+                              "isStatic": true
+                            }
+                          ]
+                        }
+                      ],
+                      "timeSpent": 3,
+                      "id": 3572634
+                    }
+                  ]
+                }
+              ],
+              "id": 1040994,
+              "isStatic": true
+            }
+          ]
+        }
+      ],
+      "id": 347815,
+      "isStatic": true
+    },
+    {
+      "component": "webStickyProducts",
+      "params": "{\"triggeringObjectSelector\":\"#short-product-info-trigger-new\"}",
+      "stateId": "webStickyProducts-726428-default-1",
+      "version": 2,
+      "vertical": "pdp",
+      "widgetTrackingInfo": "{}",
+      "placeholders": [
+        {
+          "name": "reviews",
+          "widgets": [
+            {
+              "component": "webPdpGrid",
+              "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+              "stateId": "webPdpGrid-726421-default-1",
+              "version": 1,
+              "vertical": "pdp",
+              "widgetTrackingInfo": "{}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "webReviewProductScore",
+                      "params": "{\"displayType\":\"simple\",\"anchorUrl\":\"?tab=reviews#comments--offset-130\"}",
+                      "stateId": "webReviewProductScore-3132021-default-1",
+                      "version": 1,
+                      "vertical": "rpProduct",
+                      "widgetTrackingInfo": "{\"name\":\"rpProduct.webReviewProductScore\", \"vertical\":\"rpProduct\", \"component\":\"webReviewProductScore\", \"version\":1, \"id\":3132021, \"revisionId\":3453145, \"index\":87, \"provider\":\"product-review-api\"}",
+                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InJwUHJvZHVjdCIsIm5hbWUiOiJ3ZWJSZXZpZXdQcm9kdWN0U2NvcmUiLCJwYXJhbXMiOlt7Im5hbWUiOiJkaXNwbGF5VHlwZSIsInRleHQiOiJzaW1wbGUifSx7Im5hbWUiOiJhbmNob3JVcmwiLCJ0ZXh0IjoiP3RhYj1yZXZpZXdzI2NvbW1lbnRzLS1vZmZzZXQtMTMwIn1dLCJ2ZXJzaW9uIjoxLCJsYXlvdXRJRCI6MTE4NTIsImlkIjozMTMyMDIxfSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                      "trackingOn": true,
+                      "widgetToken": "0xuh1UKzGcjcey1br8RJIhypQ16RVAib",
+                      "name": "rpProduct.webReviewProductScore",
+                      "id": 3132021,
+                      "isTrackView": true,
+                      "isTrackingOn": true
+                    },
+                    {
+                      "component": "webQuestionCount",
+                      "params": "{\"anchorUrl\":\"?tab=questions#comments--offset-130\"}",
+                      "stateId": "webQuestionCount-3132022-default-1",
+                      "version": 1,
+                      "vertical": "rpProduct",
+                      "widgetTrackingInfo": "{\"name\":\"rpProduct.webQuestionCount\", \"vertical\":\"rpProduct\", \"component\":\"webQuestionCount\", \"version\":1, \"id\":3132022, \"revisionId\":3453149, \"index\":88, \"provider\":\"ugc-questions-widgets\"}",
+                      "trackingOn": true,
+                      "widgetToken": "0xuh1NSJIS35J5ciyQK5c6Y_Xfn3APcV",
+                      "name": "rpProduct.webQuestionCount",
+                      "id": 3132022,
+                      "isTrackView": true,
+                      "isTrackingOn": true
+                    },
+                    {
+                      "component": "webAddToCompare",
+                      "params": "{\"btnText\":\"Сравнивать\",\"btnTextActive\":\"В сравнение\",\"tooMuchText\":\"Вы добавили в сравнение максимальное количество товаров\",\"productAdded\":\"Товар добавлен в сравнение.\",\"theme\":\"theme1\"}",
+                      "stateId": "webAddToCompare-939214-default-1",
+                      "version": 3,
+                      "vertical": "pdp",
+                      "widgetTrackingInfo": "{\"name\":\"pdp.webAddToCompare\", \"vertical\":\"pdp\", \"component\":\"webAddToCompare\", \"version\":3, \"id\":939214, \"revisionId\":1099844, \"index\":89, \"provider\":\"compare-api\"}",
+                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0NvbXBhcmUiLCJwYXJhbXMiOlt7Im5hbWUiOiJidG5UZXh0IiwidGV4dCI6ItCh0YDQsNCy0L3QuNCy0LDRgtGMIn0seyJuYW1lIjoiYnRuVGV4dEFjdGl2ZSIsInRleHQiOiLQkiDRgdGA0LDQstC90LXQvdC40LUifSx7Im5hbWUiOiJ0b29NdWNoVGV4dCIsInRleHQiOiLQktGLINC00L7QsdCw0LLQuNC70Lgg0LIg0YHRgNCw0LLQvdC10L3QuNC1INC80LDQutGB0LjQvNCw0LvRjNC90L7QtSDQutC+0LvQuNGH0LXRgdGC0LLQviDRgtC+0LLQsNGA0L7QsiJ9LHsibmFtZSI6InByb2R1Y3RBZGRlZCIsInRleHQiOiLQotC+0LLQsNGAINC00L7QsdCw0LLQu9C10L0g0LIg0YHRgNCw0LLQvdC10L3QuNC1LiJ9LHsibmFtZSI6InRoZW1lIiwidGV4dCI6InRoZW1lMSJ9XSwidmVyc2lvbiI6MywibGF5b3V0SUQiOjExODUyLCJpZCI6OTM5MjE0fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                      "trackingOn": true,
+                      "widgetToken": "0xuh1TCvXDKvPs_afB4Fvrqs2Cx-IJD9",
+                      "timeSpent": 1,
+                      "name": "pdp.webAddToCompare",
+                      "id": 939214,
+                      "isTrackView": true,
+                      "isTrackingOn": true
+                    },
+                    {
+                      "component": "separator",
+                      "params": "{\"height\":20}",
+                      "stateId": "separator-909632-default-1",
+                      "version": 1,
+                      "vertical": "cms",
+                      "widgetTrackingInfo": "{\"name\":\"cms.separator\", \"vertical\":\"cms\", \"component\":\"separator\", \"version\":1, \"id\":909632, \"revisionId\":1010022, \"provider\":\"cms-api\"}",
+                      "etag": "65c07ecd543e1ef2",
+                      "widgetToken": "0xuh1Yoc-lI-aS7a_vt4agxmP2kUVC6t",
+                      "name": "cms.separator",
+                      "id": 909632,
+                      "isTrackingOn": true,
+                      "isStatic": true
+                    }
+                  ]
+                }
+              ],
+              "id": 726421,
+              "isStatic": true
+            }
+          ]
+        },
+        {
+          "name": "addToCart",
+          "widgets": [
+            {
+              "component": "webPdpGrid",
+              "params": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"spaceBetween\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"350px\"}",
+              "stateId": "webPdpGrid-726427-default-1",
+              "version": 1,
+              "vertical": "pdp",
+              "widgetTrackingInfo": "{}",
+              "placeholders": [
+                {
+                  "name": "default",
+                  "widgets": [
+                    {
+                      "component": "webAddToCart",
+                      "params": "{\"quantSaleBadge\":true}",
+                      "stateId": "webAddToCart-8707205-default-1",
+                      "version": 10,
+                      "vertical": "pdp",
+                      "widgetTrackingInfo": "{\"name\":\"pdp-widget\", \"vertical\":\"pdp\", \"component\":\"webAddToCart\", \"version\":10, \"originName\":\"pdp.webAddToCart\", \"originVertical\":\"pdp\", \"originComponent\":\"webAddToCart\", \"originVersion\":10, \"id\":8707205, \"revisionId\":9322136, \"index\":91, \"provider\":\"pdp-api\"}",
+                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0NhcnQiLCJwYXJhbXMiOlt7Im5hbWUiOiJpc1N0YXJNb2RlRW5hYmxlZCJ9LHsibmFtZSI6ImhpZGVRdWFudEJ1dHRvbiJ9LHsibmFtZSI6InF1YW50U2FsZUJhZGdlIiwiYm9vbCI6dHJ1ZX0seyJuYW1lIjoib25Nb2RhbFdpbmRvdyJ9LHsibmFtZSI6ImRvdWJsZUNhcnRBcHBWaWV3In0seyJuYW1lIjoiZGlzYWJsZUFuaW1hdGlvbnMifV0sInZlcnNpb24iOjEwLCJsYXlvdXRJRCI6MTE4NTIsImlkIjo4NzA3MjA1fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                      "widgetToken": "0xuh1OziXOk_P5PfM9cIjtWamvH3yBC9",
+                      "timeSpent": 20,
+                      "name": "pdp-widget",
+                      "id": 8707205,
+                      "isTrackingOn": true
+                    },
+                    {
+                      "component": "webAddToFavorite",
+                      "params": "{\"btnText\":\"В избранное\",\"btnTextActive\":\"В избранном\",\"theme\":\"apparel\",\"favoriteTooltipIsShow\":true,\"favoriteTooltipText\":\"Добавьте в избранное\",\"favoriteTooltipTitle\":\"Понравился товар?\",\"favoriteTooltipSrcImg\":\"https://ir.ozone.ru/s3/pdp-api/heart-blue_m.png\",\"favoriteTooltipTimeToShow\":210,\"favoriteTooltipTimeForShow\":10}",
+                      "stateId": "webAddToFavorite-1255798-default-1",
+                      "version": 1,
+                      "vertical": "pdp",
+                      "widgetTrackingInfo": "{\"name\":\"pdp.webAddToFavorite\", \"vertical\":\"pdp\", \"component\":\"webAddToFavorite\", \"version\":1, \"id\":1255798, \"revisionId\":3468855, \"index\":92, \"provider\":\"pdp-api\"}",
+                      "asyncData": "eyJjaSI6eyJ2ZXJ0aWNhbCI6InBkcCIsIm5hbWUiOiJ3ZWJBZGRUb0Zhdm9yaXRlIiwicGFyYW1zIjpbeyJuYW1lIjoiYnRuVGV4dCIsInRleHQiOiLQkiDQuNC30LHRgNCw0L3QvdC+0LUifSx7Im5hbWUiOiJidG5UZXh0QWN0aXZlIiwidGV4dCI6ItCSINC40LfQsdGA0LDQvdC90L7QvCJ9LHsibmFtZSI6InRoZW1lIiwidGV4dCI6ImFwcGFyZWwifSx7Im5hbWUiOiJmYXZvcml0ZVRvb2x0aXBJc1Nob3ciLCJib29sIjp0cnVlfSx7Im5hbWUiOiJmYXZvcml0ZVRvb2x0aXBUZXh0IiwidGV4dCI6ItCU0L7QsdCw0LLRjNGC0LUg0LLCoNC40LfQsdGA0LDQvdC90L7QtSJ9LHsibmFtZSI6ImZhdm9yaXRlVG9vbHRpcFRpdGxlIiwidGV4dCI6ItCf0L7QvdGA0LDQstC40LvRgdGPINGC0L7QstCw0YA/In0seyJuYW1lIjoiZmF2b3JpdGVUb29sdGlwU3JjSW1nIiwidGV4dCI6Imh0dHBzOi8vY2RuMS5vem9uZS5ydS9zMy9wZHAtYXBpL2hlYXJ0LWJsdWVfbS5wbmcifSx7Im5hbWUiOiJmYXZvcml0ZVRvb2x0aXBUaW1lVG9TaG93IiwiaW50IjoyMTB9LHsibmFtZSI6ImZhdm9yaXRlVG9vbHRpcFRpbWVGb3JTaG93IiwiaW50IjoxMH1dLCJ2ZXJzaW9uIjoxLCJsYXlvdXRJRCI6MTE4NTIsImlkIjoxMjU1Nzk4fSwidXJsIjoiL3Byb2R1Y3QvNDA0MzEwNDY2NT9fX3JyPTEmc2g9YWpELVE0SmtlUSJ9",
+                      "widgetToken": "0xuh1O5zi6pDu8RlHOlsBG1uvZAxrAGp",
+                      "timeSpent": 20,
+                      "name": "pdp.webAddToFavorite",
+                      "id": 1255798,
+                      "isTrackingOn": true
+                    }
+                  ]
+                }
+              ],
+              "id": 726427,
+              "isStatic": true
+            }
+          ]
+        }
+      ],
+      "timeSpent": 19,
+      "id": 726428
+    },
+    {
+      "component": "paginator",
+      "params": "{\"layoutContainer\":\"pdpPage2column\",\"fetchType\":\"scroll\",\"offsetTop\":1500,\"minHeight\":3000,\"isContentVisibilityAuto\":true}",
+      "stateId": "paginator-658722-default-1",
+      "version": 1,
+      "vertical": "composer",
+      "widgetTrackingInfo": "{}",
+      "id": 658722,
+      "isStatic": true
+    },
+    {
+      "component": "footer",
+      "params": "{}",
+      "stateId": "footer-347823-default-1",
+      "version": 1,
+      "vertical": "cms",
+      "widgetTrackingInfo": "{\"name\":\"cms.footer\", \"vertical\":\"cms\", \"component\":\"footer\", \"version\":1, \"id\":347823, \"revisionId\":345504, \"index\":97, \"provider\":\"shell-api\"}",
+      "trackingOn": true,
+      "widgetToken": "0xuh1XYDtWTJFi6XVBVCoEhF2MzUFMVk",
+      "timeSpent": 2,
+      "name": "cms.footer",
+      "id": 347823,
+      "isTrackView": true,
+      "isTrackingOn": true
+    }
+  ],
+  "widgetStates": {
+    "tapTags-3419971-default-1": "{\"items\":[],\"maxRows\":0,\"searchText\":\"\",\"backgroundColor\":\"\"}",
+    "profileMenuAnonymous-7278492-default-1": "{\"tooltip\":{\"text\":\"Войдите, чтобы делать покупки, отслеживать заказы и пользоваться персональными скидками и баллами.\",\"notice\":\"После входа вы сможете создать аккаунт юрлица.\",\"buttons\":[{\"text\":\"Войти или зарегистрироваться\",\"theme\":\"primary\",\"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_ACTION\",\"link\":\"authorizationRouter\",\"params\":{\"pageType\":\"pdp\",\"url\":\"/product/4043104665?__rr=1\\u0026sh=ajD-Q4JkeQ\"}}},{\"text\":\"Личный кабинет\",\"type\":\"my-account\",\"url\":\"/my/main\",\"theme\":\"secondary\",\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\",\"link\":\"/my/main\",\"id\":\"my-account\"}}]},\"iconHeader\":{\"icon\":{\"size\":\"SIZE_500\",\"shape\":\"SHAPE_NONE\",\"icon\":{\"icon\":\"ic_s_anonymous_filled_compact\",\"tintColor\":\"graphicPrimary\"}},\"subtitle\":{\"text\":\"Войти\",\"textColor\":\"graphicPrimary\",\"maxLines\":1,\"preset\":\"PRESET_CUSTOM\",\"typographyToken\":\"tsCompact300XSmall\"},\"testInfo\":{\"automatizationId\":\"header-my-ozon-icon\"}},\"indicatorEnabled\":true}",
+    "webProductMainWidget-347746-default-1": "{\"sku\":\"4043104665\", \"url\":\"/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?__rr=1&sh=ajD-Q4JkeQ\", \"cellTrackingInfo\":{\"products\":{\"main\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}}}",
+    "webPdpGrid-3385918-default-1": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+    "webSharingButton-3385613-default-1": "{\"trackingInfo\":{\"show\":{\"actionType\":\"show\", \"key\":\"1huh1Q3yQbzt8fxG3yi-Su4QKMP74zf_\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1Q3yQbzt8fxG3yi-Su4QKMP74zf_\"}}, \"button\":{\"iconName\":\"ic_s_share_arrow_filled\", \"iconColor\":\"graphicTertiary\", \"text\":\"Поделиться\", \"textColor\":\"textSecondary\", \"mode\":\"inline\", \"hoverTextColor\":\"textActiveAction\", \"hoverIconColor\":\"graphicActiveActionPrimary\", \"backgroundHoverColor\":\"bgActiveActionSecondary\", \"testInfo\":{\"automatizationId\":\"button-text\"}}, \"copyNotification\":{\"success\":{\"type\":\"success\", \"icon\":\"ic_m_confirmed_filled\", \"iconColor\":\"graphicPositivePrimary\", \"content\":\"Ссылка на товар скопирована\"}, \"error\":{\"type\":\"error\", \"icon\":\"ic_m_cancel_filled\", \"iconColor\":\"graphicWarningPrimary\", \"content\":\"Не удалось скопировать\"}}, \"list\":[{\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1_Z4IkhotnXCXexCSc-CRaBz_dl-\"}}, \"id\":\"copy\", \"iconName\":\"ic_m_copy_filled\", \"text\":\"Скопировать ссылку\", \"actionType\":\"ACTION_TYPE_COPY\", \"options\":{\"productUrl\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?from=share_web&perehod=smm_share_button_productpage_link&sh=ajD-Q4JkeQ\"}}, {\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1MQfssi--T1s3G4kSsLVktaY3cCu\"}}, \"id\":\"vkontakte\", \"iconName\":\"ic_m_vk_filled\", \"text\":\"ВКонтакте\", \"actionType\":\"ACTION_TYPE_SHARE\", \"options\":{\"width\":550, \"height\":335, \"shareUrl\":\"https://vk.com/share.php?image=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-1-r%2F7673175351.jpg&title=MICHELIN+Michelin+Anakee+Adventure+%D0%9C%D0%BE%D1%82%D0%BE%D1%88%D0%B8%D0%BD%D1%8B++170%2F60+R17+72+V&url=__url_placeholder__\", \"urlPlaceholder\":\"__url_placeholder__\", \"productUrl\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?from=share_web&perehod=smm_share_button_productpage_vk&sh=ajD-Q4JkeQ\"}}, {\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Uqh69-mQHfq-7YR3zzk-KzmSce_\"}}, \"id\":\"odnoklassniki\", \"iconName\":\"ic_m_odnoklassniki_filled\", \"text\":\"Одноклассники\", \"actionType\":\"ACTION_TYPE_SHARE\", \"options\":{\"width\":640, \"height\":400, \"shareUrl\":\"https://connect.ok.ru/offer?imageUrl=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-1-r%2F7673175351.jpg&title=MICHELIN+Michelin+Anakee+Adventure+%D0%9C%D0%BE%D1%82%D0%BE%D1%88%D0%B8%D0%BD%D1%8B++170%2F60+R17+72+V&url=__url_placeholder__\", \"urlPlaceholder\":\"__url_placeholder__\", \"productUrl\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?from=share_web&perehod=smm_share_button_productpage_ok&sh=ajD-Q4JkeQ\"}}, {\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1TjGFowdMPbvGO7w30-4iiuj7ZNN\"}}, \"id\":\"telegram\", \"iconName\":\"ic_m_telegram_filled\", \"text\":\"Telegram\", \"actionType\":\"ACTION_TYPE_SHARE\", \"options\":{\"width\":600, \"height\":500, \"shareUrl\":\"https://t.me/share/url?url=__url_placeholder__\", \"urlPlaceholder\":\"__url_placeholder__\", \"productUrl\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?from=share_web&perehod=smm_share_button_productpage_telegram&sh=ajD-Q4JkeQ\"}}, {\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1ZfcFvun1UgmJBst2YpEOdcBFGuH\"}}, \"id\":\"whatsapp\", \"iconName\":\"ic_m_whatsapp_filled\", \"text\":\"WhatsApp\", \"actionType\":\"ACTION_TYPE_SHARE\", \"options\":{\"width\":600, \"height\":500, \"shareUrl\":\"https://api.whatsapp.com/send?text=MICHELIN+Michelin+Anakee+Adventure+%D0%9C%D0%BE%D1%82%D0%BE%D1%88%D0%B8%D0%BD%D1%8B++170%2F60+R17+72+V+__url_placeholder__\", \"urlPlaceholder\":\"__url_placeholder__\", \"productUrl\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/?from=share_web&perehod=smm_share_button_productpage_whatsapp&sh=ajD-Q4JkeQ\"}}],\"params\":{\"buttonMode\":\"inline\",\"isFreshColorsEnabled\":true}}",
+    "webStickyColumn-3572561-default-1": "{\"offsetTop\":\"64px\", \"viewportOffset\":64,\"params\":{\"offsetBottom\":\"\",\"offsetTop\":\"64px\",\"viewportOffset\":64}}",
+    "webBrand-8976278-default-1": "{\"avatar\":{\"image\":\"https://cdn1.ozonusercontent.com/s3/product-service-meta-media/224218c5-54ab-40a4-a24c-3503de77ea78.jpg\", \"aspectRatio\":\"RATIO_1_1\", \"hasParanja\":true, \"cornerRadius\":\"RADIUS_400\", \"imageWidth\":44, \"cdnSettings\":{\"size\":44}}, \"content\":{\"title\":{\"text\":[{\"type\":\"link\", \"content\":\"MICHELIN\", \"href\":\"/brand/michelin-30315461/?all_items=true\", \"font\":\"tsCompactControl500Medium\", \"color\":\"textPrimary\"}]}, \"description\":{\"content\":{\"text\":[{\"type\":\"text\", \"content\":\"Бренд\", \"font\":\"tsBody400Small\", \"color\":\"textSecondary\"}]}}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1NUvOkt4o4LiA6vebmcF2W51_P2D\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1NUvOkt4o4LiA6vebmcF2W51_P2D\"}}, \"link\":\"/brand/michelin-30315461/?all_items=true\",\"params\":{\"description 1p\":null,\"description 3p\":null,\"disablePaidBrand\":false,\"hideTrustFactor1p\":false,\"selectInBigOzon\":false,\"showTrustFactor3p\":true,\"theme\":\"default\",\"title\":\"Оригинал\",\"title 3p\":\"Оригинал\"}}",
+    "webAddToCart-8707875-default-1": "{\"firstButton\":{\"isInCart\":false, \"toCart\":{\"backgroundColor\":\"bgActionPrimary\", \"cornerRadius\":\"RADIUS_500\", \"title\":{\"text\":\"В корзину\", \"textColor\":\"textLightKey\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsBodyControl500Medium\", \"testInfo\":{\"automatizationId\":\"pdp-add-to-cart-title\"}}, \"action\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\", \"id\":\"addToCart\", \"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"to_cart\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}, \"asyncFetchType\":\"SUBTITLE\", \"buttonHoverColor\":\"bgActiveActionPrimary\", \"testInfo\":{\"automatizationId\":\"saleblock-add-to-cart-button\"}}, \"inCart\":{\"backgroundColor\":\"bgPositivePrimary\", \"cornerRadius\":\"RADIUS_500\", \"title\":{\"text\":\"В корзине\", \"textColor\":\"textLightKey\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsBodyControl500Medium\", \"testInfo\":{\"automatizationId\":\"pdp-add-in-cart-title\"}}, \"subtitle\":{\"text\":\"Перейти\", \"textColor\":\"textPrimaryOnDark\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsCompact400Small\", \"testInfo\":{\"automatizationId\":\"pdp-add-in-cart-subtitle\"}}, \"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"/cart\", \"id\":\"toCheckout\", \"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"toCart\", \"key\":\"1huh1NyN_xzRRJix8FwBtg6cUZfwgjvq\"}}, \"asyncFetchType\":\"SUBTITLE\", \"buttonHoverColor\":\"bgActivePositivePrimary\", \"testInfo\":{\"automatizationId\":\"button-go-to-cart\"}}, \"additionalButton\":{\"incrementButton\":{\"action\":{\"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"increment\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}}, \"decrementButton\":{\"action\":{\"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"decrement\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}}, \"countPicker\":{\"size\":\"SIZE_600\", \"sizing\":\"SIZING_HUG\", \"styleType\":\"CUSTOM\", \"customStyle\":{\"backgroundColor\":\"bgSecondary\"}}}, \"sku\":\"4043104665\", \"freeRest\":310, \"minAddToCartQuantity\":1, \"inCartQuantity\":0}, \"asyncAction\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\", \"link\":\"pdpGetButtonTexts?product_id=4043104665\", \"id\":\"asyncDatesRequest\", \"params\":{\"hideQuantButton\":\"false\", \"inCartPosition\":\"subtitle\", \"toCartPosition\":\"subtitle\"}}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}}, \"webData\":{\"tooltipTextOutOfFreeRest\":{\"text\":\"В наличии больше нет\", \"textColor\":\"textPrimaryOnDark\", \"typographyToken\":\"tsBody400Small\"}}}",
+    "webStickyProducts-726428-default-1": "{\"sku\":\"4043104665\", \"name\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V\", \"coverImageUrl\":\"https://ir.ozone.ru/s3/multimedia-1-r/c50/7673175351.jpg\", \"seller\":{\"logoImageUrl\":\"https://cdn1.ozonusercontent.com/s3/marketing-api/banners/dH/F2/dHF2Hwg5SQISysfecK2p8E1PD8Ankfhe.png\", \"name\":\"100%A+\", \"link\":\"https://www.ozon.ru/seller/100-a/\", \"subtitle\":\"Перейти в магазин\"},\"params\":{\"triggeringObjectSelector\":\"#short-product-info-trigger-new\"}}",
+    "webAddToFavorite-1255798-default-1": "{\"sku\":\"4043104665\", \"lexemes\":{\"ariaLabelAddText\":\"Добавить в избранное\", \"ariaLabelClearText\":\"Убрать из избранного\"}, \"cellTrackingInfo\":{\"products\":{\"main\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"uis\":{\"favoriteTooltip\":\"1huh1-eaQx7MOPO3EayIMIEYuo457GF8\"}}, \"trackingInfo\":{\"favorite\":{\"actionType\":\"favorite\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"unfavorite\":{\"actionType\":\"unfavorite\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1-eaQx7MOPO3EayIMIEYuo457GF8\"}},\"params\":{\"btnText\":\"В избранное\",\"btnTextActive\":\"В избранном\",\"classifiedAction\":false,\"favoriteTooltipIsShow\":true,\"favoriteTooltipSrcImg\":\"https://ir.ozone.ru/s3/pdp-api/heart-blue_m.png\",\"favoriteTooltipText\":\"Добавьте в избранное\",\"favoriteTooltipTimeForShow\":10,\"favoriteTooltipTimeToShow\":210,\"favoriteTooltipTitle\":\"Понравился товар?\",\"theme\":\"apparel\"}}",
+    "row-347780-default-1": "{}",
+    "webGallery-3311626-default-1": "{\"sku\":\"4043104665\", \"coverImage\":\"https://ir.ozone.ru/s3/multimedia-1-r/7673175351.jpg\", \"images\":[{\"src\":\"https://ir.ozone.ru/s3/multimedia-1-r/7673175351.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #1\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-c/7612117788.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #2\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-m/7618687870.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #3\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-p/7625346685.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #4\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-1/7524739009.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #5\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-2/7612377374.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #6\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-d/7612377349.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #7\"}, {\"src\":\"https://ir.ozone.ru/s3/multimedia-1-e/7612377350.jpg\", \"alt\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V #8\"}], \"videoCover\":{\"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1-_9NnSXMouOhWuR45lnWuUAuQus\"}, \"cover_preview_open\":{\"actionType\":\"preview_open\", \"key\":\"1huh1_HNJkQfexuDGQ2VuO_sq3EAS-wk\"}, \"cover_view_end\":{\"actionType\":\"view_end\", \"key\":\"1huh1_HNJkQfexuDGQ2VuO_sq3EAS-wk\"}, \"cover_view_start\":{\"actionType\":\"view_start\", \"key\":\"1huh1_HNJkQfexuDGQ2VuO_sq3EAS-wk\"}}}, \"isWithParandja\":false, \"isWithWave\":false, \"isUnavailable\":false, \"galleryTipRs\":[{\"type\":\"text\", \"content\":\"Для просмотра удерживайте левую кнопку мыши\"}, {\"type\":\"newLine\"}, {\"type\":\"text\", \"content\":\"и вращайте влево или вправо,\"}, {\"type\":\"newLine\"}, {\"type\":\"text\", \"content\":\"кликните по изображению, чтобы увеличить его\"}], \"lexemes\":{\"galleryTip1\":\"Для просмотра удерживайте левую кнопку мыши\", \"galleryTip2\":\"и вращайте влево или вправо\", \"galleryTip3\":\"кликните по изображению, чтобы увеличить его\", \"imageAdditionalTitle\":\"Дополнительно\", \"imageCaptionDesktop\":\"Чтобы рассмотреть товар, зажмите левую кнопку мыши поверх фото и потяните в любую сторону\", \"imageCaptionMobile\":\"Удерживайте палец на фото и вращайте товар в любую сторону\", \"imageTitle\":\"Фотографии\", \"openGalleryBtnText\":\"Перейти в галерею\", \"photo360Title\":\"Фото 360\", \"photoShootAlt\":\"На фотосессии\", \"videoCoverTitle\":\"Видео обложка\", \"videoText\":\"видео\", \"videoTitle\":\"Видео\"}, \"galleryRatio\":0.75, \"similarItemsURL\":\"/modal/similar-products?product_id=4043104665\", \"imageRendering\":\"\", \"cellTrackingInfo\":{\"uis\":{\"galleryItemClickImage\":\"1huh1RrsLnHHOTBDlBG0U665cgSREIUo\", \"galleryItemClickVideoCover\":\"1huh1_HNJkQfexuDGQ2VuO_sq3EAS-wk\", \"galleryPopup\":\"1huh1S4CdTKfEF0ayr2Y3lFSEfw9DDiH\", \"galleryPopupClose\":\"1huh1PED5BkR5kbz_inlYx9CGZplCJcn\", \"galleryVideoCoverToGalleryClick\":\"1huh1-_9NnSXMouOhWuR45lnWuUAuQus\", \"galleryView\":\"1huh1O4jJ2dBRcje8X_zOhhRiothxt-4\"}}, \"imageQualityInModal\":2500, \"similarItemsText\":\"Похожие\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1RrsLnHHOTBDlBG0U665cgSREIUo\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1O4jJ2dBRcje8X_zOhhRiothxt-4\"}},\"params\":{\"galleryContainerRatio\":\"3x4\",\"hideVideoVideoCover360Button\":false,\"imageQuality\":2500,\"imageZoomEnabled\":false,\"isCoverAutoPlayOn\":true,\"isSimilarItemsButtonEnabled\":true,\"linkToSimilar\":\"/modal/similar-products\",\"markedDownText\":\"уценённый товар\",\"theme\":\"default\"}}",
+    "webPdpGrid-3311645-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"12\"}",
+    "customHtml-347935-default-1": "{\"html\":\"\\u003cspan id=\\\"short-product-info-trigger-new\\\"\\u003e\\u003c/span\\u003e\",\"disableJquery\":true,\"css\":\"\",\"js\":\"\",\"resources\":[]}",
+    "webPdpGrid-3292442-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"spaceBetween\",\"betweenMargin\":\"4\"}",
+    "webOneClickButton-8448572-default-1": "{\"sku\":\"4043104665\", \"redirectLink\":\"/gocheckout?start=0&src=pdp\", \"payload\":{\"items\":[{\"id\":\"4043104665\", \"quantity\":1}]}, \"cellTrackingInfo\":{\"products\":{\"to_checkout\":\"1huh1ShXWN2sGVuXwt2rLzNL5c5-m6RP\", \"view\":\"1huh1O0LKtqoJSlFD67O4A8-mlx3AeF9\"}}, \"trackingInfo\":{\"to_checkout\":{\"actionType\":\"to_checkout\", \"key\":\"1huh1ShXWN2sGVuXwt2rLzNL5c5-m6RP\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1O0LKtqoJSlFD67O4A8-mlx3AeF9\"}}, \"buttonText\":\"Купить сейчас\",\"params\":{\"btnText\":\"Купить сейчас\",\"btnTextinCnC\":\"Забронировать сейчас\",\"buyQuant\":false}}",
+    "webCurrentSeller-7772769-default-1": "{\"header\":{\"title\":{\"text\":\"Магазин\", \"textColor\":\"textPrimary\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsHeadline400Small\", \"testInfo\":{\"automatizationId\":\"title\"}}, \"badge\":{\"isSubscribed\":false, \"subscribed\":{\"text\":\"Вы подписаны\", \"leftIcon\":\"ic_m_heart_filled\", \"size\":\"SIZE_400\", \"styleType\":\"CUSTOM\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_ACTION\", \"link\":\"sisUnlike\", \"id\":\"sisUnlike\", \"params\":{\"sellerId\":\"4265057\"}}, \"testInfo\":{\"automatizationId\":\"unsubscribe\"}}, \"customBadgeStyle\":{\"leftGraphicColor\":\"graphicAccentPrimary\", \"textColor\":\"textPrimary\"}, \"hideDisclosure\":true}, \"unsubscribed\":{\"text\":\"Подписаться\", \"leftIcon\":\"ic_m_heart_filled\", \"size\":\"SIZE_400\", \"styleType\":\"CUSTOM\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_DISMISS_AND_REDIRECT\", \"link\":\"/modal/ozonIdIframe?returnUrl=%2F\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1U5ZIPO76-53OjLU-Gzv2Wt28Fbp\"}}, \"testInfo\":{\"automatizationId\":\"subscribe\"}}, \"customBadgeStyle\":{\"leftGraphicColor\":\"graphicTertiary\", \"textColor\":\"textPrimary\"}, \"hideDisclosure\":true}}}, \"sellerCell\":{\"settings\":{\"topPadding\":\"PADDING_400\", \"bottomPadding\":\"PADDING_400\", \"leftPadding\":\"PADDING_400\", \"rightPadding\":\"PADDING_500\", \"disableSeparator\":true}, \"leftBlock\":{\"common\":{\"testInfo\":{\"automatizationId\":\"seller-logo\"}}, \"rightPadding\":\"PADDING_400\", \"icon\":{\"shape\":\"SQUIRCLE\", \"text\":\"1\", \"backgroundColor\":\"bgSecondary\"}}, \"centerBlock\":{\"title\":{\"text\":\"100%A+\", \"textColor\":\"textPrimary\", \"typographyToken\":\"tsCompactControl500Medium\", \"maxLines\":1, \"truncatingMode\":\"TAIL\"}, \"subtitle\":{\"text\":\"Перейти\", \"textColor\":\"textSecondary\", \"typographyToken\":\"tsBody400Small\", \"maxLines\":1, \"truncatingMode\":\"TAIL\"}, \"titleIcon\":{\"icon\":\"ic_m_status_points_filled\", \"tintColor\":\"graphicTertiary\"}}, \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"https://www.ozon.ru/seller/100-a/\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Ox4I7W_b_I6XypMxD75G03rbv0v\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1Ox4I7W_b_I6XypMxD75G03rbv0v\"}}, \"testInfo\":{\"automatizationId\":\"webCurrentSellerAll\"}}}, \"rating\":{\"icon\":{\"size\":\"SIZE_400\", \"shape\":\"SHAPE_NONE\", \"icon\":{\"icon\":\"ic_m_star_filled\", \"tintColor\":\"graphicWarningPrimary\"}, \"testInfo\":{\"automatizationId\":\"rating-icon\"}}, \"title\":{\"text\":\"5.0\", \"textColor\":\"textPrimary\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsCompactControl300XSmall\", \"testInfo\":{\"automatizationId\":\"rating-value\"}}, \"backgroundColor\":\"bgSecondary\", \"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\", \"link\":\"/modal/shop-in-shop-rating-popover\", \"params\":{\"closeButton\":\"true\", \"maxWidthContent\":\"500\", \"screenSizeType\":\"wrap\", \"size\":\"600\", \"theme\":\"bottom\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1PBXEckDLGYfzaQD-RrPA8HatBgD\"}}, \"backgroundHover\":\"bgActiveSecondary\"}, \"chat\":{\"icon\":{\"size\":\"SIZE_400\", \"shape\":\"SHAPE_NONE\", \"icon\":{\"icon\":\"ic_m_tabbar_chat\", \"tintColor\":\"bgActionPrimary\"}, \"testInfo\":{\"automatizationId\":\"chat-icon\"}}, \"title\":{\"text\":\"Чат\", \"maxLines\":1, \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsCompactControl300XSmall\", \"leftPadding\":\"PADDING_100\", \"testInfo\":{\"automatizationId\":\"chat-text\"}}, \"backgroundColor\":\"bgSecondary\", \"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"/my/chat/?channel=CS&context=pdp&sku=4043104665&url_sign=Eltb3FDd-2JCsMBt-Jn1wocCZnyX7QoOXrYHCghu-mw.6d705490.WyJjaGFubmVsIiwidXNlcl9pZCJd.1&user_id=4265057&prefillMessage=e3t70JfQtNGA0LDQstGB0YLQstGD0LnRgtC1ISDQoyDQvNC10L3RjyDQstC+0L/RgNC+0YEg0L/QviDQstCw0YjQtdC80YMg0YLQvtCy0LDRgNGDICIlcyIsINCw0YDRgtC40LrRg9C7ICVzfHBkcC1hcGl8WyVzfE1JQ0hFTElOIE1pY2hlbGluIEFuYWtlZSBBZHZlbnR1cmUg0JzQvtGC0L7RiNC40L3RiyAgMTcwLzYwIFIxNyA3MiBWfCVzfGhjZjhwWF9fSUtSOEQyNVBJUF19fX0u\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1M9QEJHVLjkEAtc0knYgOJIa2m1f\"}}, \"backgroundHover\":\"bgActiveSecondary\", \"templateLink\":\"/my/chat/?channel=CS&context=pdp&sku=4043104665&url_sign=Eltb3FDd-2JCsMBt-Jn1wocCZnyX7QoOXrYHCghu-mw.6d705490.WyJjaGFubmVsIiwidXNlcl9pZCJd.1&user_id=4265057&prefillMessage={placeholder}\", \"placeholderValue\":\"Здравствуйте! У меня вопрос по вашему товару \\\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V\\\", артикул hcf8pX__IKR8D25PIP.\", \"placeholderKey\":\"{placeholder}\"}, \"backgroundColor\":\"layerFloor1\", \"innerBackgroundColor\":\"bgSecondary\", \"loadingWithWebDelivery\":true, \"sellerCellHoverColor\":\"textActiveAction\", \"trustFactors\":[{\"icon\":{\"size\":\"SIZE_400\", \"shape\":\"SHAPE_NONE\", \"icon\":{\"icon\":\"ic_m_info_input_filled_compact\", \"tintColor\":\"graphicTertiary\"}, \"testInfo\":{\"automatizationId\":\"about-seller-icon\"}}, \"title\":{\"text\":\"О магазине\", \"testInfo\":{\"automatizationId\":\"about-seller-text\"}}, \"tooltip\":{\"title\":{\"text\":\"О магазине\"}, \"subtitle\":[{\"type\":\"text\", \"content\":\"Putian Chengxiang Bingning Auto Parts Co., Ltd\", \"font\":\"tsBody300XSmall\", \"color\":\"textSecondaryInverted\"}, {\"type\":\"newLine\"}, {\"type\":\"newLine\"}, {\"type\":\"text\", \"content\":\"Room 1703, 2nd Floor, Building 9, Jiulong Community, No. 999 Lihuadong Avenue, Xialin Street, Chengx\", \"font\":\"tsBody300XSmall\", \"color\":\"textSecondaryInverted\"}, {\"type\":\"newLine\"}, {\"type\":\"newLine\"}, {\"type\":\"text\", \"content\":\"CN, Putian\", \"font\":\"tsBody300XSmall\", \"color\":\"textSecondaryInverted\"}, {\"type\":\"newLine\"}, {\"type\":\"newLine\"}, {\"type\":\"text\", \"content\":\"Режим работы — согласно режиму работы Ozon\", \"font\":\"tsBody300XSmall\", \"color\":\"textSecondaryInverted\"}], \"qaId\":\"about-seller-tooltip\"}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1P0AHItTfOIX8Axd3VUUJDEfJrC0\"}}}], \"onboarding\":{\"settings\":{\"duration\":\"20\", \"delay\":\"5\"}, \"banner\":{\"title\":{\"text\":\"Магазин теперь здесь\", \"textColor\":\"textPrimaryInverted\", \"typographyToken\":\"tsCompact500Medium\"}, \"subtitle\":{\"text\":\"Смотрите информацию о нём и подписывайтесь, чтобы не пропустить новинки\", \"textColor\":\"textSecondaryInverted\", \"typographyToken\":\"tsBody400Small\"}, \"image\":\"https://ir.ozone.ru/s3/pdp-api/new_shop_onboarding_icon.png\", \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1P7mxX0GdoZqnWjzpzEjfW6_Yxjc\"}}}}, \"trustFactorsSettings\":{\"trustFactorsToShow\":3, \"showMoreBlock\":{\"settings\":{\"disableSeparator\":true}, \"centerBlock\":{\"title\":{\"text\":\"Ещё о магазине\", \"textColor\":\"textAction\", \"typographyToken\":\"tsCompactControl400Small\", \"maxLines\":1, \"truncatingMode\":\"TAIL\"}}, \"rightBlock\":{\"alignment\":\"ALIGNMENT_CENTER\", \"leftPadding\":\"PADDING_300\", \"icon\":{\"size\":\"SIZE_300\", \"shape\":\"SHAPE_NONE\", \"icon\":{\"icon\":\"ic_s_circle_chevron_down_filled\", \"tintColor\":\"graphicNeutral\"}}}, \"common\":{\"testInfo\":{\"automatizationId\":\"more-features\"}}}, \"hoverColorIcon\":\"bgActivePrimary\", \"hoverColorTitle\":\"textActiveAction\"},\"params\":{\"enableOnboarding\":true,\"loadingWithWebDelivery\":true,\"maxCharsInTitle\":21,\"maxCharsInTitleWithIcon\":19,\"onboardingBeforeShowTime\":5,\"onboardingBody\":\"Смотрите информацию о нём и подписывайтесь, чтобы не пропустить новинки\",\"onboardingShowTime\":20,\"onboardingTitle\":\"Магазин теперь здесь\",\"ordersCountMinOrdersToDisplay\":1000,\"ozonRussiaGradientEnable\":true,\"titleWidget\":\"Магазин\",\"trustfactorsLimit\":3}}",
+    "webReviewProductScore-3132021-default-1": "{\"cellTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"0\"},\"view\":{\"actionType\":\"view\",\"key\":\"1\"}},\"url\":\"\",\"score\":null,\"reviewsCount\":0,\"itemId\":4043104665,\"totalScore\":0,\"isHidden\":false,\"constants\":{\"emptyScoreText\":\"Нет оценок\",\"reviewsTextEmpty\":\"Оставить отзыв\",\"reviewsTextExist\":\"0 отзывов\"},\"lmtParams\":{\"displayType\":\"simple\",\"anchorUrl\":\"?tab=reviews#comments--offset-130\"}}",
+    "webPdpGrid-3572555-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"57.3%\"}",
+    "column-3155453-default-1": "{\"collapseIfEmpty\":true}",
+    "column-347761-default-1": "{}",
+    "webPdpGrid-3292468-default-1": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"start\",\"betweenMargin\":\"2\",\"direction\":\"column\",\"wrap\":\"nowrap\",\"width\":\"388px\"}",
+    "webDelivery-8727767-default-1": "{}",
+    "paginator-658722-default-1": "{\"nextPage\":\"/product/4043104665?__rr=1&layout_container=pdpPage2column&layout_page_index=2&sh=ajD-Q4JkeQ&start_page_id=d41ccdc52c8b1273fa90fb3c7ebd51f4\",\"size\":10,\"offsetTop\":1500,\"fetchType\":\"scroll\",\"minHeight\":3000,\"isContentVisibilityAuto\":true,\"layoutContainer\":\"pdpPage2column\"}",
+    "orderInfo-7278501-default-1": "{\"icon\":{\"icon\":{\"size\":\"SIZE_500\",\"shape\":\"SHAPE_NONE\",\"icon\":{\"icon\":\"ic_m_box_filled\",\"tintColor\":\"graphicTertiary\"}},\"subtitle\":{\"text\":\"Заказы\",\"textColor\":\"graphicTertiary\",\"maxLines\":1,\"preset\":\"PRESET_CUSTOM\",\"typographyToken\":\"tsCompact300XSmall\"},\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\",\"link\":\"/my/orderlist/\",\"params\":{\"target\":\"_self\"}},\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1XNIqdyqFrjiaWgpON7-uNuVoapr\"}}}}",
+    "orderTracking-5718167-default-1": "{}",
+    "webPdpGrid-347778-default-1": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"spaceBetween\",\"betweenMargin\":\"12\",\"direction\":\"column\",\"wrap\":\"nowrap\"}",
+    "webPdpGrid-1040994-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"32\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"100%\"}",
+    "webProductHeading-3385933-default-1": "{\"title\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V\", \"rowCount\":3, \"lexemes\":{\"showMore\":\"ещё\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1XSTa5O3EMVnkPWv_Ww5-Ha7o89l\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1XSTa5O3EMVnkPWv_Ww5-Ha7o89l\"}},\"params\":{\"rowsCount\":3}}",
+    "webInstallmentPurchase-11156568-default-1": "{\"sku\":\"4043104665\", \"titleRs\":[{\"type\":\"text\", \"content\":\"без % до 15 октября\", \"font\":\"tsCompactControl400Small\", \"color\":\"textPrimary\"}, {\"type\":\"newLine\"}], \"link\":\"/modal/pdpCreditCardPromo\", \"isWink\":true, \"winkTimeToShow\":\"10000\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1ToY3DwCyaWWWac737AZA7SATq3S\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1ToY3DwCyaWWWac737AZA7SATq3S\"}}, \"colorBlock\":{\"data\":{\"text\":[{\"type\":\"text\", \"content\":\"Оплатить позже\", \"font\":\"tsBodyControl400Small\", \"color\":\"textLightKey\"}]}, \"styles\":{\"backgroundColor\":\"bgMarketingPrimary\", \"paddings\":{\"topPadding\":\"6px\", \"bottomPadding\":\"6px\", \"leftPadding\":\"8px\", \"rightPadding\":\"8px\"}}},\"params\":{\"BaseAnimationTimer\":10,\"borderRadius\":\"0 0 12px 12px\",\"headerTitle\":\"Оплачивайте позже\",\"headerWithBadgeEnable\":true,\"highPrice\":0,\"highPriceAnimationTimer\":10,\"iconBNPLEnableName\":true,\"installmentAnimation\":true,\"margin\":\"\",\"mode\":\"modal\",\"onboardingBNPL\":true,\"onboardingCreditCard\":true,\"onboardingTimerBefore\":85,\"onboardingTimerViewing\":20,\"onboardingWithoutOverpayments\":false,\"onboardingZeroRublesToday\":false,\"width\":\"calc(100% + 24px)\"}}",
+    "webPdpGrid-3292467-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"24\",\"verticalPadding\":\"12\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+    "searchBarDesktop-3414131-default-1": "{\"global\":{\"contextTitle\":\"Везде\",\"placeholder\":\"Искать на Ozon\",\"link\":\"/search/?text={value}&from_global=true\",\"isGlobal\":true,\"searchTrackingInfo\":{\"click\":{\"actionType\":\"search\",\"key\":\"1huh1S3zcMmGd8JozaTmqic00EZvwThE\"}},\"searchByPlaceholderTrackingInfo\":{\"click\":{\"actionType\":\"search\",\"key\":\"1huh1S3Eem8Y3ZpMKsPvhsWvl2hQCOBv\"}}},\"text\":\"\",\"urlSearchContextPopup\":\"/modal/contextPopup\",\"searchBarPerf\":\"\",\"lexems\":{\"search\":\"Поиск\"},\"abFeatures\":{\"uiFiltersPersistenceConfig\":\"{\\\\\\\"pageTypes\\\\\\\":[\\\\\\\"search\\\\\\\",\\\\\\\"category\\\\\\\"],\\\\\\\"filters\\\\\\\":[\\\\\\\"currency_price\\\\\\\",\\\\\\\"delivery\\\\\\\",\\\\\\\"is_promo\\\\\\\",\\\\\\\"brandcertified\\\\\\\",\\\\\\\"is_installment\\\\\\\",\\\\\\\"is_official_brand_seller\\\\\\\",\\\\\\\"color\\\\\\\",\\\\\\\"type\\\\\\\",\\\\\\\"is_high_rating\\\\\\\",\\\\\\\"seller\\\\\\\",\\\\\\\"has_points_from_reviews\\\\\\\",\\\\\\\"stars_loyalty\\\\\\\",\\\\\\\"is_made_in_russia\\\\\\\",\\\\\\\"filtersizeru\\\\\\\",\\\\\\\"russiansizeshoes\\\\\\\",\\\\\\\"filtersizehght\\\\\\\"]}\"},\"searchByImage\":{\"buttonTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1WH_A5TWhFrl0iCHnzYXS1Eksd3J\"}},\"tooltipText\":\"Поиск по фото\",\"dropdown\":{\"image\":\"https://ir.ozone.ru/s3/common-image-storage/bx/camera-with-frames_m.png\",\"text\":[{\"text\":\"Перетащите или \",\"typographyToken\":\"tsCompactControl500Medium\"},{\"text\":\"загрузите фото\",\"textColor\":\"textAction\",\"typographyToken\":\"tsCompactControl500Medium\"}],\"urlForm\":{\"placeholder\":\"Вставьте изображение или URL-ссылку\",\"submitTitle\":\"Найти\"},\"spinnerTrackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1VEIYTg8QZbKvMnaNd5ppbS5S29u\"}},\"crop\":{\"submitTitle\":\"Найти\",\"submitTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1SWUeaJtJ7zPAjgThPXxLIKQdpNu\"}},\"backTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1NzOnOeLnfjd4dK8I4GNjTPpN83I\"}},\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1-3v039zT2cVd8da78g4eQANmhDX\"}},\"title\":\"Выберите область с товаром\",\"submitAction\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_ACTION\",\"link\":\"searchByImage\",\"id\":\"searchByImage\"},\"minCropResolution\":60}},\"onboarding\":{\"image\":\"https://ir.ozone.ru/s3/common-image-storage/bx/camera-gray_m.png\",\"title\":\"Теперь товары можно найти по фото\",\"badgeLabel\":\"new\",\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1P6w92juEycnNabi4g6H2bvp-RaW\"},\"view\":{\"actionType\":\"view\",\"key\":\"1huh1P6w92juEycnNabi4g6H2bvp-RaW\"}},\"crossTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1MUtQtsVkH7hVoDKtlIyydVJEFNk\"}}},\"errorNotification\":{\"title\":\"Не удалось загрузить фото\",\"subtitle\":\"Попробуйте еще раз\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1N_Yy5gejhpQmRdbTaRz-Mp9b2pN\"}}},\"preset\":\"NEGATIVE\"},\"errorNotificationFileTypeInvalid\":{\"title\":\"Некорректный формат файла\",\"subtitle\":\"Поддерживаются форматы JPEG, PNG, WEBP\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1YNc8qRS12WrURjrQAatR60CaaBI\"}}},\"preset\":\"NEGATIVE\"},\"errorNotificationUrl\":{\"title\":\"Не удалось открыть ссылку\",\"subtitle\":\"Попробуйте еще раз\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1VvvSPWEkPYfh0OuUoSRspE8nf8U\"}}},\"preset\":\"NEGATIVE\"},\"errorNotificationUrlInvalid\":{\"title\":\"Введите корректный URL изображения\",\"subtitle\":\"Попробуйте еще раз\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1SZCDRUNSkrhiLXuIC7rwzcu15Ss\"}}},\"preset\":\"NEGATIVE\"},\"errorNotificationMaxFileSizeExceeded\":{\"title\":\"Слишком большой размер изображения\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1PmdwxirbycRnEiXAeSLZNKPw4c3\"}}},\"preset\":\"NEGATIVE\"},\"maxFileSize\":4194304,\"errorNotificationMinResolutionNotMet\":{\"title\":\"Слишком низкое качество изображения\",\"subtitle\":\"Попробуйте выбрать фото с большим разрешением\",\"common\":{\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"1huh1WvYYvzlEZ-jHgbt1WpwY5bahLqg\"}}},\"preset\":\"NEGATIVE\"},\"minResolution\":60,\"uploadAction\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\",\"link\":\"searchByImageUpload\",\"id\":\"searchByImageUpload\"}},\"minTextLength\":2,\"searchBarStyles\":{\"mainColor\":\"bgActionPrimary\",\"textHoverColor\":\"graphicActiveActionPrimary\"}}",
+    "row-3155454-default-1": "{}",
+    "webPdpGrid-3572557-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"24\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"100%\",\"contentGrow\":true}",
+    "webMarketingLabels-3311625-default-1": "{\"labels\":[{\"badge\":{\"text\":\"+1500 морковок\", \"image\":\"ic_m_carrot_filled\", \"tintColor\":\"textMarketing\", \"iconTintColor\":\"graphicWarningPrimary\", \"backgroundColor\":\"bgOpaqueMarketingSecondary\", \"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\", \"link\":\"/modal/prizeUnitsBadge\"}, \"theme\":\"STYLE_TYPE_MEDIUM\", \"iconPosition\":\"ICON_POSITION_LEFT\", \"accessory\":{\"icon\":\"ic_s_disclosure_compact\", \"iconTintColor\":\"textMarketing\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Us6fgAerraWhZv4SdWjczglqpEQ\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1V7NphnYv3xjRnEMEkm-EO67fy0V\"}}}, {\"badge\":{\"text\":\"Цена что надо\", \"image\":\"ic_s_like_filled_compact\", \"tintColor\":\"textPositive\", \"iconTintColor\":\"graphicPositivePrimary\", \"backgroundColor\":\"bgOpaquePositiveSecondary\", \"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\", \"link\":\"/modal/good_price\"}, \"theme\":\"STYLE_TYPE_MEDIUM\", \"iconPosition\":\"ICON_POSITION_LEFT\", \"accessory\":{\"icon\":\"ic_s_disclosure_compact\", \"iconTintColor\":\"textPositive\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Us6fgAerraWhZv4SdWjczglqpEQ\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1V7NphnYv3xjRnEMEkm-EO67fy0V\"}}}], \"cellTrackingInfo\":{\"uis\":{\"click\":\"1huh1Us6fgAerraWhZv4SdWjczglqpEQ\", \"scroll\":\"1huh1OzG_GUnIjqjbWrf6egY5JU0DJKV\", \"view\":\"1huh1V7NphnYv3xjRnEMEkm-EO67fy0V\"}},\"params\":{\"maxLabelCount\":3,\"theme\":\"default\"}}",
+    "row-702923-default-1": "{}",
+    "webPdpGrid-3292425-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"4\",\"verticalPadding\":\"8\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"388px\"}",
+    "webQuestionCount-3132022-default-1": "{\"cellTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1OBWTKKGPoQDQxXJplNpmsZnGvNo\"},\"view\":{\"actionType\":\"view\",\"key\":\"1huh1OBWTKKGPoQDQxXJplNpmsZnGvNo\"}},\"link\":\"https://www.ozon.ru/product/4043104665questions/\",\"text\":\"1 вопрос\",\"lmtParams\":{\"anchorUrl\":\"?tab=questions#comments--offset-130\"}}",
+    "row-347762-default-1": "{}",
+    "webPdpGrid-3412662-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"0\"}",
+    "webPdpGrid-3412664-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"stretch\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"0\"}",
+    "footer-347823-default-1": "{\"newFooter\":{\"share\":{\"image\":\"https://ir.ozone.ru/s3/cms/89/tad/qr-code_1_1.png\", \"description\":{\"text\":\"Наведите камеру и скачайте бесплатное приложение Ozon\", \"textColor\":\"textTertiary\", \"typographyToken\":\"tsBody400Small\"}}, \"columns\":[{\"links\":[{\"link\":\"https://corp.ozon.ru/\", \"title\":{\"text\":\"Об Ozon / About Ozon\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"0\"}}}, {\"link\":\"https://docs.ozon.ru/common/kontakty/\", \"title\":{\"text\":\"Контакты\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1\"}}}, {\"link\":\"https://docs.ozon.ru/legal/personal-data/\", \"title\":{\"text\":\"Политика обработки данных\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"2\"}}}]}, {\"links\":[{\"link\":\"https://docs.ozon.ru/common/oplata/payment-ways/\", \"title\":{\"text\":\"Оплата\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"3\"}}}, {\"link\":\"https://docs.ozon.ru/common/dostavka/sposoby-dostavki/\", \"title\":{\"text\":\"Доставка\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"4\"}}}, {\"link\":\"https://docs.ozon.ru/common/otmena-i-vozvrat-zakaza/kak-vernut-tovar/\", \"title\":{\"text\":\"Возврат товаров\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"5\"}}}]}, {\"links\":[{\"link\":\"https://ozon.by/\", \"title\":{\"text\":\"Ozon Беларусь\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"6\"}}}, {\"link\":\"https://ozon.kz/\", \"title\":{\"text\":\"Ozon Казахстан\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"7\"}}}, {\"link\":\"https://www.ozon.uz/\", \"title\":{\"text\":\"Ozon Узбекистан\", \"textColor\":\"textSecondary\", \"maxLines\":1, \"typographyToken\":\"tsBody400Small\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"8\"}}}]}], \"copyright\":{\"link\":\"//docs.ozon.ru/legal/terms-of-use/site/content-policy/?perehod=footer\", \"title\":{\"text\":\"1998 – 2026 ООО\\u0026nbsp;\\\"Интернет Решения\\\" (Входит\\u0026nbsp;в\\u0026nbsp;группу компаний МКПАО \\\"Озон\\\" (Ozon)). Все\\u0026nbsp;права\\u0026nbsp;защищены. \", \"textColor\":\"textTertiary\", \"typographyToken\":\"tsBody400Small\"}, \"description\":{\"text\":\"Применяются \\u003ca href=\\\"https://docs.ozon.ru/legal/terms-of-use/site/algorithms/\\\"\\u003e рекомендательные технологии\\u003c/a\\u003e\", \"textColor\":\"textTertiary\", \"typographyToken\":\"tsBody400Small\"}}, \"socialButtons\":[{\"size\":\"SIZE_500\", \"styleType\":\"CUSTOM\", \"buttonShape\":\"SHAPE_SQUARE\", \"icon\":\"ic_m_vk_filled\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"https://vk.com/ozon/?perehod=footer\", \"params\":{\"target\":\"_blank\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"9\"}}, \"testInfo\":{\"automatizationId\":\"VK\"}}, \"iconColor\":\"graphicTertiary\", \"backgroundColor\":\"bgOverlap\"}, {\"size\":\"SIZE_500\", \"styleType\":\"CUSTOM\", \"buttonShape\":\"SHAPE_SQUARE\", \"icon\":\"ic_m_odnoklassniki_filled\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"https://ok.ru/ozon/?perehod=footer\", \"params\":{\"target\":\"_blank\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"10\"}}, \"testInfo\":{\"automatizationId\":\"Одноклассники\"}}, \"iconColor\":\"graphicTertiary\", \"backgroundColor\":\"bgOverlap\"}, {\"size\":\"SIZE_500\", \"styleType\":\"CUSTOM\", \"buttonShape\":\"SHAPE_SQUARE\", \"icon\":\"ic_m_telegram_filled\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"https://t.me/ozonru/?perehod=footer\", \"params\":{\"target\":\"_blank\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"11\"}}, \"testInfo\":{\"automatizationId\":\"Telegram\"}}, \"iconColor\":\"graphicTertiary\", \"backgroundColor\":\"bgOverlap\"}], \"accessibilityButton\":{\"size\":\"SIZE_500\", \"title\":\"Для слабовидящих\", \"icon\":\"ic_m_visually_impaired_filled\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\", \"id\":\"accessibilityMode\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"12\"}}}}, \"hoverColor\":\"textAction\", \"legalTerms\":{\"textColor\":\"textTertiary\", \"textAlignment\":\"CENTER\", \"typographyToken\":\"tsBody400Small\"}, \"backgroundColor\":\"layerFloor0\"}}",
+    "column-347779-default-1": "{}",
+    "header-7278143-default-1": "{\"logo\":{\"link\":\"/\", \"image\":\"https://ir.ozone.ru/s3/cms/d2/t26/logo_ozon_1.png\"}, \"isRedesignHeader\":true}",
+    "horizontalMenu-7302642-default-1": "{\"menuId\":\"168\", \"items\":[{\"id\":\"3\", \"title\":\"Ozon fresh\", \"link\":\"/category/supermarket-25000/?miniapp=supermarket\", \"icon\":\"ic_s_food_filled\", \"color\":\"#00a6a6\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"0\"}}, \"isSeparator\":false}, {\"id\":\"5\", \"title\":\"Ozon Банк\", \"link\":\"https://ozon.ru/fintech/signin\", \"icon\":\"ic_s_card_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1\"}}, \"isSeparator\":false}, {\"id\":\"6\", \"title\":\"Билеты, отели\", \"link\":\"https://www.ozon.ru/travel/?mwc_campaign=oztravel_horizontal-menu_flight\", \"icon\":\"ic_s_plane_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"2\"}}, \"isSeparator\":false}, {\"id\":\"7\", \"title\":\"Для бизнеса\", \"icon\":\"ic_s_legal_entity_filled\", \"hasChildItems\":true, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"3\"}}, \"isSeparator\":false}, {\"id\":\"8\", \"title\":\"Одежда\", \"link\":\"/category/odezhda-obuv-i-aksessuary-7500/\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"4\"}}, \"isSeparator\":false}, {\"id\":\"9\", \"title\":\"Электроника\", \"link\":\"/category/elektronika-15500/\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"5\"}}, \"isSeparator\":false}, {\"id\":\"10\", \"title\":\"Дом и сад\", \"link\":\"/category/dom-i-sad-14500/\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"6\"}}, \"isSeparator\":false}, {\"id\":\"12\", \"title\":\"Товары за 1₽\", \"link\":\"https://www.ozon.ru/highlight/ozon-bank-1332387/\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"7\"}}, \"isSeparator\":false}, {\"id\":\"13\", \"title\":\"Сертификаты\", \"link\":\"https://www.ozon.ru/landing/giftcertificates/?perehod=headerdesk\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"8\"}}, \"isSeparator\":false}], \"redesign\":true}",
+    "bannerCarousel-3583103-default-1": "{\"width\":1440, \"height\":32, \"isDark\":true, \"openItemLinkInNewTab\":true, \"items\":[{\"image\":\"https://ir.ozone.ru/s3/cms/31/t98/v_rossii_432096_2.jpg\", \"link\":\"/highlight/sdelano-v-rossii-1097658/\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1SRZURbJTMCPBMcAydJeDQxZnCMg\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1SRZURbJTMCPBMcAydJeDQxZnCMg\"}}, \"align\":\"ALIGN_CENTER\"}]}",
+    "webPdpGrid-3572556-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"calc(100% - 57.3% - 24px)\"}",
+    "webQuestionCount-3386433-default-1": "{\"icon\":\"ic_s_questions_and_answers_filled\",\"iconColor\":\"graphicTertiary\",\"text\":\"1 вопрос\",\"textColor\":\"textSecondary\",\"link\":\"https://www.ozon.ru/product/4043104665questions/\",\"size\":\"500\",\"anchorUrl\":\"?tab=questions#comments--offset-130\",\"cellTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1OBWTKKGPoQDQxXJplNpmsZnGvNo\"},\"view\":{\"actionType\":\"view\",\"key\":\"1huh1OBWTKKGPoQDQxXJplNpmsZnGvNo\"}}}",
+    "separator-3508186-default-1": "{\"height\":24}",
+    "webStickyColumn-3572634-default-1": "{\"offsetTop\":\"64px\", \"viewportOffset\":64,\"params\":{\"offsetBottom\":\"\",\"offsetTop\":\"64px\",\"viewportOffset\":64}}",
+    "breadCrumbs-3385917-default-1": "{\"breadcrumbs\":[{\"text\":\"Автотовары\", \"link\":\"/category/avtotovary-8500/\", \"crumbType\":\"CRUMB_TYPE_FULL_LINK\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1WqAAt8arvmfl4zSPtwUMB0oQ_xG\"}}}, {\"text\":\"Мототовары\", \"link\":\"/category/mototehnika-i-ekipirovka-8719/\", \"crumbType\":\"CRUMB_TYPE_FULL_LINK\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1YPRYUhOxUb46hBKLKH7N6at3Adw\"}}}, {\"text\":\"Мотошины\", \"link\":\"/category/motoshiny-8505/\", \"crumbType\":\"CRUMB_TYPE_FULL_LINK\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1WFxPYW6vZUmNhrL4G4pMxheoO6C\"}}}, {\"text\":\"MICHELIN\", \"link\":\"/category/motoshiny-8505/michelin-30315461/\", \"crumbType\":\"CRUMB_TYPE_FULL_LINK\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Y-j-xwEF6NBUFTMxoPnvwt6nMgY\"}}}], \"connectSymbol\":\">\", \"isFull\":true}",
+    "webPdpGrid-3311650-default-1": "{\"direction\":\"column\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"stretch\",\"betweenMargin\":\"0\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"calc(100% - 420px)\"}",
+    "addressBookBarWeb-7278510-default-1": "{\"customCell\":{\"actionMode\":\"individual\",\"cells\":[{\"type\":\"button\",\"button\":{\"text\":\"Москва\",\"theme\":\"empty\",\"size\":\"m\",\"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\",\"link\":\"/modal/addressbook?set_sm=1\",\"id\":\"addressbook\",\"params\":{\"closeAction\":\"{\\\"behavior\\\":\\\"BEHAVIOR_TYPE_REFRESH\\\"}\",\"closeButtonPosition\":\"outside\"}},\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"0\"}},\"textStyle\":\"tsBodyControl400Small\",\"textColor\":\"textSecondary\"},\"shrinkPosition\":\"right\"},{\"type\":\"button\",\"button\":{\"text\":\"Укажите адрес\",\"theme\":\"inline\",\"size\":\"m\",\"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\",\"link\":\"/modal/addressbook?set_sm=1\",\"id\":\"addressbook\",\"params\":{\"closeAction\":\"{\\\"behavior\\\":\\\"BEHAVIOR_TYPE_REFRESH\\\"}\",\"closeButtonPosition\":\"outside\"}},\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1\"}}}}],\"separator\":{\"text\":\"&bull;\",\"textStyle\":\"tsBodyControl400Small\",\"textColor\":\"textSecondary\"}},\"trackingInfo\":{\"view\":{\"actionType\":\"view\",\"key\":\"2\",\"nested\":[]}},\"geoAction\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_ACTION\",\"link\":\"v2/addressBookBarTooltip?prv=pdp&set_sm=1\"},\"addressBookBarRedesign\":true}",
+    "column-702922-default-1": "{\"basis\":9,\"collapseIfEmpty\":true}",
+    "webAddToFavorite-3291427-default-1": "{\"sku\":\"4043104665\", \"lexemes\":{\"ariaLabelAddText\":\"Добавить в избранное\", \"ariaLabelClearText\":\"Убрать из избранного\"}, \"cellTrackingInfo\":{\"products\":{\"main\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"uis\":{\"favoriteTooltip\":\"1huh1-eaQx7MOPO3EayIMIEYuo457GF8\"}}, \"trackingInfo\":{\"favorite\":{\"actionType\":\"favorite\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"unfavorite\":{\"actionType\":\"unfavorite\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1-eaQx7MOPO3EayIMIEYuo457GF8\"}},\"params\":{\"btnText\":\"В избранное\",\"btnTextActive\":\"В избранном\",\"classifiedAction\":false,\"favoriteTooltipIsShow\":true,\"favoriteTooltipSrcImg\":\"https://ir.ozone.ru/s3/pdp-api/heart-blue_m.png\",\"favoriteTooltipText\":\"Добавьте в избранное\",\"favoriteTooltipTimeForShow\":10,\"favoriteTooltipTimeToShow\":210,\"favoriteTooltipTitle\":\"Понравился товар?\",\"theme\":\"apparel\"}}",
+    "webBestSeller-4993840-default-1": "{\"textRs\":[{\"type\":\"textGray\", \"content\":\"Есть быстрее\"}, {\"type\":\"newLine\"}, {\"type\":\"textMediumBold\", \"content\":\"от 17 029 ₽\"}], \"count\":\"20\", \"image\":\"https://ir.ozone.ru/s3/multimedia-1-r/7673175351.jpg\", \"cellTrackingInfo\":{\"products\":{\"click\":\"1huh1R0Buzok2nm_7z8fz1dM28c3pYDd\", \"view\":\"1huh1R0Buzok2nm_7z8fz1dM28c3pYDd\"}}, \"modalLink\":\"/modal/otherOffersFromSellers?product_id=4043104665&sort=date\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1R0Buzok2nm_7z8fz1dM28c3pYDd\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1R0Buzok2nm_7z8fz1dM28c3pYDd\"}},\"params\":{\"mode\":\"cheaperOrFasterWithModal\",\"popoverPlacement\":\"top\",\"popoverText\":\"\"}}",
+    "webPdpGrid-726427-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"spaceBetween\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\",\"width\":\"350px\"}",
+    "selectedCurrencyLanguage-7278511-default-1": "{\"icon\":\"ic_m_flag_russia\", \"language\":\"RU\", \"action\":{\"behavior\":\"BEHAVIOR_TYPE_COMPOSER_NESTED_PAGE\", \"link\":\"/modal/selectLanguageCurrency\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1MtyWzdpoB7pXNY5OkiRYZMQIQgV\"}}, \"testInfo\":{\"automatizationId\":\"selected-currency-language\"}}",
+    "container-347815-default-1": "{}",
+    "webAddToCompare-3385612-default-1": "{\"button\":{\"iconName\":\"ic_s_compare_default_filled\",\"iconColor\":\"graphicTertiary\",\"text\":\"В сравнение\",\"textColor\":\"textSecondary\",\"mode\":\"inline\",\"hoverTextColor\":\"textActiveAction\",\"hoverIconColor\":\"graphicActiveActionPrimary\",\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1S4J737qA8HpxvSM_VTrfVdS_W-F\"}},\"testInfo\":{\"automatizationId\":\"pdp-compare-button\"}},\"addAction\":\"actionAddToCompare\",\"actionData\":{\"sku\":\"4043104665\"},\"notification\":{\"error\":{\"type\":\"warning\",\"icon\":\"ic_m_confirmed_filled\",\"iconColor\":\"graphicPositivePrimary\",\"content\":\"Что-то с интернетом\"}},\"trackingInfo\":{\"compare\":{\"actionType\":\"compare\",\"key\":\"1huh1RTV0ssXIwpWt-u82KCVmTGYW8KR\"},\"view\":{\"actionType\":\"view\",\"key\":\"1huh1RTV0ssXIwpWt-u82KCVmTGYW8KR\"}},\"params\":{\"buttonText\":\"В сравнение\",\"buttonTextActive\":\"В сравнении\",\"displayMode\":\"inline\",\"notificationButtonTextGoTo\":\"Перейти в сравнение\",\"notificationTextBadInternet\":\"Что-то с интернетом\",\"notificationTextManySku\":\"В сравнении много товаров\",\"notificationTextSuccess\":\"Добавлено в сравнение\",\"notificationTextTryAgain\":\"Удалите лишние и попробуйте снова\"}}",
+    "webPdpGrid-296982-default-1": "{\"alignCrossAxis\":\"stretch\",\"alignMainAxis\":\"start\",\"betweenMargin\":\"24\",\"direction\":\"column\",\"wrap\":\"nowrap\",\"backgroundColor\":\"transparent\",\"horizontalPadding\":\"0\",\"verticalPadding\":\"0\"}",
+    "webAddToCart-8707205-default-1": "{\"firstButton\":{\"isInCart\":false, \"toCart\":{\"backgroundColor\":\"bgActionPrimary\", \"cornerRadius\":\"RADIUS_500\", \"title\":{\"text\":\"В корзину\", \"textColor\":\"textLightKey\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsBodyControl500Medium\", \"testInfo\":{\"automatizationId\":\"pdp-add-to-cart-title\"}}, \"action\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\", \"id\":\"addToCart\", \"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"to_cart\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}, \"asyncFetchType\":\"SUBTITLE\", \"buttonHoverColor\":\"bgActiveActionPrimary\", \"testInfo\":{\"automatizationId\":\"saleblock-add-to-cart-button\"}}, \"inCart\":{\"backgroundColor\":\"bgPositivePrimary\", \"cornerRadius\":\"RADIUS_500\", \"title\":{\"text\":\"В корзине\", \"textColor\":\"textLightKey\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsBodyControl500Medium\", \"testInfo\":{\"automatizationId\":\"pdp-add-in-cart-title\"}}, \"subtitle\":{\"text\":\"Перейти\", \"textColor\":\"textPrimaryOnDark\", \"textAlignment\":\"CENTER\", \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsCompact400Small\", \"testInfo\":{\"automatizationId\":\"pdp-add-in-cart-subtitle\"}}, \"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"/cart\", \"id\":\"toCheckout\", \"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"toCart\", \"key\":\"1huh1NyN_xzRRJix8FwBtg6cUZfwgjvq\"}}, \"asyncFetchType\":\"SUBTITLE\", \"buttonHoverColor\":\"bgActivePositivePrimary\", \"testInfo\":{\"automatizationId\":\"button-go-to-cart\"}}, \"additionalButton\":{\"incrementButton\":{\"action\":{\"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"increment\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}}, \"decrementButton\":{\"action\":{\"params\":{\"sku\":\"4043104665\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"decrement\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\", \"sliceKey\":\"1xuh1ZEVE-VuqQIdcBm_XVlw692LS0s9\"}}}, \"countPicker\":{\"size\":\"SIZE_600\", \"sizing\":\"SIZING_HUG\", \"styleType\":\"CUSTOM\", \"customStyle\":{\"backgroundColor\":\"bgSecondary\"}}}, \"sku\":\"4043104665\", \"freeRest\":310, \"minAddToCartQuantity\":1, \"inCartQuantity\":0}, \"asyncAction\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\", \"link\":\"pdpGetButtonTexts?product_id=4043104665\", \"id\":\"asyncDatesRequest\", \"params\":{\"hideQuantButton\":\"false\", \"inCartPosition\":\"subtitle\", \"toCartPosition\":\"subtitle\"}}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1X7rnrN_uE0LCIRhKLDKfeAwoKZt\"}}, \"webData\":{\"tooltipTextOutOfFreeRest\":{\"text\":\"В наличии больше нет\", \"textColor\":\"textPrimaryOnDark\", \"typographyToken\":\"tsBody400Small\"}}}",
+    "webDetailSKU-3385551-default-1": "{\"notification\":{\"success\":{\"type\":\"success\", \"icon\":\"ic_m_confirmed_filled\", \"iconColor\":\"graphicPositivePrimary\", \"content\":\"Артикул скопирован\"}, \"error\":{\"type\":\"error\", \"icon\":\"ic_m_cancel_filled\", \"iconColor\":\"graphicWarningPrimary\", \"content\":\"Ошибка при копировании артикула\"}}, \"button\":{\"iconName\":\"ic_s_copy_filled\", \"iconColor\":\"graphicTertiary\", \"text\":\"Артикул: 4043104665\", \"mode\":\"inline\", \"hoverTextColor\":\"textActiveAction\", \"hoverIconColor\":\"graphicActiveActionPrimary\", \"backgroundHoverColor\":\"bgActiveActionSecondary\"}, \"copyText\":\"4043104665\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Q3yQbzt8fxG3yi-Su4QKMP74zf_\"}, \"show\":{\"actionType\":\"show\", \"key\":\"1huh1Q3yQbzt8fxG3yi-Su4QKMP74zf_\"}, \"view\":{\"actionType\":\"view\", \"key\":\"1huh1Q3yQbzt8fxG3yi-Su4QKMP74zf_\"}},\"params\":{\"buttonMode\":\"inline\",\"isFreshColorsEnabled\":true}}",
+    "headerIcon-7278503-default-1": "{\"icon\":\"ic_m_grocery_cart_filled\",\"subtitle\":\"Корзина\"}",
+    "webPdpGrid-3386314-default-1": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+    "separator-3422630-default-1": "{\"height\":8}",
+    "webAddToCompare-939214-default-1": "{\"sku\":\"4043104665\",\"cellTrackingInfo\":{\"products\":{\"4043104665\":\"1huh1Y6AICetrpZLUy1N_pmq4FGJlU1P\"},\"uis\":{\"actionAddToCompare\":\"1huh1WSnAOM3mQDgzJX83yqCURAuM2Ew\",\"actionRemoveFromCompare\":\"1huh1ZAgJ4Sry5Ofmza2qIgWh8RC0K_W\",\"click\":\"1huh1-P3HmZvqOX4KWOGoiiMtW0G4yUI\",\"view\":\"1huh1OlI6c68mcxC_KqOz8lEU91_aqQR\"}},\"trackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"1huh1S4J737qA8HpxvSM_VTrfVdS_W-F\"},\"compare\":{\"actionType\":\"compare\",\"key\":\"1huh1Y6AICetrpZLUy1N_pmq4FGJlU1P\"},\"view\":{\"actionType\":\"view\",\"key\":\"1huh1RTV0ssXIwpWt-u82KCVmTGYW8KR\"}},\"params\":{\"btnText\":\"Сравнивать\",\"btnTextActive\":\"В сравнение\",\"productAdded\":\"Товар добавлен в сравнение.\",\"theme\":\"theme1\",\"tooMuchText\":\"Вы добавили в сравнение максимальное количество товаров\"}}",
+    "separator-909632-default-1": "{\"height\":20}",
+    "catalogMenu-7278490-default-1": "{\"menuId\":\"185\", \"categories\":[{\"id\":\"15500\", \"title\":\"Электроника\", \"url\":\"/category/elektronika-15500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/electronics_15500.png\", \"icon\":\"ic_m_electronics_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1\"}}}, {\"id\":\"7500\", \"title\":\"Одежда\", \"url\":\"/category/odezhda-obuv-i-aksessuary-7500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/clothes_7500.png\", \"icon\":\"ic_m_apparel_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"3\"}}}, {\"id\":\"17777\", \"title\":\"Обувь\", \"url\":\"/category/obuv-17777/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/shoes_17777.png\", \"icon\":\"ic_m_shoes_fitting_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"5\"}}}, {\"id\":\"14500\", \"title\":\"Дом и сад\", \"url\":\"/category/dom-i-sad-14500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/house_and_garden_14500.png\", \"icon\":\"ic_m_home_and_garden_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"7\"}}}, {\"id\":\"7000\", \"title\":\"Детские товары\", \"url\":\"/category/detskie-tovary-7000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/for_children_7000.png\", \"icon\":\"ic_m_kids_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"9\"}}}, {\"id\":\"6500\", \"title\":\"Красота и здоровье\", \"url\":\"/category/krasota-i-zdorove-6500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/Beauty_and_care_6500.png\", \"icon\":\"ic_m_beauty_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"11\"}}}, {\"id\":\"10500\", \"title\":\"Бытовая техника\", \"url\":\"/category/bytovaya-tehnika-10500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/household_appliances_10500.png\", \"icon\":\"ic_m_appliances_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"13\"}}}, {\"id\":\"11000\", \"title\":\"Спорт и отдых\", \"url\":\"/category/sport-i-otdyh-11000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/sport_and_rest_11000.png\", \"icon\":\"ic_m_sport_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"15\"}}}, {\"id\":\"9700\", \"title\":\"Строительство и ремонт\", \"url\":\"/category/stroitelstvo-i-remont-9700/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/construction_and_renovation_9700.png\", \"icon\":\"ic_m_repairs_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"17\"}}}, {\"id\":\"9200\", \"title\":\"Продукты питания\", \"url\":\"/category/produkty-pitaniya-9200/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/food_9200.png\", \"icon\":\"ic_m_product_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"19\"}}}, {\"id\":\"6000\", \"title\":\"Аптека\", \"url\":\"/category/apteka-6000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/pharmacy_6000.png\", \"icon\":\"ic_m_pharmacy_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"21\"}}}, {\"id\":\"12300\", \"title\":\"Товары для животных\", \"url\":\"/category/tovary-dlya-zhivotnyh-12300/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/zoo_12300.png\", \"icon\":\"ic_m_pet_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"23\"}}}, {\"id\":\"16500\", \"title\":\"Книги\", \"url\":\"/category/knigi-16500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/books_16500.png\", \"icon\":\"ic_m_book_printed_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"25\"}}}, {\"id\":\"33332\", \"title\":\"Туризм, рыбалка, охота\", \"url\":\"/category/ohota-rybalka-turizm-33332/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/hiking_fishing_hunting_33332.png\", \"icon\":\"ic_m_tourism_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"27\"}}}, {\"id\":\"8500\", \"title\":\"Автотовары\", \"url\":\"/category/avtotovary-8500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/auto_goods_8500.png\", \"icon\":\"ic_m_auto_parts_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"29\"}}}, {\"id\":\"15000\", \"title\":\"Мебель\", \"url\":\"/category/mebel-15000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/furniture_15000.png\", \"icon\":\"ic_m_furniture_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"31\"}}}, {\"id\":\"13500\", \"title\":\"Хобби и творчество\", \"url\":\"/category/hobbi-i-tvorchestvo-13500/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/%D0%BDobbies_and_creativity_13500.png\", \"icon\":\"ic_m_hobby_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"33\"}}}, {\"id\":\"50001\", \"title\":\"Ювелирные украшения\", \"url\":\"/category/yuvelirnye-ukrasheniya-50001/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/jewelry_50001.png\", \"icon\":\"ic_m_jewelry_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"35\"}}}, {\"id\":\"7697\", \"title\":\"Аксессуары\", \"url\":\"/category/aksessuary-7697/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/accessories_7697.png\", \"icon\":\"ic_m_accessories_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"37\"}}}, {\"id\":\"13300\", \"title\":\"Игры и консоли\", \"url\":\"/category/igry-i-soft-13300/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/games_and_consoles_13300.png\", \"icon\":\"ic_m_game_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"39\"}}}, {\"id\":\"18000\", \"title\":\"Канцелярские товары\", \"url\":\"/category/kantselyarskie-tovary-18000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/office_supplies_18000.png\", \"icon\":\"ic_m_stationery_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"41\"}}}, {\"id\":\"9000\", \"title\":\"Товары для взрослых\", \"url\":\"/category/tovary-dlya-vzroslyh-9000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/adult_products_9000.png\", \"icon\":\"ic_m_adult_content_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"43\"}}}, {\"id\":\"8000\", \"title\":\"Антиквариат и коллекционирование\", \"url\":\"/category/antikvariat-vintazh-iskusstvo-8000/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/antiques_8000.png\", \"icon\":\"ic_m_antiques_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"45\"}}}, {\"id\":\"32056\", \"title\":\"Цифровые товары\", \"url\":\"/category/tsifrovye-tovary-32056/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/digital_goods_32056.png\", \"icon\":\"ic_m_digital_product_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"47\"}}}, {\"id\":\"37234\", \"title\":\"Подарочные сертификаты OZON\", \"url\":\"/category/podarochnye-sertifikaty-37234/\", \"image\":\"https://ir.ozone.ru/s3/multimedia-1-z/7354360871.jpg\", \"icon\":\"ic_m_gift_card_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"49\"}}}, {\"id\":\"14572\", \"title\":\"Бытовая химия и гигиена\", \"url\":\"/category/bytovaya-himiya-14572/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/chemicals_14572.png\", \"icon\":\"ic_m_household_chemicals_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"51\"}}}, {\"id\":\"13100\", \"title\":\"Музыка и видео\", \"url\":\"/category/muzyka-i-video-13100/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/music_and_video_13100.png\", \"icon\":\"ic_m_music_and_video_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"53\"}}}, {\"id\":\"39803\", \"title\":\"Автомобили\", \"url\":\"/category/avtomobili-39803/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/cars_39803.png\", \"icon\":\"ic_m_auto_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"55\"}}}, {\"id\":\"35659\", \"title\":\"Товары для курения и аксессуары\", \"url\":\"/category/elektronnye-sigarety-i-tovary-dlya-kureniya-35659/\", \"image\":\"https://ir.ozone.ru/s3/searchteam-cdn/Smoking_products_and_accessories_35659.png\", \"icon\":\"ic_m_electronic_cigarette_filled\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"57\"}}}], \"marketing\":[{\"title\":\"Карта Ozon Банка\", \"url\":\"/highlight/keshbek-do-30-dlya-ozon-schet-i-premium-323369/\", \"image\":\"https://ir.ozone.ru/s3/cms/b8/td9/ozon_bank_logo.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"58\"}}}, {\"title\":\"Билеты, Отели, Туры\", \"url\":\"/travel/?mwc_campaign=ozon_menu_main\", \"deeplink\":\"ozon://travel/?mwc_campaign=ozon_menu_m\", \"image\":\"https://ir.ozone.ru/s3/cms/dd/t79/travel.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"59\"}}}, {\"title\":\"Доставка от 1 часа\", \"url\":\"/highlight/express/\", \"image\":\"https://ir.ozone.ru/s3/cms/0e/tae/express.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"60\"}}}, {\"title\":\"Ozon Premium\", \"url\":\"/highlight/premium/\", \"deeplink\":\"ozon://highlight/premium/\", \"image\":\"https://ir.ozone.ru/s3/cms/9b/t7a/premium.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"61\"}}}, {\"title\":\"Зарубежные товары\", \"url\":\"/highlight/ozon-global-155600/\", \"image\":\"https://ir.ozone.ru/s3/cms/a5/tb8/ic_category_..png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"62\"}}}, {\"title\":\"Подарочные сертификаты\", \"url\":\"https://www.ozon.ru/category/podarochnye-sertifikaty-37234/\", \"deeplink\":\"https://www.ozon.ru/category/podarochnye-sertifikaty-37234/\", \"image\":\"https://ir.ozone.ru/s3/cms/a0/t4c/gifts.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"63\"}}}, {\"title\":\"Цены от 39 ₽\", \"url\":\"/highlight/tovary-narashvat-1789580/\", \"image\":\"https://ir.ozone.ru/s3/cms/2d/t96/150x150_5_1.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"64\"}}}, {\"title\":\"Ozon Забота\", \"url\":\"/special/care\", \"image\":\"https://ir.ozone.ru/s3/cms/c0/t37/zabota.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"65\"}}}, {\"title\":\"Товары в Рассрочку\", \"url\":\"/highlight/20023/\", \"deeplink\":\"ozon://highlight/20023/\", \"image\":\"https://ir.ozone.ru/s3/cms/fc/te2/rassrok.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"66\"}}}, {\"title\":\"Сделано в России\", \"url\":\"/highlight/sdelano-v-rossii-1097658/\", \"deeplink\":\"ozon://highlight/sdelano-v-rossii-1097658/\", \"image\":\"https://ir.ozone.ru/s3/cms/f0/t6a/catalogue_made_in_russia_desk.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"67\"}}}, {\"title\":\"Сделано в Москве\", \"url\":\"/highlight/sdelano-v-moskve-730077/\", \"image\":\"https://ir.ozone.ru/s3/cms/05/t4b/moscoww.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"68\"}}}, {\"title\":\"Сделано в Беларуси\", \"url\":\"/highlight/sdelano-v-belarusi-1541934/\", \"image\":\"https://ir.ozone.ru/s3/cms/f6/t3e/ic_category_._2.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"69\"}}}, {\"title\":\"Товары из Казахстана\", \"url\":\"/highlight/tovary-iz-kazahstana-3939922/\", \"deeplink\":\"ozon://highlight/tovary-iz-kazahstana-3939922/\", \"image\":\"https://ir.ozone.ru/s3/cms/8c/t03/2c6ee16a-5785-4a97-a3fc-5312e4d04ab4.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"70\"}}}, {\"title\":\"Сделано в Кыргызстане\", \"url\":\"/highlight/sdelano-v-kyrgyzstane-4174120/\", \"deeplink\":\"ozon://highlight/sdelano-v-kyrgyzstane-4174120/\", \"image\":\"https://ir.ozone.ru/s3/cms/45/t48/150x150-kyrg.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"71\"}}}, {\"title\":\"Уценённые товары\", \"url\":\"/highlight/utsenennye-tovary-831483/\", \"deeplink\":\"ozon://highlight/utsenennye-tovary-831483/\", \"image\":\"https://ir.ozone.ru/s3/cms/19/tde/sales.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"72\"}}}, {\"title\":\"Экотовары\", \"url\":\"https://www.ozon.ru/realeco\", \"image\":\"https://ir.ozone.ru/s3/cms/8f/t1a/eco.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"73\"}}}, {\"title\":\"Товары Ozon\", \"url\":\"/highlight/ozon-retail-186820/\", \"deeplink\":\"ozon://highlight/ozon-retail-186820/\", \"image\":\"https://ir.ozone.ru/s3/cms/72/t27/ozon_goods.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"74\"}}}, {\"title\":\"Магазины на Ozon\", \"url\":\"/seller/\", \"image\":\"https://ir.ozone.ru/s3/cms/cb/taa/sis-deskv2_1.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"75\"}}}, {\"title\":\"Ozon Merch\", \"url\":\"https://www.ozon.ru/highlight/ozon-merch-4528594/\", \"image\":\"https://ir.ozone.ru/s3/cms/31/t1a/merch.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"76\"}}}, {\"title\":\"Стать продавцом\", \"url\":\"https://seller.ozon.ru/?utm_source=ozonru_web&utm_medium=link&utm_campaign=header_nachat_prodavat_na_ozon/\", \"image\":\"https://ir.ozone.ru/s3/cms/99/t58/seller.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"77\"}}}, {\"title\":\"Открыть ПВЗ\", \"url\":\"https://pvz.ozon.ru/?perehod=catalog_ves_ozon_web\", \"image\":\"https://ir.ozone.ru/s3/cms/d3/tb4/ic_category_pvz_1.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"78\"}}}, {\"title\":\"Ozon для бизнеса\", \"url\":\"/business/\", \"image\":\"https://ir.ozone.ru/s3/cms/7a/t55/for_buisness.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"79\"}}}, {\"title\":\"Создано людьми\", \"url\":\"/highlight/people-make-3179249/\", \"deeplink\":\"ozon://highlight/people-make-3179249/\", \"image\":\"https://ir.ozone.ru/s3/cms/3e/tde/property_1variant2.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"80\"}}}, {\"title\":\"Ozon Клуб\", \"url\":\"/club/\", \"image\":\"https://ir.ozone.ru/s3/cms/fa/t41/style3d.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"81\"}}}, {\"title\":\"Специальные предложения\", \"url\":\"/highlight/spetsproekty-na-ozon-3441747/\", \"deeplink\":\"ozon://highlight/spetsproekty-na-ozon-3441747/\", \"image\":\"https://ir.ozone.ru/s3/cms/89/tf3/navi_icon_custom_48x48.png\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"82\"}}}], \"catalogButton\":{\"button\":{\"styleType\":\"ACTION_PRIMARY\", \"size\":\"SIZE_500\", \"title\":\"Каталог\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_CUSTOM\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"84\"}}}}, \"iconShow\":\"ic_m_catalog_tile_filled\", \"iconClose\":\"ic_m_cross_filled\"}, \"serviceButton\":{\"text\":\"Весь Ozon\", \"image\":\"https://ir.ozone.ru/s3/cms/98/t2c/menu.svg\", \"imageHover\":\"https://ir.ozone.ru/s3/cms/4b/t7b/menuhover.svg\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"83\"}, \"view\":{\"actionType\":\"view\", \"key\":\"83\"}}}, \"onlyRootNodes\":true, \"titleForShowMoreButton\":\"Еще\", \"titleForCloseMoreButton\":\"Свернуть\"}",
+    "webStickyColumn-3572560-default-1": "{\"offsetTop\":\"70px\", \"viewportOffset\":64,\"params\":{\"offsetBottom\":\"\",\"offsetTop\":\"70px\",\"viewportOffset\":64}}",
+    "webSale-2111389-default-1": "{\"offer\":{\"isAvailable\":true, \"offerType\":\"default\"}, \"cellTrackingInfo\":{\"uis\":{\"clickDefault\":\"1huh1QPVjnI3sRjpoDg1Ht-k4vOs7jsQ\", \"ozonCard\":\"1huh1TauuKPTEOMVPQrWIvBgn9L0zqtw\", \"premiumSubscribe\":\"1huh1Oi_vxQRQ81tIbjCYhjvePUMPrq1\", \"view\":\"1huh1QPVjnI3sRjpoDg1Ht-k4vOs7jsQ\"}}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1QPVjnI3sRjpoDg1Ht-k4vOs7jsQ\"}}}",
+    "webPdpGrid-726421-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+    "webSingleProductScore-3386432-default-1": "{\"icon\":\"ic_s_star_filled\",\"iconColor\":\"graphicTertiary\",\"text\":\"Нет отзывов\",\"textColor\":\"textSecondary\",\"size\":\"500\",\"anchorUrl\":\"?tab=reviews#comments--offset-130\",\"cellTrackingInfo\":{\"click\":{\"actionType\":\"click\",\"key\":\"0\"},\"view\":{\"actionType\":\"view\",\"key\":\"1\"}}}",
+    "webPrice-3121879-default-1": "{\"isAvailable\":true, \"cardPrice\":\"16 923 ₽\", \"price\":\"17 637 ₽\", \"showOriginalPrice\":true, \"link\":\"/modal/pdpListOfBanks?product_id=4043104665\", \"lexemes\":{\"currency\":\"Валюта\", \"includeVatTextMobile\":\"Цена с НДС\", \"moreText\":\"Подробнее\", \"notRefundVatText\":\"НДС не возмещается\", \"withOzonCard\":\"С банками\", \"withoutOzonCard\":\"С другими банками\", \"withoutVatText\":\"без НДС\", \"withoutVatTextCapitalize\":\"Без НДС\", \"withoutVatTextMobile\":\"Цена без НДС\"}, \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1XuB-FM2XcBjV8nMdkkE83X5dzdq\"}}, \"trackingInfoOzonBank\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1QIBSVToJ1epbWg8wA3OhVjXIg_4\"}}, \"colorBlockRightContent\":{\"images\":[{\"image\":\"https://ir.ozone.ru/s3/payments-cdn/ozon-price-compact-new-ozon-light.png\", \"aspectRatio\":\"RATIO_1_1\", \"imageWidth\":23, \"cdnSettings\":{\"size\":64}, \"fitType\":\"FIT_CENTER\"}, {\"image\":\"https://ir.ozone.ru/s3/payments-cdn/ozon_other_sovkombank_dark.png\", \"aspectRatio\":\"RATIO_1_1\", \"imageWidth\":20, \"cdnSettings\":{\"size\":64}, \"fitType\":\"FIT_CENTER\"}, {\"image\":\"https://ir.ozone.ru/s3/payments-cdn/ozon_other_royal_black.png\", \"aspectRatio\":\"RATIO_1_1\", \"imageWidth\":20, \"cdnSettings\":{\"size\":64}, \"fitType\":\"FIT_CENTER\"}, {\"image\":\"https://ir.ozone.ru/s3/payments-cdn/ozon_other_otp_light.png\", \"aspectRatio\":\"RATIO_1_1\", \"imageWidth\":20, \"cdnSettings\":{\"size\":64}, \"fitType\":\"FIT_CENTER\"}]},\"params\":{\"ladderPriceHide\":false,\"showPpu\":true,\"withOzonAccount\":\"/modal/withOzonAccount\",\"withOzonAccountLegal\":\"/modal/OzoneAccountForLegal\",\"withoutOzonAccount\":\"/modal/withoutOzonAccount\"}}",
+    "webPdpGrid-3291428-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"8\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"0\",\"backgroundColor\":\"transparent\"}",
+    "favoriteCounter-7278502-default-1": "{\"iconHeader\":{\"icon\":{\"size\":\"SIZE_500\", \"shape\":\"SHAPE_NONE\", \"icon\":{\"icon\":\"ic_m_heart_filled\", \"tintColor\":\"graphicTertiary\"}}, \"subtitle\":{\"text\":\"Избранное\", \"textColor\":\"textTertiary\", \"maxLines\":1, \"preset\":\"PRESET_CUSTOM\", \"typographyToken\":\"tsCompact300XSmall\", \"testInfo\":{\"automatizationId\":\"header-my-ozon-title\"}}, \"counter\":{\"text\":\"0\", \"size\":\"SIZE_500\", \"styleType\":\"ACCENT\"}, \"action\":{\"behavior\":\"BEHAVIOR_TYPE_REDIRECT\", \"link\":\"/my/favorites\"}, \"testInfo\":{\"automatizationId\":\"header-favorites\"}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1MwyOUjp42WGPVfslUBrX4IPXhca\"}}}}",
+    "webPdpGrid-347857-default-1": "{\"direction\":\"row\",\"wrap\":\"nowrap\",\"alignMainAxis\":\"spaceBetween\",\"alignCrossAxis\":\"center\",\"betweenMargin\":\"20\"}",
+    "webPdpGrid-3385615-default-1": "{\"direction\":\"row\",\"wrap\":\"wrap\",\"alignMainAxis\":\"start\",\"alignCrossAxis\":\"start\",\"betweenMargin\":\"12\",\"verticalPadding\":\"0\",\"horizontalPadding\":\"12\",\"backgroundColor\":\"transparent\",\"noContentShrink\":true}",
+    "webShortCharacteristics-3385952-default-1": "{\"titleRs\":[{\"type\":\"text\", \"content\":\"О товаре\", \"font\":\"tsHeadline500Medium\", \"color\":\"textPrimary\"}], \"goTo\":{\"text\":\"Перейти к описанию\", \"styleType\":\"NEUTRAL_PRIMARY\", \"common\":{\"action\":{\"behavior\":\"BEHAVIOR_TYPE_SCROLL_TO_WIDGET\", \"link\":\"section-description\", \"params\":{\"offsetTop\":\"144\"}}, \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1MsiAdjBRSQIZqnMcuyxbXUPnE3W\"}}}}, \"characteristics\":[{\"id\":\"Type_0\", \"title\":{\"textRs\":[{\"type\":\"text\", \"content\":\"Тип\", \"font\":\"tsBodyM\", \"color\":\"textSecondary\"}]}, \"values\":[{\"id\":\"Type_0\", \"text\":\"Шины для мотоциклов\", \"textColor\":\"textPrimary\", \"textStyle\":\"tsBody400Small\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1-XmW7ez1QCdlmQsEpAxo18GO3kF\"}}}]}, {\"id\":\"Seria_auto_1\", \"title\":{\"textRs\":[{\"type\":\"text\", \"content\":\"Серия\", \"font\":\"tsBodyM\", \"color\":\"textSecondary\"}]}, \"values\":[{\"id\":\"Seria_auto_0\", \"text\":\"Michelin Anakee Adventure\", \"textColor\":\"textPrimary\", \"textStyle\":\"tsBody400Small\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1P80HqkghWUm6w2Z8sxjYdIcVCoi\"}}}]}, {\"id\":\"Diameter_Auto_2\", \"title\":{\"textRs\":[{\"type\":\"text\", \"content\":\"Диаметр, дюймы\", \"font\":\"tsBodyM\", \"color\":\"textSecondary\"}]}, \"values\":[{\"id\":\"Diameter_Auto_0\", \"text\":\"17\", \"textColor\":\"textPrimary\", \"textStyle\":\"tsBody400Small\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1Q9zjKXebyPJw9dsnbAjUGqCTqYK\"}}}]}, {\"id\":\"TyreWidth_3\", \"title\":{\"textRs\":[{\"type\":\"text\", \"content\":\"Ширина профиля, мм\", \"font\":\"tsBodyM\", \"color\":\"textSecondary\"}]}, \"values\":[{\"id\":\"TyreWidth_0\", \"text\":\"170\", \"textColor\":\"textPrimary\", \"textStyle\":\"tsBody400Small\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1WvgzLXmwAFioiJQZWgH6FpBlRFl\"}}}]}, {\"id\":\"TyreHeight_4\", \"title\":{\"textRs\":[{\"type\":\"text\", \"content\":\"Высота профиля, %\", \"font\":\"tsBodyM\", \"color\":\"textSecondary\"}]}, \"values\":[{\"id\":\"TyreHeight_0\", \"text\":\"60\", \"textColor\":\"textPrimary\", \"textStyle\":\"tsBody400Small\", \"trackingInfo\":{\"click\":{\"actionType\":\"click\", \"key\":\"1huh1MNjzpjJreq_aiJ-zmXXMNAtP-As\"}}}]}], \"trackingInfo\":{\"view\":{\"actionType\":\"view\", \"key\":\"1huh1QxzbiyVq7bNvwA8YroxWjp0Wbek\"}},\"params\":{\"anchor\":\"\",\"disablePaidBrand\":false,\"isFreshColorsEnabled\":true,\"isWidgetCharacteristicsOnPage\":true,\"isWidgetDescriptionOnPage\":true,\"limit\":5,\"linkToCharacteristics\":\"section-characteristics\",\"linkToCharacteristicsButtonText\":\"Перейти к характеристикам\",\"linkToDescription\":\"section-description\",\"linkToDescriptionButtonText\":\"Перейти к описанию\",\"linkToExternal\":\"\",\"linkToExternalText\":\"Подробнее\",\"offsetScrol\":144,\"paramsLinkTarget\":\"self\",\"showLongCharacteristics\":true,\"thresholdLength\":60}}"
+  },
+  "browser": {
+    "ip": "146.70.52.54",
+    "isDesktop": true,
+    "platform": "desktop",
+    "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+    "useSW": true,
+    "trackResources": true,
+    "webp": true,
+    "device": "desktop",
+    "age": "modern",
+    "family": "Chrome",
+    "majorVersion": 150,
+    "cdnImgHostname": "ir.ozone.ru",
+    "cdnVideoHostname": "v-1.ozone.ru",
+    "cdnOriginalImgHostname": "io.ozone.ru",
+    "cdnStaticHostname": "st.ozone.ru",
+    "avif": true
+  },
+  "client": {
+    "platform": "desktop",
+    "marketplaceDomain": "ozon.ru"
+  },
+  "layoutTrackingInfo": "{\"layoutId\":11852, \"layoutVersion\":1281, \"pageType\":\"pdp\", \"ruleId\":2149, \"categoryId\":8505, \"categoryName\":\"Мотошины\", \"deviceType\":\"desktop\", \"hierarchy\":\"Автотовары/Мототовары/Мотошины/MICHELIN\", \"platform\":\"site\", \"templateType\":\"desktop\", \"sku\":4043104665, \"marketplaceId\":1, \"requestId\":\"d41ccdc52c8b1273fa90fb3c7ebd51f4\", \"userWwId\":1}",
+  "location": {
+    "current": {
+      "areaId": 2,
+      "areaType": 4,
+      "city": "Москва",
+      "country": "Россия",
+      "countryCode": "RUS",
+      "countryId": 1,
+      "fias": "0c5b2444-70a0-4932-980c-b4dc0d3f02b5",
+      "fullName": "Москва",
+      "name": "Москва",
+      "timeZoneUtcname": "UTC+3",
+      "geoCoordinate": {},
+      "uid": "0c5b2444-70a0-4932-980c-b4dc0d3f02b5"
+    }
+  },
+  "seo": {
+    "title": "MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V купить c доставкой на OZON по низкой цене (4043104665)",
+    "link": [
+      {
+        "href": "https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "canonical"
+      },
+      {
+        "href": "https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "x-default"
+      },
+      {
+        "href": "https://uz.ozon.com/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "ru-uz"
+      },
+      {
+        "href": "https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "ru-ru"
+      },
+      {
+        "href": "https://ozon.kz/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "ru-kz"
+      },
+      {
+        "href": "https://ozon.by/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "ru-by"
+      },
+      {
+        "href": "https://am.ozon.com/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "rel": "alternate",
+        "hreflang": "ru-am"
+      }
+    ],
+    "meta": [
+      {
+        "content": "MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V – покупайте на OZON по выгодным ценам! Быстрая и бесплатная доставка, большой ассортимент, бонусы, рассрочка и кэшбэк. Распродажи, скидки и акции. Реальные отзывы покупателей. (4043104665)",
+        "name": "description"
+      },
+      {
+        "content": "https://ir.ozone.ru/s3/multimedia-1-r/c600/7673175351.jpg",
+        "property": "og:image"
+      },
+      {
+        "content": "website",
+        "property": "og:type"
+      },
+      {
+        "content": "OZON",
+        "property": "og:site_name"
+      },
+      {
+        "content": "https://ir.ozone.ru/multimedia/xml/browserconfig.xml",
+        "name": "msapplication-config"
+      },
+      {
+        "content": "OZON",
+        "name": "application-name"
+      },
+      {
+        "content": "https://www.ozon.ru/",
+        "name": "msapplication-starturl"
+      },
+      {
+        "content": "Интернет-магазин OZON",
+        "name": "msapplication-tooltip"
+      },
+      {
+        "content": "https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/",
+        "property": "og:url"
+      },
+      {
+        "content": "MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V ",
+        "property": "og:title"
+      },
+      {
+        "content": "Успейте купить по выгодной цене! ",
+        "property": "og:description"
+      },
+      {
+        "content": "1211635852237386",
+        "property": "fb:app_id"
+      }
+    ],
+    "script": [
+      {
+        "innerHTML": "{\"@context\":\"http://schema.org\",\"@type\":\"Product\",\"brand\":\"MICHELIN\",\"description\":\"\",\"image\":\"https://ir.ozone.ru/s3/multimedia-1-r/7673175351.jpg\",\"name\":\"MICHELIN Michelin Anakee Adventure Мотошины  170/60 R17 72 V\",\"offers\":{\"@type\":\"Offer\",\"url\":\"https://www.ozon.ru/product/michelin-michelin-anakee-adventure-motoshiny-170-60-r17-72-v-4043104665/\",\"availability\":\"http://schema.org/InStock\",\"price\":\"17637\",\"priceCurrency\":\"RUB\"},\"sku\":\"4043104665\"}",
+        "type": "application/ld+json"
+      }
+    ]
+  },
+  "shared": "{\"context\":\"ozon\"}",
+  "segments": [
+    1
+  ],
+  "pageInfo": {
+    "url": "/product/4043104665?__rr=1&sh=ajD-Q4JkeQ",
+    "layoutId": 11852,
+    "layoutVersion": 1281,
+    "pageType": "pdp",
+    "ruleId": 2149,
+    "pageTypeTracking": "pdp",
+    "analyticsInfo": {
+      "sku": 4043104665
+    }
+  },
+  "trackingPayloads": {
+    "0Nuh1Z8u-v9doiO5zYQDmmMrlCtZjW8j": "{\"layoutId\":11852, \"layoutVersion\":1281, \"pageType\":\"pdp\", \"ruleId\":2149, \"categoryId\":8505, \"categoryName\":\"Мотошины\", \"deviceType\":\"desktop\", \"hierarchy\":\"Автотовары/Мототовары/Мотошины/MICHELIN\", \"platform\":\"site\", \"templateType\":\"desktop\", \"sku\":4043104665, \"marketplaceId\":1, \"requestId\":\"d41ccdc52c8b1273fa90fb3c7ebd51f4\", \"userWwId\":1}"
+  },
+  "pageToken": "0Nuh1Z8u-v9doiO5zYQDmmMrlCtZjW8j",
+  "userToken": "11uh1OB-INKGKbokv4761--2007JajmL",
+  "experimentsConfig": {
+    "prerenderCheckoutSW": true,
+    "isModern": true,
+    "prerenderCartPageSW": true,
+    "trackMediaPlayerMetricsRum4": true,
+    "entrypointPrerenderHome": true,
+    "trackMessengerRum4": true,
+    "entrypointCacheControl": true,
+    "imgPixelatedRender": true,
+    "disableProductClickEvent": true,
+    "enableSpeculationRules": true,
+    "fastDeliveryDeploy": true,
+    "useCrossorigin": true,
+    "useNewSwPath": true,
+    "enableTrackerLogs": true,
+    "allyMode": true,
+    "trackImagesRum4": true,
+    "cpmTrackerEnabled": true,
+    "enableSummaryV2": true,
+    "disableVersionFallback": true,
+    "prefetchWebGalleryVideoSW": true,
+    "enableDevtools": true,
+    "enableSWCaching": true,
+    "trackMapInitActions": true,
+    "prefetchAssetsSW": true,
+    "prerenderHomePageSW": true,
+    "swDisableReinitSPA": true,
+    "isCdnFonts": true,
+    "alternativeCdnImages": true,
+    "lowerGalleryImageQuality": true,
+    "enableCertEvents": true,
+    "gtmDelay2000": true,
+    "linkAsyncWidgets": true,
+    "fingerprinting": true,
+    "withPerformanceMarks": true,
+    "enableTrackerInfoLogs": true,
+    "detectHeadlessRum4": true,
+    "isTrinityEvent": true,
+    "disableWidgetTracking": true,
+    "s3PublicPath": true,
+    "usePreloadImagesPDPGallery": true,
+    "earlyHintsEnabled": true,
+    "enableVideoPrefetchSW": true,
+    "newPaginationRum4": true,
+    "mergeUrlLogger": true,
+    "enableVersionFallbackLogs": true,
+    "disableSendWidgetViewCE": true,
+    "prefetchListPhotosVideoSW": true,
+    "trackLcpElement": true
+  },
+  "requestID": "d41ccdc52c8b1273fa90fb3c7ebd51f4",
+  "trackingTokenAliases": {
+    "webSingleProductScore-3386432-default-1": {
+      "data": {
+        "1": "1huh1RR5g19A4SIxoclxbXnZgKp9v6W4",
+        "0": "1huh1RR5g19A4SIxoclxbXnZgKp9v6W4"
+      }
+    },
+    "webReviewProductScore-3132021-default-1": {
+      "data": {
+        "1": "1huh1RR5g19A4SIxoclxbXnZgKp9v6W4",
+        "0": "1huh1RR5g19A4SIxoclxbXnZgKp9v6W4"
+      }
+    },
+    "horizontalMenu-7302642-default-1": {
+      "data": {
+        "4": "1huh1U2MVAkaVv-YmocZVeubObBs-mEv",
+        "2": "1huh1Rc-P-pnXQbwvpZXwXyInH1Q1e4W",
+        "3": "1huh1MPEEaL7_TMbLOXbEkxhQcM7gfvN",
+        "0": "1huh1PzvCojx4Goo_2WDXY5pJ8doMRjG",
+        "1": "1huh1UuZUmbr9vSSNgJUsgnJEMpszMx8",
+        "8": "1huh1YGJvtgwIXMX0doZ74aEeraqheam",
+        "7": "1huh1PRVoNY6k_L9dK1rD9JSIn-mXPtR",
+        "5": "1huh1OdHh-FwrfXBZHaF3cgIeQvkhh52",
+        "6": "1huh1OZn0tTmJ85HgZJGzwbN-x08DU6e"
+      }
+    },
+    "footer-347823-default-1": {
+      "data": {
+        "5": "1huh1Z_X5R1G-fbvkaEuPKMI4izBLoVW",
+        "2": "1huh1Q_vFLKAG15PPqCUvE7CkEmL0gJF",
+        "12": "1huh1WusUXEUS8ooMIimKFiwGug8o8J2",
+        "11": "1huh1OjSLLm3IyLS0giwki-1Fkxll7Qr",
+        "7": "1huh1-SyAl95nBg3QD_ybm278ihDskHH",
+        "6": "1huh1XZc6mbv9Jd6QQ0u0leT5ws8zd5A",
+        "3": "1huh1R05aP9C184oxcB4wT1Gb3cMQxZq",
+        "4": "1huh1NXDo81xZnZcqMCjTVlooMhl-f8O",
+        "1": "1huh1-MpVs6yaZEqA2YTNyYEOWPFv3dk",
+        "0": "1huh1_0xSL-VKvtZLlKDu_ZHyFdrGsne",
+        "9": "1huh1P203qGvXcb6_-Cs7F7mubyDWE4Y",
+        "8": "1huh1YFkQy965O46qgi6CVFpldcTMmlb",
+        "10": "1huh1YNArM5airroOkib-4x-pvdC-sq_"
+      }
+    },
+    "catalogMenu-7278490-default-1": {
+      "data": {
+        "55": "1huh1Q5_clu7CbJSZQYtrFZyVPmV1hNz",
+        "15": "1huh1ZJ0gdn18Xe4RGosovQKkyCJt6V8",
+        "48": "1xuh1YskV7_5FCF4t8sljnBDyG6ZPz91",
+        "19": "1huh1S0mGkvtkPOSSgcKzTmcsOj5ubpt",
+        "52": "1xuh1W1seVIhbIWeLbA1wWspBJSKmP-Y",
+        "34": "1xuh1UBzFYKNRhr3P9y9oOzuhHQESr5R",
+        "22": "1xuh1VKvguu9_rNzI_c8s-e9bbwKiQpL",
+        "14": "1xuh1SB1NcVcZ30jAGGyVEMJLuE8qNrU",
+        "45": "1huh1WPD3TRblW7K1VB0Td-EuZmORiVo",
+        "79": "1huh1_rsUslTl3Lqsl2vjtJheRDPCpzE",
+        "42": "1xuh1RRGDlCv5avbEhyLDS-nz2xjtypX",
+        "9": "1huh1NiR7cra3fdFNFh9gBJP-A2CZUI3",
+        "46": "1xuh1XEHnlqk-viGsuzZ05ynNvlAsC0K",
+        "37": "1huh1MrdFOJKzNbekigvOxy6hvH76-rW",
+        "68": "1huh1S1KUtFbT0HqxcSQ3AMaDRCUZSwl",
+        "81": "1huh1NmBHtbLZeF38EVoS_GErZc7b0Lh",
+        "69": "1huh1QJdp3jCXVEDUinbF0mD9gF5_SXQ",
+        "4": "1xuh1OzGhFaQyb4GBmHBDjd10UpCT7NM",
+        "29": "1huh1TT36soaalMtIfzxex8vMNiuaas2",
+        "63": "1huh1Vc18GRzIk_Dqsmq3Nel-ea3u_5d",
+        "27": "1huh1WkI8MoXKOoLn54PRck2BtzKDnuu",
+        "60": "1huh1W_SPMcq_T6tLiidB9zv6jv756kC",
+        "84": "1huh1T1XX5CGllJG1DJK2JTtt4DiQpBS",
+        "75": "1huh1ZbMPDy7Pxj_JQ5JKgvQxNxzpcbD",
+        "32": "1xuh1OG721Lk-ba7Ke6WBI6oVBWU6D7w",
+        "82": "1huh1PcGckjfrzivF140QwDP3xMN71Xf",
+        "30": "1xuh1PI1J_bD-JX-O1hWTd_E2PAv9xdj",
+        "21": "1huh1WVffDaRKrSvyfLoBoS6Bbx5r4K6",
+        "56": "1xuh1Z_04Wdat2DNGbaK6Q4cEU-EAZn-",
+        "41": "1huh1_3uKPbIHl35rCgPilnwuDpTVyE4",
+        "5": "1huh1SA2HjnFvXOCC7Jid64pzq6dNym8",
+        "72": "1huh1Mor1eq7KR3bv51mvFJNfeJY4V05",
+        "17": "1huh1OJWiILMX4PzKz0ppq-I8jNWy02g",
+        "16": "1xuh1PuRnK6uXO6QnDjyZy4B9gUo5CN4",
+        "54": "1xuh1-DDt5lMfiOQR2kg65RAigDddoWG",
+        "33": "1huh1V7IP8FZ7M0oHpuWvloYjwl9A7Dd",
+        "12": "1xuh1SfzBBCU0xpnVrCtffFLpaZvM-Qm",
+        "0": "1xuh1_VCFGDIeTaY-c_J788WnBLGw6AU",
+        "80": "1huh1NHiJDFCOLAty_iRSlgg9RqikOD_",
+        "53": "1huh1WOk_Pl5M0AMgZJhDbBQSB9Z8SjH",
+        "18": "1xuh1YfyWg37JyyTT0zlQjPZdcVy4m6_",
+        "57": "1huh1SzMLo_umjiEsxvItSuklT_sVgN7",
+        "7": "1huh1NosEJh3MoqtJCIBElwMQDzNRUqC",
+        "67": "1huh1N0AB_fb6XDMjDc5EXoBydXI5YTE",
+        "64": "1huh1YV3wILjcRls-ashJeJG6uJJjK5k",
+        "1": "1huh1TIQ2nI8RFXqq_HICBfavIUm3WHf",
+        "73": "1huh1ZdHhQFS_bWtKqfqX3wGEIJB2Az5",
+        "3": "1huh1Ufyvo33SP_GqdCWS0l2V6IXqPeO",
+        "28": "1xuh1Rh0wuuuxyLOI8PDyyeK3VHzg4f1",
+        "49": "1huh1_nbycLfl74M7ktlWlWucoTNq6v7",
+        "40": "1xuh1T8PD46WupmqXWvUbo6Y3roujLev",
+        "10": "1xuh1TwEaL9w1ydBYZ4-q8n2HVCRpE8O",
+        "71": "1huh1RZRahqfob82go_oKfYUmDAyp7YR",
+        "58": "1huh1-kSQ96IWgBGwlO90Lid3zVieCAM",
+        "59": "1huh1WVpdhb4deu3dXnGEU11-brUs9e7",
+        "74": "1huh1XUWO61P_fsbPXyikHaAW37HJSzP",
+        "51": "1huh1OafKBLvQRwXFNiuyJido-_j31DO",
+        "31": "1huh1M6LMXxL2OekAudg4B7lLprekNfb",
+        "76": "1huh1RnhkNos2Ge07zaj4PHrJRjhYrmf",
+        "36": "1xuh1X1niOF6suU5tsZasSESiK_8lMz-",
+        "47": "1huh1WqG89v3hW5kjAHjFPJPVIHS3bFF",
+        "77": "1huh1ZNUiKGYs13GVSEza1WGtkiS_X09",
+        "62": "1huh1Xb6SP-eDYVMN1v7mRPswJL1v5l9",
+        "50": "1xuh1MHr_xhzzB2vS3AjdhWiCgcuE3Gk",
+        "43": "1huh1QJGQh-86TICrhvqUqqI2lswwm4F",
+        "78": "1huh1WzWrEX8SrTrDBPg2L-bwnP8q8nA",
+        "26": "1xuh1PlHkjtBnrqoKJ2h4Je0OUBDsx_A",
+        "44": "1xuh1SZqkE08nTBLfoeoapSVL1BhvaOR",
+        "23": "1huh1RBILZSp5x7xs_xDIV6tk_qJqkP0",
+        "39": "1huh1_8-ivppPth_IEDt7L5ZVwvAmMLf",
+        "2": "1xuh1Qz53g5qA4coMNuwXGKFwNKanfRF",
+        "70": "1huh1XnT98IC3vTD7XAo5b1fQNlzF4uz",
+        "13": "1huh1PmVovSQPZi7i6B4AgaoD31E0AA8",
+        "83": "1huh1YcNcKeVG5QquXv1OPM3vmB6J-su",
+        "20": "1xuh1Yq1GZATgScMHszFF9XpXfp9QnWt",
+        "24": "1xuh1XB6f3ffkHFRnPSoYAS3ZdufRKQm",
+        "61": "1huh1UFz1APjViOmPooar9jTm_3WcpKJ",
+        "6": "1xuh1Upc2_Gc4haE468TTHj1qLfThjPB",
+        "35": "1huh1WrJ7lLwevSdiGbsHuMTAdhnMwzY",
+        "25": "1huh1T6q3kdavUFy7nPOJ8vIyRDqaYzX",
+        "65": "1huh1PRYS9A6zw0l74J_KcYpmZ-WoG3b",
+        "11": "1huh1OLb9h6IGpzSdYsXWmC46M1MgF6a",
+        "8": "1xuh1_uB58rLTWaiP5xgnd2ZjgEwFCfA",
+        "66": "1huh1Pnii1ZkL8CHLVBHYbmPYE1Zr3ez",
+        "38": "1xuh1XMThfWE1dGuXY_mcGdp8NIv648E"
+      }
+    },
+    "addressBookBarWeb-7278510-default-1": {
+      "data": {
+        "2": "1huh1TejpScyPtj2qIpDtl0KGEIqgQEz",
+        "1": "1huh1TejpScyPtj2qIpDtl0KGEIqgQEz",
+        "0": "1huh1TejpScyPtj2qIpDtl0KGEIqgQEz"
+      }
+    }
+  }
+}

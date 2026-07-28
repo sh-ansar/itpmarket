@@ -40,6 +40,11 @@ STATUS_INFO: dict[str, dict[str, str]] = {
     "REVIEW_REQUIRED": {"label": "Требует ручной проверки", "tone": "warning"},
     "DATA_COLLECTED": {"label": "Данные собраны", "tone": "info"},
     "DATA_ERROR": {"label": "Ошибка получения точных предложений", "tone": "danger"},
+    "COMPARABLE_LOWEST": {"label": "Ниже сопоставимого рынка", "tone": "success"},
+    "COMPARABLE_BELOW": {"label": "Ниже медианы бренда и размера", "tone": "success"},
+    "COMPARABLE_IN_MARKET": {"label": "В диапазоне бренда и размера", "tone": "info"},
+    "COMPARABLE_ABOVE": {"label": "Выше медианы бренда и размера", "tone": "warning"},
+    "COMPARABLE_HIGHEST": {"label": "Выше сопоставимого рынка", "tone": "danger"},
     # Старые статусы оставлены для чтения ранее сохранённых отчётов.
     "EXACT_COMPETITIVE": {"label": "В рыночном диапазоне", "tone": "info"},
     "SEGMENT_LOWEST": {"label": "Архивный сегментный статус", "tone": "neutral"},

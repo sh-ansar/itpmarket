@@ -1,0 +1,100 @@
+{"stage": "product", "index": 1, "article": "1188484162", "status": "JSON_OK", "elapsed_ms": 3812, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 2, "article": "1714168316", "status": "JSON_OK", "elapsed_ms": 3110, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 3, "article": "2928493604", "status": "JSON_OK", "elapsed_ms": 578, "events": []}
+{"stage": "product", "index": 4, "article": "2946334021", "status": "JSON_OK", "elapsed_ms": 3063, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 5, "article": "2946334906", "status": "JSON_OK", "elapsed_ms": 484, "events": []}
+{"stage": "product", "index": 6, "article": "2946338250", "status": "JSON_OK", "elapsed_ms": 3125, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 7, "article": "2946339116", "status": "JSON_OK", "elapsed_ms": 2984, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 8, "article": "2946339665", "status": "JSON_OK", "elapsed_ms": 812, "events": []}
+{"stage": "product", "index": 9, "article": "2946343911", "status": "JSON_OK", "elapsed_ms": 906, "events": []}
+{"stage": "product", "index": 10, "article": "2946345808", "status": "JSON_OK", "elapsed_ms": 3156, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 11, "article": "2946347174", "status": "JSON_OK", "elapsed_ms": 3062, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 12, "article": "2946349466", "status": "JSON_OK", "elapsed_ms": 703, "events": []}
+{"stage": "product", "index": 13, "article": "2946350552", "status": "JSON_OK", "elapsed_ms": 3062, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 14, "article": "2946351812", "status": "JSON_OK", "elapsed_ms": 1282, "events": []}
+{"stage": "product", "index": 15, "article": "2946358184", "status": "JSON_OK", "elapsed_ms": 3141, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 16, "article": "2946361485", "status": "JSON_OK", "elapsed_ms": 781, "events": []}
+{"stage": "product", "index": 17, "article": "2946362261", "status": "JSON_OK", "elapsed_ms": 829, "events": []}
+{"stage": "product", "index": 18, "article": "2946362299", "status": "JSON_OK", "elapsed_ms": 3156, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 19, "article": "2946363047", "status": "JSON_OK", "elapsed_ms": 1156, "events": []}
+{"stage": "product", "index": 20, "article": "2946364385", "status": "JSON_OK", "elapsed_ms": 734, "events": []}
+{"stage": "product", "index": 21, "article": "2946364835", "status": "JSON_OK", "elapsed_ms": 703, "events": []}
+{"stage": "product", "index": 22, "article": "2946365194", "status": "JSON_OK", "elapsed_ms": 3125, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 23, "article": "2946365535", "status": "JSON_OK", "elapsed_ms": 734, "events": []}
+{"stage": "product", "index": 24, "article": "2946365970", "status": "JSON_OK", "elapsed_ms": 781, "events": []}
+{"stage": "product", "index": 25, "article": "2946368418", "status": "JSON_OK", "elapsed_ms": 687, "events": []}
+{"stage": "product", "index": 26, "article": "2946368451", "status": "JSON_OK", "elapsed_ms": 656, "events": []}
+{"stage": "product", "index": 27, "article": "2946368653", "status": "JSON_OK", "elapsed_ms": 984, "events": []}
+{"stage": "product", "index": 28, "article": "2946368714", "status": "JSON_OK", "elapsed_ms": 719, "events": []}
+{"stage": "product", "index": 29, "article": "2946368854", "status": "JSON_OK", "elapsed_ms": 3110, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 30, "article": "2946370461", "status": "JSON_OK", "elapsed_ms": 1047, "events": []}
+{"stage": "product", "index": 31, "article": "2946373594", "status": "JSON_OK", "elapsed_ms": 875, "events": []}
+{"stage": "product", "index": 32, "article": "2946374582", "status": "JSON_OK", "elapsed_ms": 812, "events": []}
+{"stage": "product", "index": 33, "article": "2946374939", "status": "JSON_OK", "elapsed_ms": 797, "events": []}
+{"stage": "product", "index": 34, "article": "2946377112", "status": "JSON_OK", "elapsed_ms": 1125, "events": []}
+{"stage": "product", "index": 35, "article": "2947223597", "status": "JSON_OK", "elapsed_ms": 812, "events": []}
+{"stage": "product", "index": 36, "article": "2947535211", "status": "JSON_OK", "elapsed_ms": 1016, "events": []}
+{"stage": "product", "index": 37, "article": "2947763114", "status": "JSON_OK", "elapsed_ms": 3047, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 38, "article": "3416080530", "status": "JSON_OK", "elapsed_ms": 718, "events": []}
+{"stage": "product", "index": 39, "article": "3417226100", "status": "JSON_OK", "elapsed_ms": 3172, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 40, "article": "3417235807", "status": "JSON_OK", "elapsed_ms": 3157, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 41, "article": "3417472050", "status": "JSON_OK", "elapsed_ms": 625, "events": []}
+{"stage": "product", "index": 42, "article": "3430651651", "status": "JSON_OK", "elapsed_ms": 3219, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 43, "article": "3451018658", "status": "JSON_OK", "elapsed_ms": 844, "events": []}
+{"stage": "product", "index": 44, "article": "3451050611", "status": "JSON_OK", "elapsed_ms": 3110, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 45, "article": "3531028127", "status": "JSON_OK", "elapsed_ms": 3078, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 46, "article": "3551933602", "status": "JSON_OK", "elapsed_ms": 812, "events": []}
+{"stage": "product", "index": 47, "article": "3558445110", "status": "JSON_OK", "elapsed_ms": 3016, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 48, "article": "3672359185", "status": "JSON_OK", "elapsed_ms": 3312, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 49, "article": "4751853802", "status": "JSON_OK", "elapsed_ms": 3125, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 50, "article": "4751856049", "status": "JSON_OK", "elapsed_ms": 3000, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 51, "article": "2868561995", "status": "JSON_OK", "elapsed_ms": 1610, "events": []}
+{"stage": "product", "index": 52, "article": "178597676", "status": "JSON_OK", "elapsed_ms": 969, "events": []}
+{"stage": "product", "index": 53, "article": "2868558477", "status": "JSON_OK", "elapsed_ms": 3906, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 54, "article": "2868559508", "status": "JSON_OK", "elapsed_ms": 3109, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 55, "article": "2868559990", "status": "JSON_OK", "elapsed_ms": 922, "events": []}
+{"stage": "product", "index": 56, "article": "2868561153", "status": "JSON_OK", "elapsed_ms": 703, "events": []}
+{"stage": "product", "index": 57, "article": "2868562113", "status": "JSON_OK", "elapsed_ms": 562, "events": []}
+{"stage": "product", "index": 58, "article": "2946336416", "status": "JSON_OK", "elapsed_ms": 3032, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 59, "article": "2946338515", "status": "JSON_OK", "elapsed_ms": 3031, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 60, "article": "2946342402", "status": "JSON_OK", "elapsed_ms": 734, "events": []}
+{"stage": "product", "index": 61, "article": "2946346318", "status": "JSON_OK", "elapsed_ms": 797, "events": []}
+{"stage": "product", "index": 62, "article": "2946353002", "status": "JSON_OK", "elapsed_ms": 734, "events": []}
+{"stage": "product", "index": 63, "article": "2946363199", "status": "JSON_OK", "elapsed_ms": 735, "events": []}
+{"stage": "product", "index": 64, "article": "3451042740", "status": "JSON_OK", "elapsed_ms": 938, "events": []}
+{"stage": "product", "index": 65, "article": "3538682553", "status": "JSON_OK", "elapsed_ms": 3032, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 66, "article": "3538903187", "status": "JSON_OK", "elapsed_ms": 781, "events": []}
+{"stage": "product", "index": 67, "article": "178597719", "status": "JSON_OK", "elapsed_ms": 3140, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 68, "article": "178873851", "status": "JSON_OK", "elapsed_ms": 906, "events": []}
+{"stage": "product", "index": 69, "article": "178873850", "status": "JSON_OK", "elapsed_ms": 797, "events": []}
+{"stage": "product", "index": 70, "article": "178968640", "status": "JSON_OK", "elapsed_ms": 3235, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 71, "article": "740466966", "status": "JSON_OK", "elapsed_ms": 938, "events": []}
+{"stage": "product", "index": 72, "article": "178873843", "status": "JSON_OK", "elapsed_ms": 1000, "events": []}
+{"stage": "product", "index": 73, "article": "178873838", "status": "JSON_OK", "elapsed_ms": 891, "events": []}
+{"stage": "product", "index": 74, "article": "178873852", "status": "JSON_OK", "elapsed_ms": 610, "events": []}
+{"stage": "product", "index": 75, "article": "178873839", "status": "JSON_OK", "elapsed_ms": 1391, "events": []}
+{"stage": "product", "index": 76, "article": "263506065", "status": "JSON_OK", "elapsed_ms": 750, "events": []}
+{"stage": "product", "index": 77, "article": "178873849", "status": "JSON_OK", "elapsed_ms": 3141, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 78, "article": "178597686", "status": "JSON_OK", "elapsed_ms": 750, "events": []}
+{"stage": "product", "index": 79, "article": "178873860", "status": "JSON_OK", "elapsed_ms": 3234, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 80, "article": "178873836", "status": "JSON_OK", "elapsed_ms": 594, "events": []}
+{"stage": "product", "index": 81, "article": "199621954", "status": "JSON_OK", "elapsed_ms": 3110, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 82, "article": "178873841", "status": "JSON_OK", "elapsed_ms": 3063, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 83, "article": "2946354032", "status": "JSON_OK", "elapsed_ms": 2985, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 84, "article": "2946334108", "status": "JSON_OK", "elapsed_ms": 859, "events": []}
+{"stage": "product", "index": 85, "article": "2946346606", "status": "JSON_OK", "elapsed_ms": 875, "events": []}
+{"stage": "product", "index": 86, "article": "2946355087", "status": "JSON_OK", "elapsed_ms": 3031, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 87, "article": "2946354788", "status": "JSON_OK", "elapsed_ms": 610, "events": []}
+{"stage": "product", "index": 88, "article": "2946345381", "status": "JSON_OK", "elapsed_ms": 672, "events": []}
+{"stage": "product", "index": 89, "article": "2946366111", "status": "JSON_OK", "elapsed_ms": 531, "events": []}
+{"stage": "product", "index": 90, "article": "2946342947", "status": "JSON_OK", "elapsed_ms": 719, "events": []}
+{"stage": "product", "index": 91, "article": "2946333993", "status": "JSON_OK", "elapsed_ms": 2937, "events": [{"event": "poll", "attempt": 1, "blocked": false}]}
+{"stage": "product", "index": 92, "article": "539136786", "status": "JSON_OK", "elapsed_ms": 750, "events": []}
+{"stage": "product", "index": 93, "article": "1188484186", "status": "JSON_OK", "elapsed_ms": 1484, "events": []}
+{"stage": "product", "index": 94, "article": "2873930076", "status": "JSON_OK", "elapsed_ms": 813, "events": []}
+{"stage": "product", "index": 95, "article": "1046794900", "status": "JSON_OK", "elapsed_ms": 813, "events": []}
+{"stage": "product", "index": 96, "article": "542144159", "status": "JSON_OK", "elapsed_ms": 734, "events": []}
+{"stage": "product", "index": 97, "article": "4627495397", "status": "JSON_OK", "elapsed_ms": 1281, "events": []}
+{"stage": "product", "index": 98, "article": "1735593596", "status": "JSON_OK", "elapsed_ms": 797, "events": []}
+{"stage": "product", "index": 99, "article": "1188484082", "status": "JSON_OK", "elapsed_ms": 703, "events": []}
+{"stage": "product", "index": 100, "article": "1758037785", "status": "JSON_OK", "elapsed_ms": 1063, "events": []}

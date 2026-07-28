@@ -6,7 +6,10 @@ import sqlite3
 import threading
 import time
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
+import re
+import statistics
 from typing import Any
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
@@ -32,6 +35,12 @@ SORT_FIELDS = {
 RISK_STATUSES = {"EXACT_ABOVE", "EXACT_HIGHEST", "DATA_ERROR"}
 OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_BELOW"}
 UNSCANNED_STATUSES = {"NOT_ANALYZED", "INSUFFICIENT_DATA", "REVIEW_REQUIRED"}
+OZON_READY_STATUSES = {
+    "DATA_COLLECTED", "NO_OTHER_SELLERS", "EXACT_LOWEST", "EXACT_BELOW",
+    "EXACT_IN_MARKET", "EXACT_ABOVE", "EXACT_HIGHEST", "NO_OTHER_SELLERS",
+    "COMPARABLE_LOWEST", "COMPARABLE_BELOW", "COMPARABLE_IN_MARKET",
+    "COMPARABLE_ABOVE", "COMPARABLE_HIGHEST",
+}
 
 
 class DataService:
@@ -86,6 +95,7 @@ class DataService:
     def preferences(self, user_id: int | None) -> dict[str, Any]:
         defaults = {
             "locale": "ru",
+            "theme": "system",
             "display_currency": "KZT",
             "rub_to_kzt": 5.5,
             "usd_to_kzt": 520.0,
@@ -97,7 +107,7 @@ class DataService:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT locale,display_currency,rub_to_kzt,usd_to_kzt,eur_to_kzt,default_monthly_units "
+                "SELECT locale,theme,display_currency,rub_to_kzt,usd_to_kzt,eur_to_kzt,default_monthly_units "
                 "FROM app_user_preferences WHERE user_id=?",
                 (int(user_id),),
             ).fetchone()
@@ -113,36 +123,54 @@ class DataService:
             conn.close()
 
     def save_preferences(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        locale = str(payload.get("locale") or "ru").lower()
+        current = self.preferences(user_id)
+        locale = str(payload.get("locale", current.get("locale", "ru")) or "ru").lower()
         if locale not in {"ru", "kk", "en"}:
             raise ValueError("Поддерживаются языки ru, kk и en.")
-        display_currency = str(payload.get("display_currency") or "KZT").upper()
+        theme = str(payload.get("theme", current.get("theme", "system")) or "system").lower()
+        if theme not in {"system", "light", "dark"}:
+            raise ValueError("Поддерживаются темы system, light и dark.")
+        display_currency = str(
+            payload.get("display_currency", current.get("display_currency", "KZT")) or "KZT"
+        ).upper()
         if display_currency not in {"KZT", "RUB", "USD", "EUR"}:
             raise ValueError("Некорректная валюта отображения.")
         values = {
             "locale": locale,
+            "theme": theme,
             "display_currency": display_currency,
-            "rub_to_kzt": max(0.0001, float(payload.get("rub_to_kzt", 5.5))),
-            "usd_to_kzt": max(0.0001, float(payload.get("usd_to_kzt", 520))),
-            "eur_to_kzt": max(0.0001, float(payload.get("eur_to_kzt", 565))),
-            "default_monthly_units": max(0, min(1_000_000, int(payload.get("default_monthly_units", 1)))),
+            "rub_to_kzt": max(0.0001, float(payload.get("rub_to_kzt", current.get("rub_to_kzt", 5.5)))),
+            "usd_to_kzt": max(0.0001, float(payload.get("usd_to_kzt", current.get("usd_to_kzt", 520)))),
+            "eur_to_kzt": max(0.0001, float(payload.get("eur_to_kzt", current.get("eur_to_kzt", 565)))),
+            "default_monthly_units": max(
+                0,
+                min(
+                    1_000_000,
+                    int(payload.get("default_monthly_units", current.get("default_monthly_units", 1))),
+                ),
+            ),
         }
         conn = self._connect()
         try:
             conn.execute(
                 """
                 INSERT INTO app_user_preferences(
-                    user_id,locale,display_currency,rub_to_kzt,usd_to_kzt,eur_to_kzt,
+                    user_id,locale,theme,display_currency,rub_to_kzt,usd_to_kzt,eur_to_kzt,
                     default_monthly_units,updated_at
-                ) VALUES(?,?,?,?,?,?,?,datetime('now'))
+                ) VALUES(?,?,?,?,?,?,?,?,datetime('now'))
                 ON CONFLICT(user_id) DO UPDATE SET
-                    locale=excluded.locale,display_currency=excluded.display_currency,
+                    locale=excluded.locale,theme=excluded.theme,
+                    display_currency=excluded.display_currency,
                     rub_to_kzt=excluded.rub_to_kzt,usd_to_kzt=excluded.usd_to_kzt,
                     eur_to_kzt=excluded.eur_to_kzt,
-                    default_monthly_units=excluded.default_monthly_units,updated_at=excluded.updated_at
+                    default_monthly_units=excluded.default_monthly_units,
+                    updated_at=excluded.updated_at
                 """,
-                (int(user_id), values["locale"], values["display_currency"], values["rub_to_kzt"],
-                 values["usd_to_kzt"], values["eur_to_kzt"], values["default_monthly_units"]),
+                (
+                    int(user_id), values["locale"], values["theme"], values["display_currency"],
+                    values["rub_to_kzt"], values["usd_to_kzt"], values["eur_to_kzt"],
+                    values["default_monthly_units"],
+                ),
             )
             conn.commit()
         finally:
@@ -375,103 +403,340 @@ class DataService:
     @staticmethod
     def _ozon_product_type(title: Any) -> str:
         text = str(title or "").casefold()
-        if "мотокамера" in text or "камера" in text and "мото" in text:
+        if "мотокамера" in text or ("камера" in text and "мото" in text):
             return "motorcycle_tube"
         if "мотошин" in text or "мото шин" in text:
             return "motorcycle_tire"
+        if "коммерческ" in text or re.search(r"\br\d{2}c\b", text):
+            return "commercial_tire"
         if "грузов" in text or "для груз" in text:
             return "truck_tire"
         if "шина" in text or "шины" in text:
             return "passenger_tire"
         return "other"
 
+    @staticmethod
+    def _normalized_ozon(value: Any) -> str:
+        return re.sub(r"[^a-zа-я0-9]+", "", str(value or "").casefold())
+
+    def _ozon_owner_config(self) -> tuple[str, set[str]]:
+        expected_name = ""
+        seller_ids: set[str] = set()
+        if self.ozon_db_path:
+            root = self.ozon_db_path.parent.parent
+            expected_path = root / "EXPECTED_SELLER.txt"
+            urls_path = root / "START_URLS.txt"
+            try:
+                for raw in expected_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+                    value = raw.strip()
+                    if value and not value.startswith("#"):
+                        expected_name = self._normalized_ozon(value)
+                        break
+            except OSError:
+                pass
+            try:
+                for raw in urls_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+                    match = re.search(r"/seller/[^/?]*-(\d+)", raw, flags=re.I)
+                    if match:
+                        seller_ids.add(match.group(1))
+            except OSError:
+                pass
+        return expected_name, seller_ids
+
+    def _is_own_ozon_offer(
+        self, row: dict[str, Any], expected_name: str, seller_ids: set[str]
+    ) -> bool:
+        seller_id = str(row.get("seller_id") or "").strip()
+        seller_name = self._normalized_ozon(row.get("seller_name"))
+        return bool(
+            (seller_id and seller_id in seller_ids)
+            or (expected_name and seller_name == expected_name)
+        )
+
+    @staticmethod
+    def _ozon_source_type(url: Any) -> str:
+        return "CLIENT_CATALOG" if "/seller/" in str(url or "").casefold() else "MARKET_CATEGORY"
+
+    def _ensure_ozon_source_schema(
+        self, conn: sqlite3.Connection, expected_name: str, seller_ids: set[str]
+    ) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS catalog_sources (
+                source_url TEXT PRIMARY KEY,
+                source_type TEXT NOT NULL DEFAULT 'MARKET_CATEGORY',
+                label TEXT NOT NULL DEFAULT '',
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS product_sources (
+                article TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'MARKET_CATEGORY',
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                last_run_id TEXT NOT NULL DEFAULT '',
+                page_no INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(article, source_url)
+            );
+            CREATE INDEX IF NOT EXISTS idx_product_sources_type
+                ON product_sources(source_type, article);
+            """
+        )
+        products = conn.execute(
+            "SELECT article,discovery_url,first_seen_at,last_seen_at FROM products"
+        ).fetchall()
+        with conn:
+            for product in products:
+                source_url = str(product["discovery_url"] or "").strip()
+                if not source_url:
+                    continue
+                source_type = self._ozon_source_type(source_url)
+                first_seen = str(product["first_seen_at"] or datetime.now().isoformat(timespec="seconds"))
+                last_seen = str(product["last_seen_at"] or first_seen)
+                conn.execute(
+                    """
+                    INSERT INTO catalog_sources(
+                        source_url,source_type,label,first_seen_at,last_seen_at,active
+                    ) VALUES(?,?,?,?,?,1)
+                    ON CONFLICT(source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=MAX(catalog_sources.last_seen_at,excluded.last_seen_at),
+                        active=1
+                    """,
+                    (source_url, source_type, "", first_seen, last_seen),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO product_sources(
+                        article,source_url,source_type,first_seen_at,last_seen_at,last_run_id,page_no
+                    ) VALUES(?,?,?,?,?,'',0)
+                    ON CONFLICT(article,source_url) DO UPDATE SET
+                        source_type=excluded.source_type,
+                        last_seen_at=MAX(product_sources.last_seen_at,excluded.last_seen_at)
+                    """,
+                    (str(product["article"]), source_url, source_type, first_seen, last_seen),
+                )
+
+            # A confirmed Alfa Tires offer is a safe ownership signal even when the
+            # product was first discovered through a market category.
+            offers = conn.execute(
+                """
+                SELECT article,seller_id,seller_name,seller_url,first_seen_at,last_seen_at
+                FROM offers WHERE active=1
+                """
+            ).fetchall()
+            for offer in offers:
+                value = dict(offer)
+                if not self._is_own_ozon_offer(value, expected_name, seller_ids):
+                    continue
+                source_url = str(value.get("seller_url") or "").strip()
+                if not source_url:
+                    source_url = f"seller://{value.get('seller_id') or expected_name or 'client'}"
+                first_seen = str(value.get("first_seen_at") or datetime.now().isoformat(timespec="seconds"))
+                last_seen = str(value.get("last_seen_at") or first_seen)
+                conn.execute(
+                    """
+                    INSERT INTO catalog_sources(
+                        source_url,source_type,label,first_seen_at,last_seen_at,active
+                    ) VALUES(?,'CLIENT_CATALOG','',?,?,1)
+                    ON CONFLICT(source_url) DO UPDATE SET
+                        source_type='CLIENT_CATALOG',
+                        last_seen_at=MAX(catalog_sources.last_seen_at,excluded.last_seen_at),
+                        active=1
+                    """,
+                    (source_url, first_seen, last_seen),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO product_sources(
+                        article,source_url,source_type,first_seen_at,last_seen_at,last_run_id,page_no
+                    ) VALUES(?,?,'CLIENT_CATALOG',?,?, '',0)
+                    ON CONFLICT(article,source_url) DO UPDATE SET
+                        source_type='CLIENT_CATALOG',
+                        last_seen_at=MAX(product_sources.last_seen_at,excluded.last_seen_at)
+                    """,
+                    (str(value["article"]), source_url, first_seen, last_seen),
+                )
+
+    @staticmethod
+    def _strict_ozon_keys(row: dict[str, Any]) -> list[tuple[Any, ...]]:
+        normalize = DataService._normalized_ozon
+        product_type = DataService._ozon_product_type(row.get("title"))
+        brand = normalize(row.get("brand"))
+        manufacturer_article = normalize(row.get("manufacturer_article"))
+        result: list[tuple[Any, ...]] = []
+        if manufacturer_article and brand:
+            result.append(("MFR", product_type, brand, manufacturer_article))
+
+        model = normalize(row.get("model"))
+        size = normalize(row.get("tire_size"))
+        load_index = normalize(row.get("load_index"))
+        speed_index = normalize(row.get("speed_index"))
+        season = normalize(row.get("season"))
+        required = (brand, model, size, load_index, speed_index, season)
+        if all(required):
+            result.append((
+                "FP", product_type, brand, model, size, load_index, speed_index, season,
+                int(row.get("studded")) if row.get("studded") is not None else -1,
+                int(bool(row.get("xl"))),
+                int(bool(row.get("runflat"))),
+            ))
+        return result
+
+    @staticmethod
+    def _freshness(updated_at: Any) -> tuple[str, str]:
+        text = str(updated_at or "").strip()
+        if not text:
+            return "never", "Не обновлялось"
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            age_hours = max(
+                0.0,
+                (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 3600,
+            )
+        except Exception:
+            return "unknown", "Дата неизвестна"
+        if age_hours <= 24:
+            return "fresh", "Актуально"
+        if age_hours <= 72:
+            return "due", "Требует обновления"
+        return "stale", "Устарело"
+
+
     def _ozon_rows(self) -> list[dict[str, Any]]:
         path = self.ozon_db_path
         if not path or not path.exists():
             return []
+        conn: sqlite3.Connection | None = None
         try:
             conn = self._connect_path(path)
-            rows = conn.execute(
-                """
-                SELECT p.*,o.seller_id,o.seller_name,o.seller_url,o.seller_rating,
-                       o.card_price,o.catalog_price AS offer_catalog_price,o.regular_price,
-                       o.original_price,o.currency,o.availability_status,o.location_city,
-                       o.location_country,o.product_rating,o.review_count,o.last_checked_at
-                FROM products p
-                LEFT JOIN offers o ON o.article=p.article AND o.seller_key=(
-                    SELECT o2.seller_key FROM offers o2
-                    WHERE o2.article=p.article AND o2.active=1
-                    ORDER BY CASE WHEN o2.card_price>0 THEN 0 ELSE 1 END, o2.card_price ASC, o2.last_checked_at DESC
-                    LIMIT 1
-                )
-                WHERE p.active=1
-                ORDER BY p.last_seen_at DESC
-                """
-            ).fetchall()
-            result = []
-            for record in rows:
-                value = dict(record)
-                article = str(value.get("article") or "")
-                price_rub = value.get("card_price") or value.get("catalog_price") or 0
-                status = "DATA_COLLECTED" if value.get("detail_status") == "COMPLETE" else (
-                    "DATA_ERROR" if value.get("last_error") else "NOT_ANALYZED"
-                )
-                info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+            expected_name, seller_ids = self._ozon_owner_config()
+            self._ensure_ozon_source_schema(conn, expected_name, seller_ids)
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS market_search_candidates (
+                    client_article TEXT NOT NULL,candidate_article TEXT NOT NULL,
+                    query_text TEXT NOT NULL DEFAULT '',query_url TEXT NOT NULL DEFAULT '',
+                    catalog_rank INTEGER NOT NULL DEFAULT 0,match_level TEXT NOT NULL DEFAULT 'REJECTED',
+                    match_score REAL NOT NULL DEFAULT 0,match_method TEXT NOT NULL DEFAULT '',
+                    match_reason TEXT NOT NULL DEFAULT '',reasons_json TEXT NOT NULL DEFAULT '[]',
+                    active INTEGER NOT NULL DEFAULT 1,first_seen_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,
+                    last_checked_at TEXT NOT NULL,last_run_id TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(client_article,candidate_article)
+                );
+            """)
+            products = {str(row["article"]): dict(row) for row in conn.execute("SELECT * FROM products WHERE active=1").fetchall()}
+            memberships: dict[str,set[str]] = defaultdict(set)
+            for row in conn.execute("SELECT article,source_type FROM product_sources").fetchall():
+                memberships[str(row["article"])].add(str(row["source_type"]))
+            offers_by_article: dict[str,list[dict[str,Any]]] = defaultdict(list)
+            for row in conn.execute("SELECT * FROM offers WHERE active=1 ORDER BY article,CASE WHEN card_price>0 THEN 0 ELSE 1 END,card_price,last_checked_at DESC").fetchall():
+                offers_by_article[str(row["article"])].append(dict(row))
+            client_articles={article for article,types in memberships.items() if "CLIENT_CATALOG" in types}
+            for article,offers in offers_by_article.items():
+                if any(self._is_own_ozon_offer(o,expected_name,seller_ids) for o in offers): client_articles.add(article)
+            search_rows: dict[str,list[dict[str,Any]]] = defaultdict(list)
+            for row in conn.execute("SELECT * FROM market_search_candidates WHERE active=1 AND match_level IN ('EXACT','STRONG','COMPARABLE') ORDER BY match_score DESC,catalog_rank").fetchall():
+                search_rows[str(row["client_article"])].append(dict(row))
+            market_articles={article for article,types in memberships.items() if "MARKET_CATEGORY" in types or "MARKET_SEARCH" in types}
+            key_index: dict[tuple[Any,...],list[str]] = defaultdict(list)
+            for article in market_articles:
+                product=products.get(article)
+                if product:
+                    for key in self._strict_ozon_keys(product): key_index[key].append(article)
+            result=[]
+            for article in sorted(client_articles,key=lambda x:str(products.get(x,{}).get("last_seen_at") or ""),reverse=True):
+                value=products.get(article)
+                if not value: continue
+                article_offers=offers_by_article.get(article,[])
+                own_offer=next((o for o in article_offers if self._is_own_ozon_offer(o,expected_name,seller_ids)),None)
+                own_price=int((own_offer or {}).get("card_price") or value.get("catalog_price") or 0)
+                accepted: dict[tuple[str,str],dict[str,Any]]={}
+                def add_candidate(candidate_article:str,offer:dict[str,Any],method:str,label:str,level:str,score:float=100,reason:str=''):
+                    if self._is_own_ozon_offer(offer,expected_name,seller_ids): return
+                    price=int(offer.get("card_price") or offer.get("catalog_price") or 0)
+                    if price<=0:return
+                    seller_key=str(offer.get("seller_id") or offer.get("seller_name") or '').strip()
+                    if not seller_key:return
+                    key=(candidate_article,seller_key.casefold())
+                    priority={'EXACT':3,'STRONG':2,'COMPARABLE':1}.get(level,0)
+                    if key in accepted and accepted[key]['_priority']>=priority:return
+                    product=products.get(candidate_article,{})
+                    accepted[key]={
+                        'article':candidate_article,'merchant_id':offer.get('seller_id') or '',
+                        'merchant_name':offer.get('seller_name') or 'Продавец Ozon','merchant_rating':offer.get('seller_rating'),
+                        'price_rub':price,'currency':offer.get('currency') or 'RUB','product_url':product.get('canonical_url') or '',
+                        'product_title':product.get('title') or '', 'captured_at':offer.get('last_checked_at') or offer.get('last_seen_at'),
+                        'match_method':method,'match_method_label':label,'match_level':level,'match_score':score,'match_reason':reason,
+                        'is_own':False,'_priority':priority,
+                    }
+                for offer in article_offers:
+                    add_candidate(article,offer,'OZON_SAME_ARTICLE','Та же карточка Ozon','EXACT',100,'Другой продавец той же карточки')
+                matched_articles={}
+                for key in self._strict_ozon_keys(value):
+                    method='OZON_MANUFACTURER_ARTICLE' if key[0]=='MFR' else 'OZON_STRICT_FINGERPRINT'
+                    label='Совпадение по артикулу производителя' if key[0]=='MFR' else 'Строгое совпадение характеристик'
+                    for cand in key_index.get(key,[]):
+                        if cand!=article: matched_articles.setdefault(cand,(method,label))
+                for cand,(method,label) in matched_articles.items():
+                    for offer in offers_by_article.get(cand,[]): add_candidate(cand,offer,method,label,'EXACT',95,'Совпадение из рыночной категории')
+                for match in search_rows.get(article,[]):
+                    cand=str(match.get('candidate_article') or '')
+                    level=str(match.get('match_level') or 'COMPARABLE')
+                    label={'EXACT':'Точный товар: бренд, модель и размер','STRONG':'Сильное совпадение: бренд, размер и близкая модель','COMPARABLE':'Сопоставимый товар: тот же бренд и размер'}.get(level,level)
+                    for offer in offers_by_article.get(cand,[]):
+                        add_candidate(cand,offer,'OZON_SEARCH_'+str(match.get('match_method') or ''),label,level,float(match.get('match_score') or 0),str(match.get('match_reason') or ''))
+                exact_candidates=[{k:v for k,v in x.items() if k!='_priority'} for x in accepted.values() if x['match_level'] in {'EXACT','STRONG'}]
+                comparable_candidates=[{k:v for k,v in x.items() if k!='_priority'} for x in accepted.values() if x['match_level']=='COMPARABLE']
+                pool=exact_candidates if exact_candidates else comparable_candidates
+                basis='EXACT' if exact_candidates else 'COMPARABLE' if comparable_candidates else 'NONE'
+                prices=sorted(int(x['price_rub']) for x in pool if int(x.get('price_rub') or 0)>0)
+                market_min=min(prices) if prices else None; market_max=max(prices) if prices else None
+                market_median=float(statistics.median(prices)) if prices else None
+                difference_pct=round((own_price-market_median)/market_median*100,2) if own_price and market_median else None
+                rank_values=sorted([*prices,own_price]) if prices and own_price else []
+                price_rank=rank_values.index(own_price)+1 if rank_values else None
+                if value.get('detail_status')!='COMPLETE': status='DATA_ERROR' if value.get('last_error') else 'NOT_ANALYZED'
+                elif not prices: status='NO_OTHER_SELLERS'
+                elif basis=='EXACT':
+                    status='EXACT_LOWEST' if own_price<=market_min else 'EXACT_HIGHEST' if own_price>=market_max else 'EXACT_IN_MARKET' if abs(float(difference_pct or 0))<=2 else 'EXACT_BELOW' if float(difference_pct or 0)<0 else 'EXACT_ABOVE'
+                else:
+                    status='COMPARABLE_LOWEST' if own_price<=market_min else 'COMPARABLE_HIGHEST' if own_price>=market_max else 'COMPARABLE_IN_MARKET' if abs(float(difference_pct or 0))<=2 else 'COMPARABLE_BELOW' if float(difference_pct or 0)<0 else 'COMPARABLE_ABOVE'
+                info=STATUS_INFO.get(status,STATUS_INFO['NOT_ANALYZED'])
+                own_updated=(own_offer or {}).get('last_checked_at') or value.get('last_price_at') or value.get('last_detail_at') or value.get('last_seen_at') or ''
+                freshness_status,freshness_label=self._freshness(own_updated)
+                primary=pool[0]['match_method'] if pool else ''
+                primary_label=pool[0]['match_method_label'] if pool else ''
                 result.append({
-                    "product_code": f"ozon:{article}",
-                    "source_product_code": article,
-                    "platform": "ozon",
-                    "platform_label": "Ozon",
-                    "title": value.get("title") or "",
-                    "brand": value.get("brand") or "",
-                    "model": value.get("model") or "",
-                    "size": value.get("tire_size") or "",
-                    "product_type": self._ozon_product_type(value.get("title")),
-                    "strict_identity_eligible": bool(
-                        self._ozon_product_type(value.get("title")) in {"passenger_tire", "truck_tire"}
-                        and float(value.get("identity_completeness_percent") or 0) >= 75
-                    ),
-                    "product_url": value.get("canonical_url") or "",
-                    "image_url": value.get("image_url") or "",
-                    "own_price_kzt": None,
-                    "market_price_kzt": None,
-                    "price_original": price_rub,
-                    "currency_original": value.get("currency") or "RUB",
-                    "regular_price_original": value.get("regular_price") or 0,
-                    "seller_id": value.get("seller_id") or "",
-                    "seller_name": value.get("seller_name") or "",
-                    "seller_url": value.get("seller_url") or "",
-                    "seller_rating": value.get("seller_rating"),
-                    "catalog_rating": value.get("product_rating"),
-                    "catalog_reviews": value.get("review_count"),
-                    "availability_status": value.get("availability_status") or "UNKNOWN",
-                    "price_status": status,
-                    "status_label": info["label"],
-                    "status_tone": info["tone"],
-                    "identity_completeness_percent": value.get("identity_completeness_percent") or 0,
-                    "manufacturer_article": value.get("manufacturer_article") or "",
-                    "load_index": value.get("load_index") or "",
-                    "speed_index": value.get("speed_index") or "",
-                    "season": value.get("season") or "UNKNOWN",
-                    "studded": value.get("studded"),
-                    "xl": bool(value.get("xl")),
-                    "runflat": bool(value.get("runflat")),
-                    "watched": False,
-                    "priority": "normal",
-                    "note": "",
-                    "candidate_count": 0,
-                    "_price_sort": float(price_rub or 0),
-                    "_delta_sort": 0.0,
-                    "_updated_sort": value.get("last_checked_at") or value.get("last_seen_at") or "",
+                    'product_code':f'ozon:{article}','source_product_code':article,'platform':'ozon','platform_label':'Ozon','source_type':'CLIENT_CATALOG',
+                    'title':value.get('title') or '','brand':value.get('brand') or '','model':value.get('model') or '','size':value.get('tire_size') or '',
+                    'product_type':self._ozon_product_type(value.get('title')),'strict_identity_eligible':bool(value.get('brand') and value.get('tire_size')),
+                    'product_url':value.get('canonical_url') or '','image_url':value.get('image_url') or '','own_price_kzt':None,'market_price_kzt':None,
+                    'price_original':own_price,'currency_original':(own_offer or {}).get('currency') or 'RUB','regular_price_original':(own_offer or {}).get('regular_price') or 0,
+                    'market_min_price_original':market_min,'market_max_price_original':market_max,'market_median_price_original':market_median,
+                    'seller_id':(own_offer or {}).get('seller_id') or next(iter(seller_ids),''),'seller_name':(own_offer or {}).get('seller_name') or ('Alfa Tires' if expected_name else ''),
+                    'seller_url':(own_offer or {}).get('seller_url') or '','seller_rating':(own_offer or {}).get('seller_rating'),'catalog_rating':(own_offer or {}).get('product_rating'),
+                    'catalog_reviews':(own_offer or {}).get('review_count'),'availability_status':(own_offer or {}).get('availability_status') or 'UNKNOWN',
+                    'price_status':status,'status_label':info['label'],'status_tone':info['tone'],'identity_completeness_percent':value.get('identity_completeness_percent') or 0,
+                    'manufacturer_article':value.get('manufacturer_article') or '','load_index':value.get('load_index') or '','speed_index':value.get('speed_index') or '',
+                    'season':value.get('season') or 'UNKNOWN','studded':value.get('studded'),'xl':bool(value.get('xl')),'runflat':bool(value.get('runflat')),
+                    'watched':False,'priority':'normal','note':'','candidate_count':len(pool),'reference_count':len(pool),'exact_candidate_count':len(exact_candidates),
+                    'comparable_candidate_count':len(comparable_candidates),'reference_type':'OZON_EXACT_PRODUCT' if basis=='EXACT' else 'OZON_BRAND_SIZE' if basis=='COMPARABLE' else '',
+                    'market_basis':basis,'match_method':primary,'match_method_label':primary_label,'exact_candidates':exact_candidates,'comparable_candidates':comparable_candidates,
+                    'difference_pct':difference_pct,'price_rank':price_rank,'price_rank_total':len(rank_values) if rank_values else None,
+                    'lowest_product_url':min(pool,key=lambda x:x['price_rub'])['product_url'] if pool else '',
+                    'highest_product_url':max(pool,key=lambda x:x['price_rub'])['product_url'] if pool else '',
+                    'updated_at':own_updated,'freshness_status':freshness_status,'freshness_label':freshness_label,
+                    '_price_sort':float(own_price or 0),'_delta_sort':float(difference_pct or 0),'_updated_sort':own_updated,
                 })
             return result
         except sqlite3.Error:
             return []
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if conn is not None: conn.close()
 
     def _source_signature(self) -> tuple[int, ...]:
         values: list[int] = []
@@ -504,6 +769,18 @@ class DataService:
             original = float(item.get("price_original") or 0)
             item["price_kzt"] = round(original * rate, 2) if original else None
             item["market_price_kzt"] = item["price_kzt"]
+            for source_key, target_key in (
+                ("market_min_price_original", "market_min_price_kzt"),
+                ("market_median_price_original", "market_median_price_kzt"),
+                ("market_max_price_original", "market_max_price_kzt"),
+            ):
+                value = item.get(source_key)
+                item[target_key] = round(float(value) * rate, 2) if value not in (None, "") else None
+            median = item.get("market_median_price_kzt")
+            item["difference_kzt"] = (
+                round(float(item["price_kzt"]) - float(median), 2)
+                if item.get("price_kzt") is not None and median is not None else None
+            )
         else:
             item["price_kzt"] = item.get("own_price_kzt")
         units = item.get("expected_monthly_units")
@@ -514,7 +791,7 @@ class DataService:
         item["potential_margin_monthly_kzt"] = round(potential * int(units or 0), 2)
         return item
 
-    def overview(self, expected_count: int, assumed_workers: int = 2, user_id: int | None = None) -> dict[str, Any]:
+    def overview(self, expected_count: int, assumed_workers: int = 2, user_id: int | None = None, allowed_platforms: set[str] | None = None) -> dict[str, Any]:
         try:
             db = Database(self.db_path)
             snapshot = status_snapshot(db, assumed_workers)
@@ -523,15 +800,34 @@ class DataService:
             snapshot = {}
         preferences = self.preferences(user_id)
         rows = [self._apply_user_values(row, preferences) for row in self.rows()]
+        if allowed_platforms is not None:
+            rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
         counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in kaspi_rows)
         active_count = len(rows)
         priced_count = sum(1 for row in rows if row.get("price_kzt") is not None)
-        analyzed_count = sum(1 for row in kaspi_rows if row.get("price_status") not in UNSCANNED_STATUSES)
+        kaspi_analyzed_rows = [
+            row for row in kaspi_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") not in UNSCANNED_STATUSES
+        ]
+        ozon_ready_rows = [
+            row for row in ozon_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
+        ]
+        data_ready_count = len(kaspi_analyzed_rows) + len(ozon_ready_rows)
         risk_count = sum(counts[key] for key in RISK_STATUSES)
         opportunity_count = sum(counts[key] for key in OPPORTUNITY_STATUSES)
-        potential_monthly = sum(float(row.get("potential_margin_monthly_kzt") or 0) for row in kaspi_rows)
+        potential_rows = [
+            row for row in kaspi_rows
+            if float(row.get("potential_margin_monthly_kzt") or 0) > 0
+        ]
+        potential_monthly = sum(
+            float(row.get("potential_margin_monthly_kzt") or 0) for row in potential_rows
+        )
+        potential_units_total = sum(
+            int(row.get("expected_monthly_units") or 0) for row in potential_rows
+        )
         conn = self._connect()
         try:
             recent_events = [dict(row) for row in conn.execute(
@@ -568,13 +864,24 @@ class DataService:
             "catalog_sync": latest_catalog_sync_value,
             "priced_count": priced_count,
             "price_coverage_pct": round(priced_count / active_count * 100, 2) if active_count else 0,
-            "scanned_count": analyzed_count,
-            "scan_coverage_pct": round(analyzed_count / len(kaspi_rows) * 100, 2) if kaspi_rows else 0,
+            # Backward-compatible aliases now represent combined data readiness.
+            "scanned_count": data_ready_count,
+            "scan_coverage_pct": round(data_ready_count / active_count * 100, 2) if active_count else 0,
+            "data_ready_count": data_ready_count,
+            "data_coverage_pct": round(data_ready_count / active_count * 100, 2) if active_count else 0,
+            "kaspi_market_analyzed_count": len(kaspi_analyzed_rows),
+            "kaspi_market_coverage_pct": round(len(kaspi_analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0,
+            "ozon_data_ready_count": len(ozon_ready_rows),
+            "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0,
             "watched_count": sum(1 for row in rows if row.get("watched")),
             "risk_count": risk_count,
             "favorable_count": opportunity_count,
             "opportunity_count": opportunity_count,
+            "potential_position_count": len(potential_rows),
+            "potential_units_total": potential_units_total,
+            "price_potential_monthly_kzt": round(potential_monthly, 2),
             "potential_margin_monthly_kzt": round(potential_monthly, 2),
+            "potential_basis": "KASPI_EXACT_Q1_MINUS_OWN_PRICE",
             "status_distribution": status_distribution,
             "snapshot": snapshot,
             "last_own_price_at": last_own_price,
@@ -586,18 +893,25 @@ class DataService:
                     else "warning" if kaspi_rows else "empty"
                 ),
                 "prices": "ok" if priced_count >= max(1, active_count * 0.9) else ("warning" if priced_count else "empty"),
-                "market": "ok" if analyzed_count >= max(1, len(kaspi_rows) * 0.5) else ("warning" if analyzed_count else "empty"),
+                "market": "ok" if data_ready_count >= max(1, active_count * 0.9) else ("warning" if data_ready_count else "empty"),
             },
         }
 
-    def analytics_dashboard(self, user_id: int | None = None) -> dict[str, Any]:
+    def analytics_dashboard(self, user_id: int | None = None, allowed_platforms: set[str] | None = None) -> dict[str, Any]:
         preferences = self.preferences(user_id)
         rows = [self._apply_user_values(row, preferences) for row in self.rows()]
+        if allowed_platforms is not None:
+            rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
 
         status_counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in kaspi_rows)
         analyzed_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]
+        ozon_ready_rows = [
+            row for row in ozon_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
+        ]
+        combined_ready_count = len(analyzed_rows) + len(ozon_ready_rows)
         risk_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") in RISK_STATUSES]
         opportunity_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") in OPPORTUNITY_STATUSES]
         review_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") == "REVIEW_REQUIRED"]
@@ -605,7 +919,12 @@ class DataService:
 
         valid_deltas = [float(row.get("difference_pct")) for row in analyzed_rows if row.get("difference_pct") is not None]
         average_delta = round(sum(valid_deltas) / len(valid_deltas), 2) if valid_deltas else 0.0
-        potential_total = round(sum(float(row.get("potential_margin_monthly_kzt") or 0) for row in opportunity_rows), 2)
+        potential_rows = [
+            row for row in opportunity_rows
+            if float(row.get("potential_margin_monthly_kzt") or 0) > 0
+        ]
+        potential_total = round(sum(float(row.get("potential_margin_monthly_kzt") or 0) for row in potential_rows), 2)
+        potential_units_total = sum(int(row.get("expected_monthly_units") or 0) for row in potential_rows)
 
         brands: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "brand": "Без бренда", "total": 0, "risks": 0, "opportunities": 0,
@@ -705,13 +1024,23 @@ class DataService:
                 "total_products": len(rows),
                 "kaspi_products": len(kaspi_rows),
                 "ozon_products": len(ozon_rows),
-                "analyzed_count": len(analyzed_rows),
-                "analysis_coverage_pct": round(len(analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0.0,
+                "analyzed_count": combined_ready_count,
+                "analysis_coverage_pct": round(combined_ready_count / len(rows) * 100, 2) if rows else 0.0,
+                "data_ready_count": combined_ready_count,
+                "data_coverage_pct": round(combined_ready_count / len(rows) * 100, 2) if rows else 0.0,
+                "kaspi_market_analyzed_count": len(analyzed_rows),
+                "kaspi_market_coverage_pct": round(len(analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0.0,
+                "ozon_data_ready_count": len(ozon_ready_rows),
+                "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0.0,
                 "risk_count": len(risk_rows),
                 "opportunity_count": len(opportunity_rows),
                 "review_count": len(review_rows),
                 "insufficient_count": len(insufficient_rows),
                 "potential_margin_monthly_kzt": potential_total,
+                "price_potential_monthly_kzt": potential_total,
+                "potential_position_count": len(potential_rows),
+                "potential_units_total": potential_units_total,
+                "potential_basis": "KASPI_EXACT_Q1_MINUS_OWN_PRICE",
                 "average_delta_pct": average_delta,
             },
             "status_distribution": status_distribution,
@@ -739,6 +1068,9 @@ class DataService:
             return False
         status = str(filters.get("status") or "").strip().upper()
         if status and str(row.get("price_status") or "").upper() != status:
+            return False
+        freshness = str(filters.get("freshness") or "").strip().casefold()
+        if freshness and str(row.get("freshness_status") or "never").casefold() != freshness:
             return False
         watched = str(filters.get("watched") or "").strip().casefold()
         if watched == "yes" and not row.get("watched"):
@@ -780,6 +1112,7 @@ class DataService:
             "image_url", "seller_name", "seller_url", "identity_completeness_percent", "candidate_count",
             "match_method", "match_method_label", "exact_offer_status", "exact_offer_checked_at",
             "exact_offer_count", "competitor_seller_count", "legacy_candidate_count",
+            "updated_at", "freshness_status", "freshness_label", "source_type",
             "_updated_sort", "raw_price_status",
         }
         items = [{key: row.get(key) for key in fields} for row in rows[start:start + page_size]]
@@ -788,13 +1121,20 @@ class DataService:
     def product_codes(self, filters: dict[str, Any], limit: int = 10000) -> list[str]:
         return [str(row["product_code"]) for row in self.rows() if self._matches(row, filters)][:max(1, min(int(limit), 10000))]
 
-    def filter_options(self) -> dict[str, Any]:
+    def filter_options(self, allowed_platforms: set[str] | None = None) -> dict[str, Any]:
         rows = self.rows()
+        if allowed_platforms is not None:
+            rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         brands = sorted({str(row.get("brand") or "").strip() for row in rows if str(row.get("brand") or "").strip()}, key=str.casefold)
         statuses = sorted({str(row.get("price_status") or "NOT_ANALYZED") for row in rows})
         return {
             "brands": brands,
-            "platforms": [{"value": "kaspi", "label": "Kaspi"}, {"value": "ozon", "label": "Ozon"}],
+            "platforms": [
+                item for item in [
+                    {"value": "kaspi", "label": "Kaspi"},
+                    {"value": "ozon", "label": "Ozon"},
+                ] if allowed_platforms is None or item["value"] in allowed_platforms
+            ],
             "statuses": [{"value": status, "label": STATUS_INFO.get(status, {}).get("label", status), "tone": STATUS_INFO.get(status, {}).get("tone", "neutral")} for status in statuses],
         }
 
@@ -806,8 +1146,14 @@ class DataService:
         result.pop("_price_sort", None); result.pop("_delta_sort", None); result.pop("_updated_sort", None)
         if result.get("platform") == "ozon":
             result["specifications"] = self._ozon_specifications(result)
-            result["candidates"] = []
-            result["offers"] = self._ozon_offers(str(result.get("source_product_code")))
+            rate = float(self.preferences(user_id).get("rub_to_kzt") or 5.5)
+            offers = []
+            for candidate in [*(result.get("exact_candidates") or []), *(result.get("comparable_candidates") or [])]:
+                value = dict(candidate)
+                value["price_kzt"] = round(float(value.get("price_rub") or 0) * rate, 2)
+                offers.append(value)
+            result["candidates"] = offers
+            result["offers"] = offers
             result["history"] = self.price_history(code, user_id=user_id)
             return result
         raw_code = str(result.get("source_product_code") or code)

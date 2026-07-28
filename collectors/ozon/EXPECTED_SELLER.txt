@@ -1,2 +1,1 @@
-# Leave empty for market/category collection.
-# Put seller name or seller ID here only for seller validation.
+Alfa Tires

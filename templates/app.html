@@ -6,58 +6,70 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <meta name="app-version" content="{{ version }}">
   <title>ITP Market Intelligence</title>
+  <script>(function(){var p=localStorage.getItem("itp_theme")||"system",d=p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=p;document.documentElement.style.colorScheme=d;}());</script>
   <link rel="icon" href="{{ url_for('static', filename='images/itp-logo.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ version }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2.css') }}?v={{ version }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_1.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_2.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_4.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_1.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_3.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_3_1.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_4.css') }}?v={{ version }}">
 </head>
 <body>
-<div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP"><i></i></div><strong>ITP Market Intelligence</strong><span>Инициализация локального аналитического контура</span></div>
+<div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP"><i></i></div><strong>ITP Market Intelligence</strong><span data-i18n="boot_text">Инициализация аналитического контура</span></div>
 
 <div class="app app-topnav" id="app" hidden>
   <header class="global-header">
     <div class="global-header__row">
-      <a class="top-brand" href="#" data-page-link="dashboard">
+      <a class="top-brand" href="#" data-page-link="dashboard" aria-label="Market Intelligence">
         <img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP">
-        <span><b>ITP Market Intelligence</b><small>Market Control Room</small></span>
+        <span><b>Market Intelligence</b></span>
       </a>
 
-      <button class="icon mobile top-menu-button" id="mobileMenu">
+      <button class="icon mobile top-menu-button" id="mobileMenu" data-i18n-aria="menu" aria-label="Меню" aria-controls="sidebar" aria-expanded="false">
         <img src="{{ url_for('static', filename='icons/menu.svg') }}" alt="Меню">
       </button>
 
       <nav class="top-navigation" id="sidebar" aria-label="Основная навигация">
-        <button class="nav active" data-page="dashboard" aria-label="Обзор" data-tooltip="Обзор">
+        <button class="nav active" data-page="dashboard" aria-label="Обзор" data-i18n-aria="nav_dashboard">
           <img src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt="">
-          <span class="sr-only" data-i18n="nav_dashboard">Обзор</span>
+          <span class="sr-only nav-label" data-i18n="nav_dashboard">Обзор</span>
         </button>
-        <button class="nav" data-page="products" aria-label="Товары" data-tooltip="Товары">
+        <button class="nav" data-page="products" aria-label="Товары" data-i18n-aria="nav_products">
           <img src="{{ url_for('static', filename='icons/navigation/products.svg') }}" alt="">
-          <span class="sr-only" data-i18n="nav_products">Товары</span>
+          <span class="sr-only nav-label" data-i18n="nav_products">Товары</span>
           <em id="navProductCount">0</em>
         </button>
-        <button class="nav" data-page="operations" aria-label="Операции" data-tooltip="Операции">
+        <button class="nav" data-page="operations" aria-label="Операции" data-i18n-aria="nav_operations">
           <img src="{{ url_for('static', filename='icons/navigation/operations.svg') }}" alt="">
-          <span class="sr-only" data-i18n="nav_operations">Операции</span>
+          <span class="sr-only nav-label" data-i18n="nav_operations">Операции</span>
           <em id="navRunning" hidden>0</em>
         </button>
-        <button class="nav" data-page="reports" aria-label="Отчёты" data-tooltip="Отчёты">
+        <button class="nav" data-page="reports" aria-label="Отчёты" data-i18n-aria="nav_reports">
           <img src="{{ url_for('static', filename='icons/navigation/reports.svg') }}" alt="">
-          <span class="sr-only" data-i18n="nav_reports">Отчёты</span>
+          <span class="sr-only nav-label" data-i18n="nav_reports">Отчёты</span>
         </button>
+        <button class="nav" data-page="schedules" aria-label="Расписание" data-i18n-aria="nav_schedules"><img src="{{ url_for('static', filename='icons/navigation/schedules.svg') }}" alt=""><span class="sr-only nav-label" data-i18n="nav_schedules">Расписание</span></button>
         {% if current_user.role == 'admin' %}
-        <button class="nav" data-page="users" aria-label="Пользователи" data-tooltip="Пользователи">
+        <button class="nav" data-page="users" aria-label="Сотрудники" data-i18n-aria="nav_users">
           <img src="{{ url_for('static', filename='icons/navigation/users.svg') }}" alt="">
-          <span class="sr-only" data-i18n="nav_users">Пользователи</span>
+          <span class="sr-only nav-label" data-i18n="nav_users">Сотрудники</span>
         </button>
         {% endif %}
       </nav>
 
       <div class="top-actions">
+        <button class="theme-switch" id="themeToggle" data-theme-toggle data-i18n-aria="theme_toggle" aria-label="Переключить тему"><span class="theme-icon sun"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""></span><i></i><span class="theme-icon moon"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></span></button>
+        <button class="header-help" id="helpButton" aria-controls="helpDrawer" aria-expanded="false" data-i18n-aria="help_open" aria-label="Открыть помощь по текущему разделу"><img src="{{ url_for('static', filename='icons/help.svg') }}" alt=""><span data-i18n="help">Помощь</span></button>
         <div class="languages" id="languageSwitch"><button data-lang="ru" class="active">RU</button><button data-lang="kk">KZ</button><button data-lang="en">EN</button></div>
-        <button class="profile" id="profileButton"><span>{{ current_user.display_name[:1] | upper }}</span><div><b>{{ current_user.display_name }}</b><small>{{ current_user.role }}</small></div><i>⌄</i></button>
+        <button class="profile" id="profileButton"><span>{{ current_user.display_name[:1] | upper }}</span><div><b>{{ current_user.display_name }}</b><small id="profileRole">{{ current_user.role }}</small></div><i>⌄</i></button>
         <div class="profile-menu" id="profileMenu" hidden>
-          <div class="profile-menu__identity"><b>{{ current_user.display_name }}</b><small>{{ current_user.email }}</small></div>
+          <div class="profile-menu__identity"><b>{{ current_user.display_name }}</b><small>{{ current_user.email }}</small>{% if current_tenant %}<small class="tenant-name">{{ current_tenant.name }}</small>{% endif %}</div>
+          {% if current_user.platform_role %}<a class="profile-menu-link" href="{{ url_for('platform_index') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Платформенная панель</span></a>{% endif %}
           <button data-page-link="settings"><img class="button-icon" src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""><span data-i18n="nav_settings">Настройки</span></button>
           <button id="openPassword"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="change_password">Изменить пароль</span></button>
           <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit"><img class="button-icon" src="{{ url_for('static', filename='icons/close.svg') }}" alt=""><span data-i18n="logout">Выйти</span></button></form>
@@ -65,6 +77,12 @@
       </div>
     </div>
   </header>
+
+  <section class="page-section-header" aria-live="polite">
+    <div class="page-section-header__inner">
+      <h1 id="pageTitle" data-i18n="dashboard_page_title">Обзор</h1>
+    </div>
+  </section>
 
   <section class="workspace">
     <main>
@@ -74,26 +92,26 @@
             <span class="eyebrow">ITP MARKET INTELLIGENCE</span>
             <h2 data-i18n="hero_title">Единая аналитика цен и рыночных сигналов без ложных сравнений.</h2>
             <p data-i18n="hero_text">Kaspi сравнивается только внутри одной карточки товара по product_code. Похожие товары, другие бренды и модели не влияют на цену.</p>
-            <div class="hero-buttons"><button class="primary" data-page-link="products"><img class="button-icon" src="{{ url_for('static', filename='icons/products.svg') }}" alt=""><span>Открыть каталог</span></button><button class="ghost" data-page-link="reports"><img class="button-icon" src="{{ url_for('static', filename='icons/reports.svg') }}" alt=""><span>Открыть аналитику</span></button></div>
+            <div class="hero-buttons"><button class="primary" data-page-link="products"><img class="button-icon" src="{{ url_for('static', filename='icons/products.svg') }}" alt=""><span data-i18n="open_catalog_button">Открыть каталог</span></button><button class="ghost" data-page-link="reports"><img class="button-icon" src="{{ url_for('static', filename='icons/reports.svg') }}" alt=""><span data-i18n="open_analytics">Открыть аналитику</span></button></div>
           </div>
           <div class="hero-orbit">
             <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
             <div class="orbit-core"><img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP"></div>
-            <div class="orbit-node n1"><b id="heroProducts">0</b><small>товаров</small></div>
-            <div class="orbit-node n2"><b id="heroAnalyzed">0%</b><small>проанализировано</small></div>
-            <div class="orbit-node n3"><b id="heroRisks">0</b><small>ценовых рисков</small></div>
+            <div class="orbit-node n1"><b id="heroProducts">0</b><small data-i18n="products_count_label">товаров</small></div>
+            <div class="orbit-node n2"><b id="heroAnalyzed">0%</b><small data-i18n="data_ready_label">данных готово</small></div>
+            <div class="orbit-node n3"><b id="heroRisks">0</b><small data-i18n="price_risks_label">ценовых рисков</small></div>
           </div>
         </div>
 
         <div class="metrics">
           <article><span class="metric-icon blue"><img src="{{ url_for('static', filename='icons/catalog.svg') }}" alt=""></span><div><small data-i18n="total_products">Всего товаров</small><b id="metricProducts">0</b><em id="metricPlatforms">Каталог</em></div></article>
-          <article><span class="metric-icon cyan"><img src="{{ url_for('static', filename='icons/coverage.svg') }}" alt=""></span><div><small data-i18n="analyzed">Проанализировано</small><b id="metricAnalyzed">0%</b><em id="metricAnalyzedSub">0 позиций</em></div></article>
-          <article><span class="metric-icon blue"><img src="{{ url_for('static', filename='icons/risk.svg') }}" alt=""></span><div><small data-i18n="price_risks">Ценовые риски</small><b id="metricRisks">0</b><em data-i18n="requires_attention">требуют внимания</em></div></article>
-          <article><span class="metric-icon green"><img src="{{ url_for('static', filename='icons/potential.svg') }}" alt=""></span><div><small data-i18n="margin_potential">Потенциал маржи / месяц</small><b id="metricOpportunity">0 ₸</b><em data-i18n="based_on_volume">по заданному объёму</em></div></article>
+          <article><span class="metric-icon cyan"><img src="{{ url_for('static', filename='icons/coverage.svg') }}" alt=""></span><div><small data-i18n="analyzed">Данные обработаны</small><b id="metricAnalyzed">0%</b><em id="metricAnalyzedSub">0 позиций</em></div></article>
+          <article><span class="metric-icon blue"><img src="{{ url_for('static', filename='icons/risk.svg') }}" alt=""></span><div><small data-i18n="price_risks">Ценовые риски Kaspi</small><b id="metricRisks">0</b><em data-i18n="requires_attention">требуют внимания</em></div></article>
+          <article><span class="metric-icon green"><img src="{{ url_for('static', filename='icons/potential.svg') }}" alt=""></span><div><small data-i18n="margin_potential">Ценовой потенциал Kaspi / месяц</small><b id="metricOpportunity">0 ₸</b><em id="metricOpportunitySub">нет подтверждённых возможностей</em></div></article>
         </div>
 
         <div class="dashboard-grid">
-          <section class="panel span2"><div class="panel-head"><div><small>PRICE POSITION</small><h3 data-i18n="status_distribution">Распределение рыночных позиций</h3></div><button class="text-button" data-page-link="products" data-i18n="open_catalog">Открыть каталог →</button></div><div class="status-chart" id="statusChart"><div class="skeleton"></div></div></section>
+          <section class="panel span2"><div class="panel-head"><div><small>PRICE POSITION</small><h3 data-i18n="status_distribution">Рыночные позиции Kaspi</h3></div><button class="text-button" data-page-link="products" data-i18n="open_catalog">Открыть каталог →</button></div><div class="status-chart" id="statusChart"><div class="skeleton"></div></div></section>
           <section class="panel"><div class="panel-head"><div><small>DATA QUALITY</small><h3 data-i18n="quality_control">Контроль качества</h3></div></div><div class="health" id="healthList"></div></section>
           <section class="panel"><div class="panel-head"><div><small>QUICK START</small><h3 data-i18n="operations">Операции</h3></div></div><div class="quick-actions"><button data-quick-action="update_own_prices"><b>Kaspi</b><span data-i18n="refresh_own_prices">Обновить цены Unityre</span></button><button data-quick-action="scan_market"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button><button data-quick-action="ozon_refresh_prices"><b>Ozon</b><span data-i18n="refresh_market_prices">Обновить цены Ozon</span></button><button data-quick-action="export_report"><b>ITP</b><span data-i18n="build_report">Сформировать отчёт</span></button></div></section>
           <section class="panel span2"><div class="panel-head"><div><small>RECENT ACTIVITY</small><h3 data-i18n="recent_activity">Последняя активность</h3></div><button class="text-button" data-page-link="operations" data-i18n="all_operations">Все операции →</button></div><div class="activity-list" id="activityList"><div class="skeleton"></div></div></section>
@@ -101,7 +119,6 @@
       </section>
 
       <section class="page" id="page-products">
-        <div class="section-head"><div><small>PRODUCT INTELLIGENCE</small><h2 data-i18n="products_title">Товары и рыночная позиция</h2><p data-i18n="products_subtitle">Kaspi и Ozon представлены в одном каталоге, но источники и валюты сохраняются раздельно.</p></div><div><button class="secondary" id="refreshProducts"><img class="button-icon" src="{{ url_for('static', filename='icons/refresh.svg') }}" alt=""><span data-i18n="refresh">Обновить</span></button><button class="primary" id="selectedReport"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="report">Отчёт</span></button></div></div>
         <section class="operation-launcher compact" id="productsOperationBar">
           <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="system" data-i18n="system">Система</option></select></div>
           <div><label data-i18n="operation">Операция</label><select id="operationAction"></select></div>
@@ -109,32 +126,36 @@
           <button class="primary launch" id="launchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
         </section>
         <div class="filters">
-          <label class="search"><span>⌕</span><input id="productSearch" data-i18n-placeholder="search_placeholder" placeholder="Название, код, бренд, размер или продавец"></label>
+          <label class="search"><img src="{{ url_for('static', filename='icons/search.svg') }}" alt=""><input id="productSearch" data-i18n-placeholder="search_placeholder" placeholder="Название, код, бренд, размер или продавец"></label>
           <select id="platformFilter"><option value="" data-i18n="all_platforms">Все площадки</option><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option></select>
           <select id="brandFilter"><option value="" data-i18n="all_brands">Все бренды</option></select>
-          <select id="statusFilter"><option value="" data-i18n="all_statuses">Все статусы</option></select>
+          <select id="statusFilter"><option value="" data-i18n="all_statuses">Все статусы</option></select><select id="freshnessFilter"><option value="" data-i18n="freshness_any">Любая актуальность</option><option value="fresh" data-i18n="freshness_fresh">Актуальные</option><option value="due" data-i18n="freshness_due">Требуют обновления</option><option value="stale" data-i18n="freshness_stale">Устаревшие</option><option value="never" data-i18n="freshness_never">Не обновлялись</option></select>
+        </div>
+        <div class="filter-command-row">
           <button class="filter-reset" id="resetFilters">× <span data-i18n="reset">Сбросить</span></button>
+          <button class="secondary" id="refreshProducts"><img class="button-icon" src="{{ url_for('static', filename='icons/refresh.svg') }}" alt=""><span data-i18n="refresh">Обновить</span></button>
+          <button class="primary" id="selectedReport"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="report">Отчёт</span></button>
         </div>
         <div class="scope-tabs" id="scopeTabs"><button class="active" data-scope="all" data-i18n="scope_all">Все</button><button data-scope="risks" data-i18n="scope_risks">Риски</button><button data-scope="opportunities" data-i18n="scope_opportunities">Потенциал</button><button data-scope="unscanned" data-i18n="scope_review">Требуют проверки</button><button data-scope="watched" data-i18n="scope_watched">Наблюдение</button></div>
         <section class="table-card">
           <div class="table-toolbar"><div><b id="productsFound">0</b><span data-i18n="positions_found"> позиций найдено</span><small id="productsLoadInfo">Готово к поиску</small></div><div><label><span data-i18n="show">Показывать</span><select id="pageSize"><option>20</option><option selected>30</option><option>50</option><option>100</option></select></label><label><span data-i18n="sort">Сортировка</span><select id="sortProducts"><option value="updated" data-i18n="sort_updated">По обновлению</option><option value="title" data-i18n="sort_title">По названию</option><option value="price" data-i18n="sort_price">По цене</option><option value="delta" data-i18n="sort_delta">По отклонению</option></select></label></div></div>
-          <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="selectPage"></th><th data-i18n="product">Товар</th><th data-i18n="platform">Площадка</th><th data-i18n="current_price">Текущая цена</th><th data-i18n="market_range">Рынок: мин / медиана / макс</th><th data-i18n="position">Позиция</th><th data-i18n="potential">Потенциал</th><th></th></tr></thead><tbody id="productsBody"><tr><td colspan="8"><div class="loader">Загрузка каталога…</div></td></tr></tbody></table></div>
+          <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="selectPage"></th><th data-i18n="product">Товар</th><th data-i18n="platform">Площадка</th><th data-i18n="current_price">Текущая цена</th><th data-i18n="market_range">Рынок: мин / медиана / макс</th><th data-i18n="position">Позиция</th><th data-i18n="potential">Потенциал</th><th data-i18n="updated">Обновлено</th><th></th></tr></thead><tbody id="productsBody"><tr><td colspan="9"><div class="loader">Загрузка каталога…</div></td></tr></tbody></table></div>
           <div class="pagination"><button id="prevPage">‹</button><span id="pageInfo">1 / 1</span><button id="nextPage">›</button></div>
         </section>
         <div class="selection" id="selectionBar" hidden><b id="selectionCount">0</b><span data-i18n="selected">выбрано</span><button id="watchSelected"><img class="button-icon" src="{{ url_for('static', filename='icons/eye.svg') }}" alt=""><span data-i18n="watch">Наблюдать</span></button><button id="analyzeSelected"><img class="button-icon" src="{{ url_for('static', filename='icons/chart.svg') }}" alt=""><span data-i18n="analyze">Анализировать</span></button><button id="exportSelected"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="report">Отчёт</span></button><button id="clearSelection">×</button></div>
       </section>
 
       <section class="page" id="page-operations">
-        <div class="section-head"><div><small>PROCESS CENTER</small><h2 data-i18n="operations_title">Операции сборщиков</h2><p data-i18n="operations_subtitle">История запуска, прогресс, примерное время выполнения и журнал каждой операции.</p></div><button class="secondary danger-soft" id="clearOperations"><img class="button-icon" src="{{ url_for('static', filename='icons/trash.svg') }}" alt=""><span data-i18n="clear_history">Очистить историю</span></button></div>
+        <div class="page-command-bar"><button class="secondary danger-soft" id="clearOperations"><img class="button-icon" src="{{ url_for('static', filename='icons/trash.svg') }}" alt=""><span data-i18n="clear_history">Очистить историю</span></button></div>
         <div class="operation-metrics"><article><span><img src="{{ url_for('static', filename='icons/operations.svg') }}" alt=""></span><b id="opsRunning">0</b><small data-i18n="running">выполняется</small></article><article><span><img src="{{ url_for('static', filename='icons/check.svg') }}" alt=""></span><b id="opsCompleted">0</b><small data-i18n="completed">завершено</small></article><article><span><img src="{{ url_for('static', filename='icons/risk.svg') }}" alt=""></span><b id="opsFailed">0</b><small data-i18n="failed">с ошибкой</small></article></div>
         <div class="operations-list" id="operationsList"><div class="empty">История операций пуста</div></div>
       </section>
 
       <section class="page" id="page-reports">
-        <div class="section-head"><div><small>MARKET ANALYTICS</small><h2 data-i18n="reports_title">Аналитические отчёты</h2><p>Сводная картина по точным предложениям продавцов, ценовым рискам, потенциалу маржи и полноте каталога.</p></div><button class="primary" id="generateReport"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="build_report">Сформировать отчёт</span></button></div>
+        <div class="page-command-bar"><button class="primary" id="generateReport"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="build_report">Сформировать отчёт</span></button></div>
         <div class="analytics-kpis" id="reportKpis"><div class="skeleton"></div></div>
         <div class="analytics-grid">
-          <section class="panel"><div class="panel-head"><div><small>MARKET POSITION</small><h3>Распределение статусов</h3></div></div><div id="reportStatusChart" class="donut-wrap"><div class="skeleton"></div></div></section>
+          <section class="panel"><div class="panel-head"><div><small>MARKET POSITION</small><h3>Рыночные позиции Kaspi</h3></div></div><div id="reportStatusChart" class="donut-wrap"><div class="skeleton"></div></div></section>
           <section class="panel"><div class="panel-head"><div><small>DATA SOURCES</small><h3>Покрытие площадок</h3></div></div><div id="reportPlatformChart" class="platform-chart"><div class="skeleton"></div></div></section>
           <section class="panel span2"><div class="panel-head"><div><small>BRAND EXPOSURE</small><h3>Бренды с наибольшим количеством рисков</h3></div></div><div id="reportBrandRisks" class="brand-risk-chart"><div class="skeleton"></div></div></section>
           <section class="panel"><div class="panel-head"><div><small>PRICE BANDS</small><h3>Распределение цен</h3></div></div><div id="reportPriceBands" class="price-band-chart"><div class="skeleton"></div></div></section>
@@ -147,34 +168,41 @@
         <section class="panel generated-reports"><div class="panel-head"><div><small>EXPORTS</small><h3>Сформированные файлы</h3></div></div><div class="reports-list" id="reportsList"><div class="loader">Загрузка отчётов…</div></div></section>
       </section>
 
+      <section class="page" id="page-schedules"><div class="page-command-bar"><button class="primary" id="addSchedule"> <span data-i18n="schedule_add">Добавить расписание</span></button></div><div class="schedule-summary" id="scheduleSummary"><article><small data-i18n="schedule_active">Активных заданий</small><b>0</b></article><article><small data-i18n="schedule_next">Следующий запуск</small><b>—</b></article><article><small data-i18n="schedule_last">Последний результат</small><b>—</b></article></div><div class="schedule-list" id="scheduleList"><div class="empty" data-i18n="schedule_empty">Расписания ещё не созданы</div></div><section class="panel schedule-runs-panel"><div class="panel-head"><div><small>RUN HISTORY</small><h3 data-i18n="schedule_history">Последние плановые запуски</h3></div></div><div class="schedule-runs" id="scheduleRuns"></div></section></section>
+
       {% if current_user.role == 'admin' %}
       <section class="page" id="page-users">
-        <div class="section-head"><div><small>ACCESS CONTROL</small><h2 data-i18n="users_title">Пользователи</h2><p data-i18n="users_subtitle">Роли, доступ и персональные параметры отображения.</p></div><button class="primary" id="addUser"><img class="button-icon" src="{{ url_for('static', filename='icons/users.svg') }}" alt=""><span data-i18n="add_user">Добавить пользователя</span></button></div>
+        <div class="page-command-bar"><button class="primary" id="addUser"><img class="button-icon" src="{{ url_for('static', filename='icons/users.svg') }}" alt=""><span data-i18n="add_user">Добавить пользователя</span></button></div>
         <div class="users-grid" id="usersGrid"><div class="loader">Загрузка пользователей…</div></div>
       </section>
       {% endif %}
 
       <section class="page" id="page-settings">
-        <div class="section-head"><div><small>PERSONAL CONFIGURATION</small><h2 data-i18n="settings_title">Настройки</h2><p data-i18n="settings_subtitle">Язык, курсы валют и расчёт потенциальной маржи сохраняются отдельно для каждого пользователя.</p></div><button class="primary" id="saveSettings"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="save">Сохранить</span></button></div>
+        <div class="page-command-bar"><button class="primary" id="saveSettings"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="save">Сохранить</span></button></div>
         <div class="settings-grid">
-          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
+          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article><article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/network.svg') }}" alt=""></span><div><h3>Доступ внутри сети</h3><p>Пользователи в той же Wi-Fi/LAN сети открывают панель по локальному IP. Вход по учётной записи остаётся обязательным.</p></div></div><div class="form-grid"><label>На этом компьютере<input id="cfgLocalUrl" readonly></label><label>Адрес в Wi-Fi/LAN<input id="cfgLanUrl" readonly></label><label>Порт<input id="cfgLanPort" readonly></label><label>Состояние<input id="cfgLanState" readonly></label></div></article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/matching.svg') }}" alt=""></span><div><h3 data-i18n="matching_rules">Правила сопоставления</h3><p data-i18n="matching_text">В MVP применяются консервативные ограничения.</p></div></div><ul class="rules"><li data-i18n="rule_exact">Kaspi: точное сравнение только внутри той же карточки и того же product_code.</li><li data-i18n="rule_segment">Ozon и межплатформенные связи: только артикул производителя либо полный строгий набор характеристик.</li><li data-i18n="rule_review">Похожие товары, другие бренды и модели сохраняются только как архив и не участвуют в аналитике.</li></ul></article>
-          {% if current_user.role == 'admin' %}<article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon Collector</h3><p>Сначала обрабатывается каталог продавца, затем дополнительные категории. Дубликаты удаляются по article.</p></div></div><div class="form-grid"><label>Каталог продавца<input id="cfgOzonSellerUrl" placeholder="https://www.ozon.ru/seller/..."></label><label>Expected seller<input id="cfgOzonExpectedSeller" placeholder="Название или seller ID"></label><label class="form-span-2">Дополнительные категории — по одной ссылке в строке<textarea id="cfgOzonCategoryUrls" rows="5" placeholder="https://www.ozon.ru/category/...&#10;https://www.ozon.ru/seller/.../?category=..."></textarea></label><label>Текущий продавец<input id="cfgOzonCurrentSeller" readonly></label><label>Ссылка продавца<input id="cfgOzonCurrentSellerUrl" readonly></label><label>Товаров в витрине<input id="cfgOzonCurrentProducts" readonly></label><label>Предложений в реестре<input id="cfgOzonCurrentOffers" readonly></label></div></article><article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Kaspi Collector</h3><p>Системные параметры локального сборщика.</p></div></div><div class="form-grid"><label>Seller ID<input id="cfgSellerId"></label><label>Seller name<input id="cfgSellerName"></label><label>City ID<input id="cfgCityId"></label><label>Expected products<input id="cfgExpected" type="number"></label><label>Discover workers<input id="cfgDiscover" type="number" min="1" max="4"></label><label>Price workers<input id="cfgPrice" type="number" min="1" max="4"></label></div></article>{% endif %}
+          {% if current_user.role == 'admin' %}<article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon Collector</h3><p>Каталог клиента и рыночные категории хранятся раздельно. В основной таблице показываются только товары Alfa Tires.</p></div></div><div class="form-grid"><label class="form-span-2">Категории каталога клиента — seller URL, по одной ссылке в строке<textarea id="cfgOzonClientUrls" rows="5" placeholder="https://www.ozon.ru/seller/alfa-tires-3381444/shiny-8502/"></textarea></label><label class="form-span-2">Рыночные категории — по одной ссылке в строке<textarea id="cfgOzonMarketUrls" rows="4" placeholder="https://www.ozon.ru/category/shiny-zimnie-8803/"></textarea></label><label>Ожидаемый продавец<input id="cfgOzonExpectedSeller" placeholder="Alfa Tires"></label><label>Текущий продавец<input id="cfgOzonCurrentSeller" readonly></label><label>Ссылка продавца<input id="cfgOzonCurrentSellerUrl" readonly></label><label>Товаров клиента<input id="cfgOzonCurrentProducts" readonly></label><label>Рыночных карточек<input id="cfgOzonMarketProducts" readonly></label><label>Предложений в реестре<input id="cfgOzonCurrentOffers" readonly></label><div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала все seller-категории Alfa Tires, затем рыночные категории. Чужие товары сохраняются только как рынок и не выводятся отдельными позициями клиенту.</span></div></div></article><article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Kaspi Collector</h3><p>Системные параметры локального сборщика.</p></div></div><div class="form-grid"><label>Seller ID<input id="cfgSellerId"></label><label>Seller name<input id="cfgSellerName"></label><label>City ID<input id="cfgCityId"></label><label>Expected products<input id="cfgExpected" type="number"></label><label>Discover workers<input id="cfgDiscover" type="number" min="1" max="4"></label><label>Price workers<input id="cfgPrice" type="number" min="1" max="4"></label></div></article>{% endif %}
         </div>
       </section>
     </main>
   </section>
 </div>
 
+<div class="help-backdrop" id="helpBackdrop" hidden></div>
+<aside class="help-drawer" id="helpDrawer" aria-hidden="true"><div class="help-head"><div><small data-i18n="help_page_label">СПРАВКА ПО РАЗДЕЛУ</small><h2 id="helpTitle">Помощь</h2></div><button class="icon" id="closeHelp" data-i18n-aria="help_close" aria-label="Закрыть помощь">×</button></div><div class="help-body" id="helpBody"></div><div class="help-footer"><img src="{{ url_for('static', filename='icons/help.svg') }}" alt=""><span data-i18n="help_contact">Не нашли ответ? Обратитесь к администратору рабочего пространства.</span></div></aside>
 <div class="backdrop" id="backdrop" hidden></div>
-<aside class="drawer" id="productDrawer" aria-hidden="true"><div class="drawer-head"><div><small>PRODUCT INTELLIGENCE</small><h2 id="drawerTitle">Товар</h2></div><button class="icon" id="closeDrawer">×</button></div><div class="drawer-body" id="drawerBody"><div class="loader">Загрузка…</div></div></aside>
+<aside class="drawer" id="productDrawer" aria-hidden="true"><div class="drawer-head"><div><small>PRODUCT</small><h2 id="drawerTitle">Товар</h2></div><button class="icon" id="closeDrawer">×</button></div><div class="drawer-body" id="drawerBody"><div class="loader">Загрузка…</div></div></aside>
 
 <div class="modal" id="logModal" hidden><div class="modal-card wide"><div class="modal-head"><div><small>PROCESS LOG</small><h3 id="logTitle">Журнал операции</h3></div><button class="icon modal-close">×</button></div><pre id="logContent"></pre><div class="modal-actions"><button class="secondary" id="refreshLog"><img class="button-icon" src="{{ url_for('static', filename='icons/refresh.svg') }}" alt="">Обновить</button><button class="danger" id="stopTask"><img class="button-icon" src="{{ url_for('static', filename='icons/stop.svg') }}" alt="">Остановить</button></div></div></div>
+<div class="modal" id="scheduleModal" hidden><div class="modal-card"><div class="modal-head"><h3>Новое расписание</h3><button class="icon modal-close">×</button></div><form id="scheduleForm"><label>Название<input name="name" required placeholder="Обновление цен Ozon"></label><label>Операция<select name="action" id="scheduleAction"></select></label><label>Периодичность<select name="recurrence_type" id="scheduleRecurrence"><option value="daily">Ежедневно</option><option value="weekly">По дням недели</option><option value="interval">Через интервал</option></select></label><label id="scheduleTimeField">Время<input name="time_of_day" type="time" value="03:00"></label><label id="scheduleIntervalField" hidden>Интервал<select name="interval_minutes"><option value="60">Каждый час</option><option value="180">Каждые 3 часа</option><option value="360" selected>Каждые 6 часов</option><option value="720">Каждые 12 часов</option><option value="1440">Каждые 24 часа</option></select></label><div id="scheduleWeekdays" hidden><span>Дни недели</span><div class="weekday-grid">{% for value,label in [(0,'Пн'),(1,'Вт'),(2,'Ср'),(3,'Чт'),(4,'Пт'),(5,'Сб'),(6,'Вс')] %}<label><input type="checkbox" name="weekdays" value="{{ value }}"><span>{{ label }}</span></label>{% endfor %}</div></div><label class="switch-line"><input name="is_enabled" type="checkbox" checked><span>Расписание активно</span></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="10" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="10" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
-{% if current_user.role == 'admin' %}<div class="modal" id="userModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="add_user">Добавить пользователя</h3><button class="icon modal-close">×</button></div><form id="userForm"><label>Имя<input name="display_name" required></label><label>Email<input name="email" type="email" required></label><label>Роль<select name="role"><option value="operator">Оператор</option><option value="viewer">Наблюдатель</option><option value="admin">Администратор</option></select></label><label>Временный пароль<input name="password" type="password" minlength="10" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Создать</button></div></form></div></div>{% endif %}
+{% if current_user.role == 'admin' %}<div class="modal" id="userModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="add_user">Добавить пользователя</h3><button class="icon modal-close">×</button></div><form id="userForm"><label>Имя<input name="display_name" required></label><label>Email<input name="email" type="email" required></label><label>Роль<select name="role"><option value="operator">Оператор</option><option value="viewer">Наблюдатель</option><option value="admin">Администратор</option></select></label><fieldset class="marketplace-access-field"><legend>Доступ к площадкам</legend><div class="marketplace-access-grid"><label><input type="checkbox" name="marketplaces" value="kaspi" checked><span>Kaspi</span></label><label><input type="checkbox" name="marketplaces" value="ozon" checked><span>Ozon</span></label><label class="coming"><input type="checkbox" name="marketplaces" value="forte_market" disabled><span>Forte Market · скоро</span></label><label class="coming"><input type="checkbox" name="marketplaces" value="halyk_market" disabled><span>Halyk Market · скоро</span></label></div></fieldset><label>Временный пароль<input name="password" type="password" minlength="10" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Создать</button></div></form></div></div>{% endif %}
 <div class="toast-stack" id="toasts"></div>
 <script>window.ITP_USER={{ current_user|tojson }};window.ITP_VERSION={{ version|tojson }};</script>
+<script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>
+<script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ version }}"></script>
 </body>
 </html>

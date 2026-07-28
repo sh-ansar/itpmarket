@@ -46,8 +46,11 @@ from config import (
 from data_service import DataService
 from schema import ensure_database
 from task_manager import TaskManager
+from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
+from scheduler_service import SchedulerService
+from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.2.1"
+VERSION = "3.4.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -55,6 +58,8 @@ CFG = ensure_directories(load_config())
 DB_PATH = resolve_path(CFG, "database")
 ensure_database(DB_PATH)
 AUTH = AuthService(DB_PATH)
+SAAS = SaaSService(DB_PATH)
+PUBLIC = PublicProductService(DB_PATH)
 DATA = DataService(
     DB_PATH,
     str(CFG["kaspi"]["seller_name"]),
@@ -137,6 +142,7 @@ ACTION_INFO = {
     },
     "ozon_discover": {"label": "Ozon: обнаружение товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_enrich": {"label": "Ozon: характеристики новых товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_market_search": {"label": "Ozon: поиск рыночных предложений", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_refresh_prices": {"label": "Ozon: обновление цен", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_refresh_stale": {"label": "Ozon: обновление характеристик", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_retry": {"label": "Ozon: повтор ошибок", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
@@ -213,6 +219,50 @@ def roles_required(*roles: str) -> Callable[[Callable[..., Any]], Callable[..., 
     return decorator
 
 
+def platform_roles_required(*roles: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    allowed = set(roles)
+    def decorator(view: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(view)
+        @login_required
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            user = current_user() or {}
+            if user.get("platform_role") not in allowed:
+                if is_api_request():
+                    return jsonify({"ok": False, "error": "Доступ к платформенной панели запрещён."}), 403
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def current_tenant() -> dict[str, Any] | None:
+    user = current_user() or {}
+    return SAAS.tenant_for_user(int(user["id"])) if user.get("id") and user.get("tenant_id") else None
+
+
+def allowed_marketplaces(user: dict[str, Any] | None = None) -> set[str]:
+    value = user or current_user() or {}
+    access = value.get("marketplaces")
+    if not isinstance(access, dict) or not access:
+        return {"kaspi", "ozon"}
+    return {code for code, enabled in access.items() if bool(enabled)}
+
+
+def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
+    filters = product_filters_from_request()
+    allowed = allowed_marketplaces()
+    requested = str(filters.get("platform") or "").strip()
+    visible = allowed & {"kaspi", "ozon"}
+    if requested and requested not in visible:
+        raise PermissionError("Нет доступа к выбранной площадке.")
+    if not requested:
+        if len(visible) == 1:
+            filters["platform"] = next(iter(visible))
+        elif not visible:
+            filters["platform"] = "__no_marketplace_access__"
+    return filters, visible
+
+
 def json_payload() -> dict[str, Any]:
     value = request.get_json(silent=True)
     return value if isinstance(value, dict) else {}
@@ -232,12 +282,13 @@ def record_event(event_type: str, entity_type: str | None = None, entity_id: str
     try:
         conn.execute(
             """
-            INSERT INTO app_events(user_id,event_type,entity_type,entity_id,details_json,created_at)
-            VALUES(?,?,?,?,?,datetime('now'))
+            INSERT INTO app_events(user_id,event_type,entity_type,entity_id,details_json,created_at,tenant_id)
+            VALUES(?,?,?,?,?,datetime('now'),?)
             """,
             (
                 user.get("id"), event_type, entity_type, entity_id,
                 json.dumps(details or {}, ensure_ascii=False),
+                user.get("tenant_id"),
             ),
         )
         conn.commit()
@@ -319,16 +370,20 @@ def load_ozon_public_config() -> dict[str, Any]:
     root = ROOT / "collectors" / "ozon"
     db_path = root / "data" / "ozon_registry.db"
     urls = _lines(root / "START_URLS.txt") or _lines(root / "START_URL.txt")
-    seller_urls = [url for url in urls if "/seller/" in url.lower()]
-    category_urls = [url for url in urls if url not in seller_urls]
+    client_urls = [url for url in urls if "/seller/" in url.lower()]
+    market_urls = [url for url in urls if url not in client_urls]
     result: dict[str, Any] = {
-        "seller_catalog_url": seller_urls[0] if seller_urls else "",
-        "category_urls": "\n".join(category_urls),
+        "client_catalog_urls": "\n".join(client_urls),
+        "market_category_urls": "\n".join(market_urls),
+        # Backward-compatible fields used by older frontends.
+        "seller_catalog_url": client_urls[0] if client_urls else "",
+        "category_urls": "\n".join(market_urls),
         "start_urls": urls,
         "expected_seller": (_lines(root / "EXPECTED_SELLER.txt") or [""])[0],
         "current_seller_name": "",
         "current_seller_url": "",
         "current_products": 0,
+        "current_market_products": 0,
         "current_offers": 0,
     }
     if not db_path.exists():
@@ -336,21 +391,51 @@ def load_ozon_public_config() -> dict[str, Any]:
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
+        tables = {
+            str(row[0]) for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "product_sources" in tables:
+            row = conn.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT CASE WHEN source_type='CLIENT_CATALOG' THEN article END) AS client_count,
+                    COUNT(DISTINCT CASE WHEN source_type='MARKET_CATEGORY' THEN article END) AS market_count
+                FROM product_sources
+                """
+            ).fetchone()
+            result["current_products"] = int(row["client_count"] or 0)
+            result["current_market_products"] = int(row["market_count"] or 0)
+        else:
+            result["current_products"] = int(conn.execute(
+                "SELECT COUNT(*) FROM products WHERE active=1 AND lower(discovery_url) LIKE '%/seller/%'"
+            ).fetchone()[0] or 0)
+            result["current_market_products"] = int(conn.execute(
+                "SELECT COUNT(*) FROM products WHERE active=1 AND lower(discovery_url) NOT LIKE '%/seller/%'"
+            ).fetchone()[0] or 0)
+
         row = conn.execute(
             """
-            SELECT seller_name, seller_url, COUNT(DISTINCT article) AS product_count, COUNT(*) AS offers_count
+            SELECT seller_name,seller_url,COUNT(DISTINCT article) AS product_count,
+                   COUNT(*) AS offers_count
             FROM offers
-            GROUP BY seller_name, seller_url
-            ORDER BY product_count DESC, offers_count DESC, seller_name ASC
+            WHERE active=1
+            GROUP BY seller_name,seller_url
+            ORDER BY
+                CASE WHEN lower(trim(seller_name))=lower(trim(?)) THEN 0 ELSE 1 END,
+                product_count DESC,offers_count DESC
             LIMIT 1
-            """
+            """,
+            (result["expected_seller"],),
         ).fetchone()
+        result["current_offers"] = int(conn.execute(
+            "SELECT COUNT(*) FROM offers WHERE active=1"
+        ).fetchone()[0] or 0)
         conn.close()
         if row:
             result["current_seller_name"] = str(row["seller_name"] or "")
             result["current_seller_url"] = str(row["seller_url"] or "")
-            result["current_products"] = int(row["product_count"] or 0)
-            result["current_offers"] = int(row["offers_count"] or 0)
     except Exception:
         pass
     return result
@@ -359,23 +444,38 @@ def load_ozon_public_config() -> dict[str, Any]:
 def save_ozon_public_config(payload: dict[str, Any]) -> None:
     root = ROOT / "collectors" / "ozon"
     root.mkdir(parents=True, exist_ok=True)
-    seller_url = str(payload.get("seller_catalog_url") or "").strip()
-    raw_categories = payload.get("category_urls") or ""
-    if isinstance(raw_categories, list):
-        categories = [str(value).strip() for value in raw_categories if str(value).strip()]
-    else:
-        categories = [value.strip() for value in str(raw_categories).splitlines() if value.strip()]
-    urls: list[str] = []
-    for value in [seller_url, *categories]:
-        if value and value not in urls:
-            urls.append(value)
+
+    def values(raw: Any) -> list[str]:
+        if isinstance(raw, list):
+            source = [str(value).strip() for value in raw]
+        else:
+            source = [value.strip() for value in str(raw or "").splitlines()]
+        result: list[str] = []
+        for value in source:
+            if value and value not in result:
+                result.append(value)
+        return result
+
+    client_urls = values(
+        payload.get("client_catalog_urls")
+        or payload.get("seller_catalog_url")
+        or ""
+    )
+    market_urls = values(
+        payload.get("market_category_urls")
+        or payload.get("category_urls")
+        or ""
+    )
+    urls = [*client_urls, *[url for url in market_urls if url not in client_urls]]
     if urls:
         (root / "START_URLS.txt").write_text("\n".join(urls) + "\n", encoding="utf-8")
         (root / "START_URL.txt").write_text(urls[0] + "\n", encoding="utf-8")
     if "expected_seller" in payload:
         (root / "EXPECTED_SELLER.txt").write_text(
-            str(payload.get("expected_seller") or "").strip() + "\n", encoding="utf-8"
+            str(payload.get("expected_seller") or "").strip() + "\n",
+            encoding="utf-8",
         )
+
 
 
 def network_public_config() -> dict[str, Any]:
@@ -423,14 +523,14 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
     codes_text = ",".join(code.removeprefix("kaspi:") for code in codes if not code.startswith("ozon:"))
     ozon_cli = ROOT / "collectors" / "ozon" / "ozon_collector.py"
     ozon_actions = {
-        "ozon_discover": "discover", "ozon_enrich": "enrich-new",
+        "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
         "ozon_refresh_prices": "refresh-prices", "ozon_refresh_stale": "refresh-stale",
         "ozon_retry": "retry-failed", "ozon_full_sync": "full-sync", "ozon_export": "export",
     }
     if action in ozon_actions:
         command = py_command(ozon_cli, ozon_actions[action])
-        if action in {"ozon_discover", "ozon_enrich", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync"}:
-            command += ["--limit", str(500 if action == "ozon_full_sync" else 100)]
+        if action in {"ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync"}:
+            command += ["--limit", str(500 if action == "ozon_full_sync" else 30 if action == "ozon_market_search" else 100)]
         return command
     if action == "sync_catalog":
         command = py_command(
@@ -517,6 +617,15 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
     raise ValueError("Неизвестная операция.")
 
 
+SCHEDULER = SchedulerService(
+    SAAS, TASKS, ACTION_INFO, build_action_command,
+    interval_seconds=int(os.environ.get("ITP_SCHEDULER_INTERVAL", "30")),
+)
+if os.environ.get("ITP_DISABLE_SCHEDULER", "0") != "1":
+    SCHEDULER.start()
+atexit.register(SCHEDULER.stop)
+
+
 @app.before_request
 def before_request() -> Any:
     g.user = None
@@ -529,14 +638,15 @@ def before_request() -> Any:
             session.clear()
 
     if not AUTH.has_users() and request.endpoint not in {
-        "setup", "setup_complete", "static", "health"
+        "setup", "setup_complete", "static", "health", "landing",
+        "registration", "registration_complete", "legal_document"
     }:
         if is_api_request():
             return json_error("Требуется первичная настройка.", 428)
         return redirect(url_for("setup"))
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        if request.endpoint in {"login", "setup", "forgot_password"}:
+        if request.endpoint in {"login", "setup", "forgot_password", "registration"}:
             token = request.form.get("csrf_token")
         elif is_api_request():
             token = request.headers.get("X-CSRF-Token")
@@ -570,7 +680,11 @@ def template_context() -> dict[str, Any]:
     return {
         "csrf_token": ensure_csrf(),
         "current_user": current_user(),
+        "current_tenant": current_tenant(),
         "version": VERSION,
+        "integration_catalog": INTEGRATION_CATALOG,
+        "public_capabilities": PUBLIC_CAPABILITIES,
+        "public_settings": PUBLIC.settings(),
     }
 
 
@@ -582,7 +696,7 @@ def health() -> Any:
 @app.route("/setup", methods=["GET", "POST"])
 def setup() -> Any:
     if AUTH.has_users():
-        return redirect(url_for("index" if current_user() else "login"))
+        return redirect(url_for("app_index" if current_user() else "login"))
     ensure_csrf()
     if request.method == "POST":
         try:
@@ -609,14 +723,14 @@ def setup() -> Any:
 def setup_complete() -> Any:
     recovery = session.pop("setup_recovery_code", None)
     if not recovery:
-        return redirect(url_for("index"))
+        return redirect(url_for("app_index"))
     return render_template("setup_complete.html", recovery_code=recovery)
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login() -> Any:
     if current_user():
-        return redirect(url_for("index"))
+        return redirect(url_for("app_index"))
     ensure_csrf()
     if request.method == "POST":
         ip = request.remote_addr or "local"
@@ -637,7 +751,7 @@ def login() -> Any:
             session["user_id"] = user["id"]
             session["csrf_token"] = secrets.token_urlsafe(32)
             next_url = request.args.get("next")
-            return redirect(next_url if next_url and next_url.startswith("/") else url_for("index"))
+            return redirect(next_url if next_url and next_url.startswith("/") else url_for("app_index"))
     return render_template("login.html")
 
 
@@ -664,19 +778,78 @@ def forgot_password() -> Any:
 @login_required
 def logout() -> Any:
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("landing"))
 
 
 @app.get("/")
+def landing() -> Any:
+    return render_template("landing.html", capabilities=PUBLIC_CAPABILITIES, has_users=AUTH.has_users())
+
+
+@app.route("/register", methods=["GET", "POST"])
+def registration() -> Any:
+    ensure_csrf()
+    if request.method == "POST":
+        payload = {
+            "company_name": request.form.get("company_name", ""),
+            "registration_number": request.form.get("registration_number", ""),
+            "contact_name": request.form.get("contact_name", ""),
+            "email": request.form.get("email", ""),
+            "phone": request.form.get("phone", ""),
+            "capabilities": request.form.getlist("capabilities"),
+            "estimated_products": request.form.get("estimated_products", "0"),
+            "comment": request.form.get("comment", ""),
+            "privacy_consent": request.form.get("privacy_consent") == "1",
+            "terms_consent": request.form.get("terms_consent") == "1",
+            "locale": request.form.get("locale", "ru"),
+            "source_page": "public_registration",
+        }
+        try:
+            request_id = SAAS.create_registration_request(payload)
+            session["registration_request_id"] = request_id
+            return redirect(url_for("registration_complete"))
+        except ValueError as exc:
+            flash(str(exc), "error")
+    return render_template("register.html", capabilities=PUBLIC_CAPABILITIES)
+
+
+@app.get("/register/complete")
+def registration_complete() -> Any:
+    return render_template("registration_complete.html", request_id=session.pop("registration_request_id", None))
+
+
+@app.get("/legal/<document>")
+def legal_document(document: str) -> Any:
+    if document not in {"privacy", "terms", "cookies", "consent", "offer"}: abort(404)
+    locale=str(request.args.get("lang") or "ru").casefold()
+    try: value=PUBLIC.legal_document(document,locale)
+    except KeyError: abort(404)
+    return render_template("legal.html",document=value)
+
+
+@app.get("/app")
 @login_required
-def index() -> Any:
+def app_index() -> Any:
     return render_template("app.html")
+
+
+@app.get("/platform")
+@platform_roles_required("superadmin", "support", "technical")
+def platform_index() -> Any:
+    return render_template("platform.html")
 
 
 @app.get("/api/session")
 @login_required
 def api_session() -> Any:
-    return json_ok(user=current_user(), csrf_token=ensure_csrf(), version=VERSION)
+    user = current_user() or {}
+    return json_ok(
+        user=user,
+        tenant=current_tenant(),
+        integrations=SAAS.integrations(int(user["tenant_id"])) if user.get("tenant_id") else [],
+        csrf_token=ensure_csrf(),
+        version=VERSION,
+    )
 
 
 @app.get("/api/overview")
@@ -687,6 +860,7 @@ def api_overview() -> Any:
             int(CFG["kaspi"].get("expected_count", 0)),
             int(CFG["analysis"].get("discover_workers", 2)),
             int((current_user() or {})["id"]),
+            allowed_platforms=allowed_marketplaces(),
         ),
         tasks=TASKS.states()[:12],
     )
@@ -695,7 +869,7 @@ def api_overview() -> Any:
 @app.get("/api/products/options")
 @login_required
 def api_product_options() -> Any:
-    return json_ok(**DATA.filter_options())
+    return json_ok(**DATA.filter_options(allowed_marketplaces()))
 
 
 def product_filters_from_request() -> dict[str, Any]:
@@ -705,6 +879,7 @@ def product_filters_from_request() -> dict[str, Any]:
         "platform": request.args.get("platform", ""),
         "status": request.args.get("status", ""),
         "watched": request.args.get("watched", ""),
+        "freshness": request.args.get("freshness", ""),
         "scope": request.args.get("scope", "all"),
         "sort": request.args.get("sort", "updated"),
         "direction": request.args.get("direction", "desc"),
@@ -719,18 +894,31 @@ def api_products() -> Any:
         page_size = int(request.args.get("page_size", CFG["app"].get("product_page_size", 30)))
     except ValueError:
         return json_error("Некорректная пагинация.")
-    return json_ok(result=DATA.products(page, page_size, product_filters_from_request(), int((current_user() or {})["id"])))
+    try:
+        filters, _ = requested_platform_filters()
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    return json_ok(result=DATA.products(
+        page, page_size, filters, int((current_user() or {})["id"])
+    ))
 
 
 @app.get("/api/products/codes")
 @login_required
 def api_product_codes() -> Any:
-    return json_ok(codes=DATA.product_codes(product_filters_from_request()))
+    try:
+        filters, _ = requested_platform_filters()
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    return json_ok(codes=DATA.product_codes(filters))
 
 
 @app.get("/api/products/<code>")
 @login_required
 def api_product(code: str) -> Any:
+    platform = "ozon" if str(code).startswith("ozon:") else "kaspi"
+    if platform not in allowed_marketplaces():
+        return json_error("Нет доступа к выбранной площадке.", 403)
     product = DATA.product(code, int((current_user() or {})["id"]))
     return json_ok(product=product) if product else json_error("Товар не найден.", 404)
 
@@ -773,11 +961,17 @@ def api_task_start() -> Any:
         return json_error("Неизвестная операция.")
     if user.get("role") not in info["roles"]:
         return json_error("Недостаточно прав.", 403)
+    task_platform = info.get("platform") or (
+        "ozon" if action.startswith("ozon_") else
+        "system" if action in {"export_report", "backup_database"} else "kaspi"
+    )
+    if task_platform in {"kaspi", "ozon"} and task_platform not in allowed_marketplaces(user):
+        return json_error("Для пользователя не разрешена эта площадка.", 403)
     codes = clean_codes(payload.get("codes"))
     scope = str(payload.get("scope") or ("selected" if codes else "all"))
     if scope == "selected" and not codes:
         return json_error("Не выбраны товары.")
-    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export"}:
+    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export"}:
         codes = []
         scope = "all"
     try:
@@ -843,7 +1037,7 @@ def api_tasks_clear() -> Any:
 @login_required
 def api_analytics_dashboard() -> Any:
     user = current_user() or {}
-    return json_ok(analytics=DATA.analytics_dashboard(int(user["id"])))
+    return json_ok(analytics=DATA.analytics_dashboard(int(user["id"]), allowed_marketplaces(user)))
 
 
 @app.get("/api/reports")
@@ -982,7 +1176,7 @@ def api_settings_put() -> Any:
 @app.get("/api/users")
 @roles_required("admin")
 def api_users_get() -> Any:
-    return json_ok(users=AUTH.list_users())
+    return json_ok(users=AUTH.list_users(int((current_user() or {})["tenant_id"])))
 
 
 @app.post("/api/users")
@@ -990,13 +1184,20 @@ def api_users_get() -> Any:
 def api_users_create() -> Any:
     payload = json_payload()
     try:
+        current = current_user() or {}
         user, recovery = AUTH.create_user(
             str(payload.get("email") or ""),
             str(payload.get("display_name") or ""),
             str(payload.get("password") or ""),
             str(payload.get("role") or "operator"),
-            int((current_user() or {})["id"]),
+            int(current["id"]),
+            tenant_id=int(current["tenant_id"]),
         )
+        marketplaces = payload.get("marketplaces")
+        if marketplaces is not None:
+            user = AUTH.update_user(
+                int(user["id"]), {"marketplaces": marketplaces}, int(current["id"])
+            )
         return json_ok(user=user, recovery_code=recovery)
     except ValueError as exc:
         return json_error(str(exc))
@@ -1030,6 +1231,117 @@ def api_users_recovery(user_id: int) -> Any:
         return json_ok(recovery_code=code)
     except ValueError as exc:
         return json_error(str(exc))
+
+
+@app.get("/api/tenant")
+@login_required
+def api_tenant_get() -> Any:
+    user = current_user() or {}
+    return json_ok(tenant=current_tenant(), integrations=SAAS.integrations(int(user["tenant_id"])))
+
+
+@app.get("/api/schedules")
+@login_required
+def api_schedules_get() -> Any:
+    user = current_user() or {}
+    tenant_id = int(user["tenant_id"])
+    return json_ok(
+        schedules=SAAS.schedules(tenant_id),
+        runs=SAAS.schedule_runs(tenant_id, int(request.args.get("limit", 50))),
+        actions=[{"code": code, "platform": value[0], "name": value[1]} for code, value in SCHEDULE_ACTIONS.items()],
+    )
+
+
+@app.post("/api/schedules")
+@roles_required("admin", "operator")
+def api_schedules_create() -> Any:
+    user = current_user() or {}
+    try:
+        return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), json_payload(), int(user["id"])))
+    except (ValueError, TypeError) as exc:
+        return json_error(str(exc))
+
+
+@app.put("/api/schedules/<int:schedule_id>")
+@roles_required("admin", "operator")
+def api_schedules_update(schedule_id: int) -> Any:
+    user = current_user() or {}
+    try:
+        return json_ok(schedule=SAAS.update_schedule(schedule_id, int(user["tenant_id"]), json_payload(), int(user["id"])))
+    except (ValueError, TypeError) as exc:
+        return json_error(str(exc))
+
+
+@app.delete("/api/schedules/<int:schedule_id>")
+@roles_required("admin")
+def api_schedules_delete(schedule_id: int) -> Any:
+    user = current_user() or {}
+    try:
+        SAAS.delete_schedule(schedule_id, int(user["tenant_id"]), int(user["id"]))
+        return json_ok(deleted=True)
+    except ValueError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.get("/api/platform/overview")
+@platform_roles_required("superadmin", "support", "technical")
+def api_platform_overview() -> Any:
+    user = current_user() or {}
+    overview = DATA.overview(int(CFG["kaspi"].get("expected_count", 0)), int(CFG["analysis"].get("discover_workers", 2)), int(user["id"]))
+    result = SAAS.platform_overview(int(overview.get("catalog_count") or 0), int(overview.get("processed_total_count") or overview.get("analyzed_count") or 0))
+    return json_ok(**result, requests=SAAS.registration_requests(), integration_catalog=SAAS.public_integrations())
+
+
+@app.get("/api/platform/tenants/<int:tenant_id>/detail")
+@platform_roles_required("superadmin", "support", "technical")
+def api_platform_tenant_detail(tenant_id: int) -> Any:
+    try: return json_ok(**SAAS.tenant_detail(tenant_id))
+    except ValueError as exc: return json_error(str(exc),404)
+
+
+@app.get("/api/platform/public-settings")
+@platform_roles_required("superadmin", "support", "technical")
+def api_platform_public_settings_get() -> Any:
+    return json_ok(settings=PUBLIC.settings())
+
+
+@app.put("/api/platform/public-settings")
+@platform_roles_required("superadmin")
+def api_platform_public_settings_put() -> Any:
+    try:
+        settings=PUBLIC.update_settings(json_payload(),int((current_user() or {})["id"]))
+        record_event("platform_public_settings_updated","platform_settings","public_product")
+        return json_ok(settings=settings)
+    except ValueError as exc: return json_error(str(exc))
+
+
+@app.put("/api/platform/tenants/<int:tenant_id>")
+@platform_roles_required("superadmin", "support")
+def api_platform_tenant_update(tenant_id: int) -> Any:
+    try:
+        return json_ok(tenant=SAAS.update_tenant(tenant_id, json_payload(), int((current_user() or {})["id"])))
+    except ValueError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/admin")
+@platform_roles_required("superadmin", "support")
+def api_platform_tenant_admin_create(tenant_id: int) -> Any:
+    payload=json_payload()
+    try:
+        user,recovery=AUTH.create_user(str(payload.get("email") or ""),str(payload.get("display_name") or ""),str(payload.get("password") or ""),"admin",int((current_user() or {})["id"]),tenant_id=tenant_id)
+        return json_ok(user=user,recovery_code=recovery)
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/platform/registration-requests/<int:request_id>/<decision>")
+@platform_roles_required("superadmin", "support")
+def api_platform_registration_review(request_id: int, decision: str) -> Any:
+    try:
+        return json_ok(request=SAAS.review_registration(request_id,decision,int((current_user() or {})["id"])))
+    except ValueError as exc:
+        return json_error(str(exc),409)
 
 
 @app.post("/api/account/password")
