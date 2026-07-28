@@ -36,7 +36,7 @@ def main() -> int:
     finally:
         conn.close()
 
-    print("ITP Market Intelligence 3.1.0 migration completed.")
+    print("Spyon 3.1.0 migration completed.")
     print(f"Backup: {backup}")
     print(f"Database integrity: {integrity}")
     print(f"Catalog products: {catalog}")

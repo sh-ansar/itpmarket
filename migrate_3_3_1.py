@@ -29,7 +29,7 @@ def main()->int:
         seen.add(k); merged.append(url)
     URLS_PATH.parent.mkdir(parents=True,exist_ok=True)
     URLS_PATH.write_text('\n'.join(merged)+'\n',encoding='utf-8')
-    print('ITP Market Intelligence 3.3.1 migration: OK')
+    print('Spyon 3.3.1 migration: OK')
     print(f'Ozon sources: {len(merged)}')
     print('Marketplace permissions initialized for existing users.')
     print('Products, prices and history were not changed.')

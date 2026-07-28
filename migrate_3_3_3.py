@@ -12,7 +12,7 @@ def main():
     conn.commit()
     users=conn.execute('SELECT COUNT(*) FROM app_user_preferences').fetchone()[0]
     conn.close()
-    print('ITP Market Intelligence 3.3.3 migration: OK')
+    print('Spyon 3.3.3 migration: OK')
     print(f'User interface preferences: {users}')
     print('Theme preference column: OK')
     print('Product, price and operation tables were not changed.')

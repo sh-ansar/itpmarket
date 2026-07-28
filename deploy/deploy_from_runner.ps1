@@ -50,7 +50,7 @@ try {
     & .\INSTALL.bat
     if ($LASTEXITCODE -ne 0) { throw "Runtime installation failed" }
 
-    & .\SERVER_SETUP_192_168_1_75.bat
+    & .\CONFIGURE_SERVER.bat $ServerIp
     if ($LASTEXITCODE -ne 0) { Write-Warning "Server setup returned $LASTEXITCODE" }
 
     $migrations = @(

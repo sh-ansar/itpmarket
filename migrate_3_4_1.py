@@ -11,7 +11,7 @@ def main():
     try:
         columns={row[1] for row in conn.execute("PRAGMA table_info(operation_schedules)")}
         ok="run_date" in columns
-        print("ITP Market Intelligence 3.4.1 migration:", "OK" if ok else "FAILED")
+        print("Spyon 3.4.1 migration:", "OK" if ok else "FAILED")
         print("One-time schedule date column:", "OK" if ok else "MISSING")
         print("Existing schedules, products, prices and collector data were preserved.")
         return 0 if ok else 1

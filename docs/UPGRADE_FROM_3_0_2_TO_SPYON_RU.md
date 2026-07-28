@@ -1,54 +1,52 @@
-# Обновление сервера с 3.0.2 до Spyon 3.4.1
+# Обновление сервера с 3.0.2 до Spyon
 
-Если на сервере осталась старая версия 3.0.2, простой pull может быть недостаточен:
-нужно подтянуть правильную ветку, прогнать все миграции базы и перезапустить процесс.
+Если на сервере старая версия, не копируйте файлы проекта вручную поверх рабочей папки. Обновляйте через Git и один upgrade-скрипт.
 
-## Быстрый вариант
+## Быстрый запуск
 
-На сервере откройте PowerShell. Надёжнее запускать скрипт из временной папки,
-чтобы он сам мог привести `C:\ITPMarket\app` к состоянию Git:
+Откройте PowerShell на сервере и выполните команды по одной:
+
+```powershell
+New-Item -ItemType Directory -Force C:\Temp | Out-Null
+```
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/sh-ansar/itpmarket/feature/spyon-admin-panel/UPGRADE_SERVER_FROM_3_0_2.ps1" -OutFile "C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1"
+```
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
+```
+
+```powershell
 C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1 -ProjectRoot C:\ITPMarket\app -Branch feature/spyon-admin-panel
 ```
 
-Если скрипт уже лежит внутри `C:\ITPMarket\app`, его тоже можно запускать оттуда:
-он сам перезапустится из `%TEMP%`, если этот файл ещё не отслеживается Git и мешает checkout.
-
-Скрипт:
+## Что делает скрипт
 
 - останавливает сервер;
-- делает резервные копии `data\unityre_kaspi.db`, `collectors\ozon\data\ozon_registry.db` и config-файлов;
+- делает backup базы, Ozon-базы и config-файлов;
 - сохраняет локальные изменения рабочей папки в `backups\pre_upgrade_worktree_*`;
-- делает `git fetch`, чистый checkout нужной ветки и `pull --ff-only`;
-- устанавливает runtime;
-- запускает миграции `3.1.0 -> 3.4.1`;
+- приводит код к состоянию ветки `feature/spyon-admin-panel`;
+- сохраняет рабочие данные: `data`, `collectors\ozon\data`, `.runtime`, `.venv`, `.kaspi_profile`, `.playwright`, `logs`, `output`, `backups`;
+- запускает миграции `migrate_3_1_0.py` ... `migrate_3_4_1.py`;
 - чистит `__pycache__`;
-- запускает self-test и сервер;
-- проверяет `/health`.
+- запускает self-test, сервер и проверяет `/health`.
 
-## Если всё ещё виден старый интерфейс
+## Если снова виден старый интерфейс
 
-Проверьте:
-
-1. Сервер запущен из той же папки, где обновлялся Git.
-2. Ветка:
+Проверьте, что сервер запущен из той же папки:
 
 ```powershell
+cd C:\ITPMarket\app
 git branch --show-current
 git log -1 --oneline
 ```
 
-Ожидается ветка `feature/spyon-admin-panel` и коммит с `Rebrand admin panel to Spyon`.
+Ожидается ветка `feature/spyon-admin-panel` и свежий коммит из этой ветки. После успешного обновления в браузере нажмите `Ctrl+F5`.
 
-3. Процесс был перезапущен после pull.
-4. В браузере нажмите `Ctrl+F5`, потому что static-файлы версионируются query-string, но браузер всё равно может держать старые вкладки.
+## Как обновлять дальше
 
-## Про старые файлы
+Старые ручные bat-файлы для отдельных версий больше не используются. Для старого сервера используйте `UPGRADE_SERVER_FROM_3_0_2.ps1`.
 
-Не удаляйте вручную `data`, `.runtime`, `.kaspi_profile`, `.playwright`, `logs`, `output`, `backups` и данные Ozon.
-Они содержат рабочую базу, профили браузеров, runtime и историю запусков.
-
-Если разворачивать через `deploy\deploy_from_runner.ps1`, он использует mirror-copy и удаляет старые файлы приложения,
-но сохраняет постоянные директории.
+Для автоматического деплоя нормальная схема такая: проверяем feature-ветку вручную, потом мержим ее в `main`, а self-hosted GitHub runner на сервере запускает `deploy\deploy_from_runner.ps1` после каждого push в `main`.

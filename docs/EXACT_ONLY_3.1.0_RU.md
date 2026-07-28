@@ -1,4 +1,4 @@
-# Exact-only matching в ITP Market Intelligence 3.1.0
+# Exact-only matching в Spyon 3.1.0
 
 ## 1. Причина изменения
 

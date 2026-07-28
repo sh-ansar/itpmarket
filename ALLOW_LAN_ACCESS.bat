@@ -9,8 +9,8 @@ if errorlevel 1 (
   exit /b
 )
 
-netsh advfirewall firewall delete rule name="ITP Market Intelligence 8765" >nul 2>&1
-netsh advfirewall firewall add rule name="ITP Market Intelligence 8765" dir=in action=allow protocol=TCP localport=8765 remoteip=LocalSubnet profile=any edge=no
+netsh advfirewall firewall delete rule name="Spyon 8765" >nul 2>&1
+netsh advfirewall firewall add rule name="Spyon 8765" dir=in action=allow protocol=TCP localport=8765 remoteip=LocalSubnet profile=any edge=no
 if errorlevel 1 (
   echo ERROR: Windows Firewall rule could not be created.
   pause

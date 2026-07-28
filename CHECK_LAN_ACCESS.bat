@@ -13,7 +13,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ips=Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.AddressState -eq 'Preferred'} | Select-Object -ExpandProperty IPAddress -Unique;" ^
   "Write-Host ''; Write-Host 'Open one of these addresses on a device connected to the same Wi-Fi:' -ForegroundColor Cyan;" ^
   "foreach($ip in $ips){Write-Host ('  http://' + $ip + ':8765')};" ^
-  "$rule=Get-NetFirewallRule -DisplayName 'ITP Market Intelligence 8765';" ^
+  "$rule=Get-NetFirewallRule -DisplayName 'Spyon 8765';" ^
   "if($rule -and $rule.Enabled -eq 'True'){Write-Host ''; Write-Host 'Windows Firewall rule: ENABLED' -ForegroundColor Green}else{Write-Host ''; Write-Host 'Windows Firewall rule: MISSING. Run ALLOW_LAN_ACCESS.bat as Administrator.' -ForegroundColor Yellow}"
 
 echo.

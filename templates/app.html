@@ -9,16 +9,6 @@
   <script>(function(){var p=localStorage.getItem("itp_theme")||"system",d=p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=p;document.documentElement.style.colorScheme=d;}());</script>
   <link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_1.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_2.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_4.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_1.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_3.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_3_3_1.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_4.css') }}?v={{ version }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_4_1.css') }}?v={{ version }}">
 </head>
 <body>
 <div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><i></i></div><strong>Spyon</strong><span data-i18n="boot_text">Инициализация аналитического контура</span></div>

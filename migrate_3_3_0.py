@@ -9,7 +9,7 @@ def main()->int:
     conn=sqlite3.connect(DB_PATH); conn.row_factory=sqlite3.Row
     try:
         tenant=conn.execute('SELECT * FROM tenants ORDER BY id LIMIT 1').fetchone()
-        print('ITP Market Intelligence 3.3.0 migration: OK')
+        print('Spyon 3.3.0 migration: OK')
         print(f"Default workspace: {tenant['name'] if tenant else 'not created'}")
         print(f"Users: {conn.execute('SELECT COUNT(*) FROM app_users').fetchone()[0]}")
         print(f"Tenant memberships: {conn.execute('SELECT COUNT(*) FROM tenant_users').fetchone()[0]}")

@@ -58,7 +58,7 @@ def now_iso() -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Экспорт отчёта ITP Market Intelligence")
+    parser = argparse.ArgumentParser(description="Экспорт отчёта Spyon")
     parser.add_argument("--db", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--seller-name", default="Unityre")
