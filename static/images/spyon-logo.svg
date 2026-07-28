@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Spyon">
+  <defs>
+    <linearGradient id="spyon-a" x1="16" y1="14" x2="82" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00A6D6"/>
+      <stop offset="1" stop-color="#087DA8"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="22" fill="#EAF8FC"/>
+  <path d="M21 30c7-8 16-12 27-12 17 0 31 11 36 28-5 17-19 28-36 28-11 0-20-4-27-12l10-10c5 5 10 8 17 8 9 0 17-5 21-14-4-9-12-14-21-14-7 0-12 3-17 8L21 30Z" fill="url(#spyon-a)"/>
+  <circle cx="48" cy="46" r="11" fill="#021D2E"/>
+  <circle cx="52" cy="42" r="4" fill="#fff"/>
+  <path d="M18 68h34c8 0 14-5 14-12 0-8-6-12-14-12H38c-5 0-8-2-8-6s3-6 8-6h31" fill="none" stroke="#021D2E" stroke-width="8" stroke-linecap="round"/>
+</svg>

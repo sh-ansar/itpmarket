@@ -1,4 +1,4 @@
-# ITP Market Intelligence 3.1.0
+# Spyon 3.1.0
 
 Локальный MVP для мониторинга цен Unityre на Kaspi и ведения отдельного реестра Ozon.
 

@@ -1,4 +1,4 @@
-# ITP Market Intelligence 3.4.1
+# Spyon 3.4.1
 
 Hotfix устанавливается поверх 3.4.0.
 

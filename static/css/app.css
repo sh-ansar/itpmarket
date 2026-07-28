@@ -7,7 +7,7 @@
 .form-span-2{grid-column:1/-1}.form-grid textarea{width:100%;resize:vertical;min-height:108px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;color:var(--ink);font:inherit}.form-grid textarea:focus{outline:2px solid rgba(6,169,231,.16);border-color:var(--blue)}
 
 /* ================================================================
-   ITP Market Intelligence 3.0.4 — visual system and analytics
+   Spyon 3.0.4 — visual system and analytics
    ================================================================ */
 :root{
   --orange:#10aee4;

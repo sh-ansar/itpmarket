@@ -8,7 +8,7 @@
 .platform-header{
   max-width:none;
 }
-html[data-theme="dark"] .platform-header img:not([src*="itp-logo"]){
+html[data-theme="dark"] .platform-header img:not([src*="spyon-logo"]){
   filter:brightness(0) invert(1) !important;
   opacity:.9 !important;
 }

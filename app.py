@@ -834,7 +834,7 @@ def app_index() -> Any:
 
 
 @app.get("/platform")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def platform_index() -> Any:
     return render_template("platform.html")
 
@@ -1120,6 +1120,7 @@ def api_settings_get() -> Any:
     return json_ok(
         preferences=DATA.preferences(int(user["id"])),
         config=config_result,
+        tenant=current_tenant(),
         network=network_public_config(),
     )
 
@@ -1132,6 +1133,13 @@ def api_settings_put() -> Any:
     try:
         preferences_payload = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else payload
         preferences = DATA.save_preferences(int(user["id"]), preferences_payload)
+        tenant_result = None
+        if user.get("role") == "admin" and isinstance(payload.get("tenant"), dict) and user.get("tenant_id"):
+            tenant_result = SAAS.update_tenant_profile(
+                int(user["tenant_id"]),
+                payload["tenant"],
+                int(user["id"]),
+            )
         config_result = None
         if user.get("role") == "admin" and isinstance(payload.get("config"), dict):
             config_payload = payload["config"]
@@ -1168,7 +1176,7 @@ def api_settings_put() -> Any:
             config_result = public_config(CFG)
             config_result["ozon"] = load_ozon_public_config()
         record_event("settings_updated", "settings", "user", {"locale": preferences.get("locale")})
-        return json_ok(preferences=preferences, config=config_result)
+        return json_ok(preferences=preferences, config=config_result, tenant=tenant_result)
     except (ValueError, TypeError) as exc:
         return json_error(f"Некорректные настройки: {exc}")
 
@@ -1284,7 +1292,7 @@ def api_schedules_delete(schedule_id: int) -> Any:
 
 
 @app.get("/api/platform/overview")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_overview() -> Any:
     user = current_user() or {}
     overview = DATA.overview(int(CFG["kaspi"].get("expected_count", 0)), int(CFG["analysis"].get("discover_workers", 2)), int(user["id"]))
@@ -1293,14 +1301,14 @@ def api_platform_overview() -> Any:
 
 
 @app.get("/api/platform/tenants/<int:tenant_id>/detail")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_tenant_detail(tenant_id: int) -> Any:
     try: return json_ok(**SAAS.tenant_detail(tenant_id))
     except ValueError as exc: return json_error(str(exc),404)
 
 
 @app.get("/api/platform/public-settings")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_public_settings_get() -> Any:
     return json_ok(settings=PUBLIC.settings())
 
@@ -1316,7 +1324,7 @@ def api_platform_public_settings_put() -> Any:
 
 
 @app.put("/api/platform/tenants/<int:tenant_id>")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_tenant_update(tenant_id: int) -> Any:
     try:
         return json_ok(tenant=SAAS.update_tenant(tenant_id, json_payload(), int((current_user() or {})["id"])))
@@ -1325,7 +1333,7 @@ def api_platform_tenant_update(tenant_id: int) -> Any:
 
 
 @app.post("/api/platform/tenants/<int:tenant_id>/admin")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_tenant_admin_create(tenant_id: int) -> Any:
     payload=json_payload()
     try:
@@ -1336,7 +1344,7 @@ def api_platform_tenant_admin_create(tenant_id: int) -> Any:
 
 
 @app.post("/api/platform/registration-requests/<int:request_id>/<decision>")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_registration_review(request_id: int, decision: str) -> Any:
     try:
         return json_ok(request=SAAS.review_registration(request_id,decision,int((current_user() or {})["id"])))
@@ -1404,7 +1412,7 @@ if __name__ == "__main__":
     threading.Thread(target=open_panel, daemon=True).start()
     host, port = runtime_host(), runtime_port()
     print("=" * 72)
-    print(f" ITP MARKET INTELLIGENCE {VERSION}")
+    print(f" SPYON {VERSION}")
     print(f" Local: http://127.0.0.1:{port}")
     for address in local_ipv4_addresses():
         print(f" Wi-Fi/LAN: http://{address}:{port}")

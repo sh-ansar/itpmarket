@@ -213,6 +213,48 @@ class SaaSService:
             return dict(conn.execute("SELECT * FROM tenants WHERE id=?",(int(tenant_id),)).fetchone())
         finally: conn.close()
 
+    def update_tenant_profile(self, tenant_id: int, payload: dict[str, Any], actor_user_id: int) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        registration_number = str(payload.get("registration_number") or "").strip()
+        contact_email = str(payload.get("contact_email") or "").strip().casefold()
+        contact_phone = str(payload.get("contact_phone") or "").strip()
+        if len(name) < 2:
+            raise ValueError("Укажите название компании.")
+        if contact_email and ("@" not in contact_email or "." not in contact_email.rsplit("@", 1)[-1]):
+            raise ValueError("Укажите корректный email компании.")
+        stamp = now_iso()
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
+            if not row:
+                raise ValueError("Компания не найдена.")
+            conn.execute(
+                """
+                UPDATE tenants
+                SET name=?, registration_number=?, contact_email=?, contact_phone=?, updated_at=?
+                WHERE id=?
+                """,
+                (name, registration_number, contact_email, contact_phone, stamp, int(tenant_id)),
+            )
+            self._audit(
+                conn,
+                actor_user_id,
+                "tenant_profile_updated",
+                int(tenant_id),
+                "tenant",
+                str(tenant_id),
+                {
+                    "name": name,
+                    "registration_number": registration_number,
+                    "contact_email": contact_email,
+                    "contact_phone": contact_phone,
+                },
+            )
+            conn.commit()
+            return dict(conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone())
+        finally:
+            conn.close()
+
     @staticmethod
     def next_run_for(
         recurrence_type: str,

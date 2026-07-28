@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <meta name="app-version" content="{{ version }}">
-  <title>ITP Market Intelligence</title>
+  <title>Spyon</title>
   <script>(function(){var p=localStorage.getItem("itp_theme")||"system",d=p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=p;document.documentElement.style.colorScheme=d;}());</script>
-  <link rel="icon" href="{{ url_for('static', filename='images/itp-logo.png') }}">
+  <link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ version }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2.css') }}?v={{ version }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_2_1.css') }}?v={{ version }}">
@@ -21,14 +21,14 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app_3_4_1.css') }}?v={{ version }}">
 </head>
 <body>
-<div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP"><i></i></div><strong>ITP Market Intelligence</strong><span data-i18n="boot_text">Инициализация аналитического контура</span></div>
+<div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><i></i></div><strong>Spyon</strong><span data-i18n="boot_text">Инициализация аналитического контура</span></div>
 
 <div class="app app-topnav" id="app" hidden>
   <header class="global-header">
     <div class="global-header__row">
-      <a class="top-brand" href="#" data-page-link="dashboard" aria-label="Market Intelligence">
-        <img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP">
-        <span><b>Market Intelligence</b></span>
+      <a class="top-brand" href="#" data-page-link="dashboard" aria-label="Spyon">
+        <img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon">
+        <span><b>Spyon</b></span>
       </a>
 
       <button class="icon mobile top-menu-button" id="mobileMenu" data-i18n-aria="menu" aria-label="Меню" aria-controls="sidebar" aria-expanded="false">
@@ -70,7 +70,7 @@
         <button class="profile" id="profileButton"><span>{{ current_user.display_name[:1] | upper }}</span><div><b>{{ current_user.display_name }}</b><small id="profileRole">{{ current_user.role }}</small></div><i>⌄</i></button>
         <div class="profile-menu" id="profileMenu" hidden>
           <div class="profile-menu__identity"><b>{{ current_user.display_name }}</b><small>{{ current_user.email }}</small>{% if current_tenant %}<small class="tenant-name">{{ current_tenant.name }}</small>{% endif %}</div>
-          {% if current_user.platform_role %}<a class="profile-menu-link" href="{{ url_for('platform_index') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Платформенная панель</span></a>{% endif %}
+          {% if current_user.platform_role == 'superadmin' %}<a class="profile-menu-link" href="{{ url_for('platform_index') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Админ панель</span></a>{% endif %}
           <button data-page-link="settings"><img class="button-icon" src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""><span data-i18n="nav_settings">Настройки</span></button>
           <button id="openPassword"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="change_password">Изменить пароль</span></button>
           <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit"><img class="button-icon" src="{{ url_for('static', filename='icons/close.svg') }}" alt=""><span data-i18n="logout">Выйти</span></button></form>
@@ -90,14 +90,14 @@
       <section class="page active" id="page-dashboard">
         <div class="hero">
           <div class="hero-copy">
-            <span class="eyebrow">ITP MARKET INTELLIGENCE</span>
+            <span class="eyebrow">SPYON</span>
             <h2 data-i18n="hero_title">Единая аналитика цен и рыночных сигналов без ложных сравнений.</h2>
             <p data-i18n="hero_text">Kaspi сравнивается только внутри одной карточки товара по product_code. Похожие товары, другие бренды и модели не влияют на цену.</p>
             <div class="hero-buttons"><button class="primary" data-page-link="products"><img class="button-icon" src="{{ url_for('static', filename='icons/products.svg') }}" alt=""><span data-i18n="open_catalog_button">Открыть каталог</span></button><button class="ghost" data-page-link="reports"><img class="button-icon" src="{{ url_for('static', filename='icons/reports.svg') }}" alt=""><span data-i18n="open_analytics">Открыть аналитику</span></button></div>
           </div>
           <div class="hero-orbit">
             <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-            <div class="orbit-core"><img src="{{ url_for('static', filename='images/itp-logo.png') }}" alt="ITP"></div>
+            <div class="orbit-core"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"></div>
             <div class="orbit-node n1"><b id="heroProducts">0</b><small data-i18n="products_count_label">товаров</small></div>
             <div class="orbit-node n2"><b id="heroAnalyzed">0%</b><small data-i18n="data_ready_label">данных готово</small></div>
             <div class="orbit-node n3"><b id="heroRisks">0</b><small data-i18n="price_risks_label">ценовых рисков</small></div>
@@ -114,7 +114,7 @@
         <div class="dashboard-grid">
           <section class="panel span2"><div class="panel-head"><div><small>PRICE POSITION</small><h3 data-i18n="status_distribution">Рыночные позиции Kaspi</h3></div><button class="text-button" data-page-link="products" data-i18n="open_catalog">Открыть каталог →</button></div><div class="status-chart" id="statusChart"><div class="skeleton"></div></div></section>
           <section class="panel"><div class="panel-head"><div><small>DATA QUALITY</small><h3 data-i18n="quality_control">Контроль качества</h3></div></div><div class="health" id="healthList"></div></section>
-          <section class="panel"><div class="panel-head"><div><small>QUICK START</small><h3 data-i18n="operations">Операции</h3></div></div><div class="quick-actions"><button data-quick-action="update_own_prices"><b>Kaspi</b><span data-i18n="refresh_own_prices">Обновить цены Unityre</span></button><button data-quick-action="scan_market"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button><button data-quick-action="ozon_refresh_prices"><b>Ozon</b><span data-i18n="refresh_market_prices">Обновить цены Ozon</span></button><button data-quick-action="export_report"><b>ITP</b><span data-i18n="build_report">Сформировать отчёт</span></button></div></section>
+          <section class="panel"><div class="panel-head"><div><small>QUICK START</small><h3 data-i18n="operations">Операции</h3></div></div><div class="quick-actions"><button data-quick-action="update_own_prices"><b>Kaspi</b><span data-i18n="refresh_own_prices">Обновить цены Unityre</span></button><button data-quick-action="scan_market"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button><button data-quick-action="ozon_refresh_prices"><b>Ozon</b><span data-i18n="refresh_market_prices">Обновить цены Ozon</span></button><button data-quick-action="export_report"><b>Spyon</b><span data-i18n="build_report">Сформировать отчёт</span></button></div></section>
           <section class="panel span2"><div class="panel-head"><div><small>RECENT ACTIVITY</small><h3 data-i18n="recent_activity">Последняя активность</h3></div><button class="text-button" data-page-link="operations" data-i18n="all_operations">Все операции →</button></div><div class="activity-list" id="activityList"><div class="skeleton"></div></div></section>
         </div>
       </section>
@@ -181,6 +181,7 @@
       <section class="page" id="page-settings">
         <div class="page-command-bar"><button class="primary" id="saveSettings"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="save">Сохранить</span></button></div>
         <div class="settings-grid">
+          {% if current_user.role == 'admin' %}<article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/users.svg') }}" alt=""></span><div><h3 data-i18n="company_profile">Компания</h3><p data-i18n="company_profile_text">Данные рабочего пространства, которые были указаны при регистрации.</p></div></div><div class="form-grid"><label><span data-i18n="company_name">Название компании</span><input id="tenantName"></label><label><span data-i18n="company_registration_number">Регистрационный номер / БИН</span><input id="tenantRegistrationNumber"></label><label><span data-i18n="company_email">Email компании</span><input id="tenantContactEmail" type="email"></label><label><span data-i18n="company_phone">Телефон компании</span><input id="tenantContactPhone"></label></div></article>{% endif %}
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article><article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/network.svg') }}" alt=""></span><div><h3>Доступ внутри сети</h3><p>Пользователи в той же Wi-Fi/LAN сети открывают панель по локальному IP. Вход по учётной записи остаётся обязательным.</p></div></div><div class="form-grid"><label>На этом компьютере<input id="cfgLocalUrl" readonly></label><label>Адрес в Wi-Fi/LAN<input id="cfgLanUrl" readonly></label><label>Порт<input id="cfgLanPort" readonly></label><label>Состояние<input id="cfgLanState" readonly></label></div></article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/matching.svg') }}" alt=""></span><div><h3 data-i18n="matching_rules">Правила сопоставления</h3><p data-i18n="matching_text">В MVP применяются консервативные ограничения.</p></div></div><ul class="rules"><li data-i18n="rule_exact">Kaspi: точное сравнение только внутри той же карточки и того же product_code.</li><li data-i18n="rule_segment">Ozon и межплатформенные связи: только артикул производителя либо полный строгий набор характеристик.</li><li data-i18n="rule_review">Похожие товары, другие бренды и модели сохраняются только как архив и не участвуют в аналитике.</li></ul></article>

@@ -1,4 +1,4 @@
-/* ITP Market Intelligence 3.3.3 — labelled navigation, themes and contextual help */
+/* Spyon 3.3.3 — labelled navigation, themes and contextual help */
 :root{--surface:#fff;--surface-2:#f6fafc;--surface-3:#edf4f7;--header-bg:rgba(255,255,255,.94);--field-bg:#fff;--hover:#edf7fa;--focus:rgba(6,169,231,.16);--overlay:rgba(4,22,32,.46);--shadow-lg:0 24px 70px rgba(8,35,50,.16)}
 html{transition:background-color .22s ease,color .22s ease}body,.global-header,.panel,.table-card,.settings-card,.operation-card,.user-card,.modal-card,.drawer,.profile-menu,input,select,textarea,button{transition:background-color .22s ease,border-color .22s ease,color .22s ease,box-shadow .22s ease}
 body.overlay-open{overflow:hidden}
