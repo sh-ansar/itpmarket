@@ -5,18 +5,23 @@
 
 ## Быстрый вариант
 
-На сервере откройте PowerShell в папке приложения и выполните:
+На сервере откройте PowerShell. Надёжнее запускать скрипт из временной папки,
+чтобы он сам мог привести `C:\ITPMarket\app` к состоянию Git:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\UPGRADE_SERVER_FROM_3_0_2.ps1 -Branch feature/spyon-admin-panel
+C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1 -ProjectRoot C:\ITPMarket\app -Branch feature/spyon-admin-panel
 ```
+
+Если скрипт уже лежит внутри `C:\ITPMarket\app`, его тоже можно запускать оттуда:
+он сам перезапустится из `%TEMP%`, если этот файл ещё не отслеживается Git и мешает checkout.
 
 Скрипт:
 
 - останавливает сервер;
 - делает резервные копии `data\unityre_kaspi.db`, `collectors\ozon\data\ozon_registry.db` и config-файлов;
-- делает `git fetch`, `checkout` и `pull --ff-only`;
+- сохраняет локальные изменения рабочей папки в `backups\pre_upgrade_worktree_*`;
+- делает `git fetch`, чистый checkout нужной ветки и `pull --ff-only`;
 - устанавливает runtime;
 - запускает миграции `3.1.0 -> 3.4.1`;
 - чистит `__pycache__`;

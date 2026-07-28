@@ -1,11 +1,13 @@
 param(
+    [string]$ProjectRoot = "",
     [string]$Branch = "feature/spyon-admin-panel",
     [string]$Remote = "origin",
-    [string]$ServerUrl = "http://127.0.0.1:8765"
+    [string]$ServerUrl = "http://127.0.0.1:8765",
+    [switch]$InternalRelaunched
 )
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = if ($ProjectRoot) { (Resolve-Path $ProjectRoot).Path } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $BackupRoot = Join-Path $Root "backups"
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
@@ -30,8 +32,37 @@ function Invoke-Native {
     }
 }
 
+function Copy-IfExists {
+    param(
+        [Parameter(Mandatory=$true)][string]$Source,
+        [Parameter(Mandatory=$true)][string]$Destination
+    )
+    if (Test-Path $Source) {
+        $parent = Split-Path -Parent $Destination
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        Copy-Item $Source $Destination -Force
+    }
+}
+
 Set-Location $Root
 New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+
+$scriptPath = $MyInvocation.MyCommand.Path
+if (-not $InternalRelaunched -and (Test-Path ".git")) {
+    $resolvedScript = (Resolve-Path $scriptPath).Path
+    $resolvedRoot = (Resolve-Path $Root).Path
+    if ($resolvedScript.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relativeScript = Resolve-Path -Relative $resolvedScript
+        & git ls-files --error-unmatch $relativeScript *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $tempScript = Join-Path $env:TEMP ("spyon_upgrade_{0}.ps1" -f $Timestamp)
+            Copy-Item $resolvedScript $tempScript -Force
+            Write-Host "Relaunching upgrade script from $tempScript so Git can clean the project folder." -ForegroundColor Yellow
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $tempScript -ProjectRoot $Root -Branch $Branch -Remote $Remote -ServerUrl $ServerUrl -InternalRelaunched
+            exit $LASTEXITCODE
+        }
+    }
+}
 
 Invoke-Step "Stop server" {
     if (Test-Path ".\STOP.bat") {
@@ -59,9 +90,44 @@ Invoke-Step "Update code from Git" {
     if (-not (Test-Path ".git")) {
         throw "This folder is not a Git checkout. Deploy a fresh checkout first, then copy the data folder into it."
     }
+    $worktreeBackup = Join-Path $BackupRoot "pre_upgrade_worktree_$Timestamp"
+    $dirty = git status --porcelain --untracked-files=all
+    if ($dirty) {
+        New-Item -ItemType Directory -Force -Path $worktreeBackup | Out-Null
+        foreach ($line in $dirty) {
+            if ($line.Length -lt 4) { continue }
+            $path = $line.Substring(3).Trim().Trim('"')
+            if (-not $path -or $path.StartsWith("backups/") -or $path.StartsWith("backups\")) { continue }
+            $source = Join-Path $Root $path
+            if (Test-Path $source -PathType Leaf) {
+                Copy-IfExists $source (Join-Path $worktreeBackup $path)
+            }
+        }
+        Write-Host "Local worktree changes were backed up to $worktreeBackup" -ForegroundColor Yellow
+    }
     Invoke-Native "git" @("fetch", $Remote)
-    Invoke-Native "git" @("checkout", $Branch)
+    Invoke-Native "git" @("reset", "--hard", "HEAD")
+    Invoke-Native "git" @(
+        "clean", "-fd",
+        "-e", "data/",
+        "-e", ".runtime/",
+        "-e", ".venv/",
+        "-e", ".kaspi_profile/",
+        "-e", ".playwright/",
+        "-e", "logs/",
+        "-e", "output/",
+        "-e", "backups/",
+        "-e", "config.local.json",
+        "-e", "collectors/ozon/data/",
+        "-e", "collectors/ozon/chrome_vpn_profile/"
+    )
+    Invoke-Native "git" @("checkout", "-B", $Branch, "$Remote/$Branch")
     Invoke-Native "git" @("pull", "--ff-only", $Remote, $Branch)
+    $configBackup = Get-ChildItem $BackupRoot -Filter "pre_spyon_3_4_1_${Timestamp}_config.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($configBackup -and -not (Test-Path ".\config.local.json")) {
+        Copy-Item $configBackup.FullName ".\config.local.json" -Force
+        Write-Host "Restored previous config.json as config.local.json"
+    }
 }
 
 Invoke-Step "Install runtime" {
