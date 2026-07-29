@@ -50,7 +50,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.2"
+VERSION = "3.4.3"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 

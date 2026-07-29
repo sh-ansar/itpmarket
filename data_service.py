@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import statistics
 from typing import Any
+from urllib.parse import urlencode
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
 from market_intelligence import (
@@ -21,6 +22,8 @@ from market_intelligence import (
     normalize_specifications,
 )
 from schema import ensure_database
+
+HALYK_BASE_URL = "https://halykmarket.kz"
 
 SORT_FIELDS = {
     "updated": "_updated_sort",
@@ -93,6 +96,11 @@ class DataService:
             return json.loads(value or "")
         except Exception:
             return default
+
+    @staticmethod
+    def _halyk_public_url(product_id: Any, title: Any = "") -> str:
+        query = str(product_id or "").strip() or str(title or "").strip()
+        return f"{HALYK_BASE_URL}/search?{urlencode({'query': query})}" if query else ""
 
     def preferences(self, user_id: int | None) -> dict[str, Any]:
         defaults = {
@@ -777,6 +785,7 @@ class DataService:
             value = dict(row)
             product_id = str(value.get("product_id") or "")
             code = f"halyk:{product_id}"
+            public_url = self._halyk_public_url(product_id, value.get("name"))
             specs = self._json(value.get("specs_json"), [])
             ident = identity(str(value.get("name") or ""), specs, str(value.get("brand") or ""))
             offers = offers_by_product.get(product_id, [])
@@ -790,7 +799,7 @@ class DataService:
                 Candidate(
                     code=str(offer.get("merchant_key") or offer.get("merchant_name") or ""),
                     title=str(offer.get("merchant_name") or "Продавец Halyk Market"),
-                    url=str(value.get("product_url") or ""),
+                    url=public_url,
                     price=float(offer.get("price_kzt") or 0),
                     brand=str(value.get("brand") or ident.get("brand") or ""),
                     tier="SAME_PRODUCT_CARD",
@@ -823,7 +832,7 @@ class DataService:
                 "model": ident.get("model") or "",
                 "size": self._identity_size(ident),
                 "product_type": ident.get("type") or "other",
-                "product_url": value.get("product_url") or "",
+                "product_url": public_url,
                 "image_url": value.get("image_url") or "",
                 "price_kzt": own_price,
                 "own_price_kzt": own_price,

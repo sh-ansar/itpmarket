@@ -114,7 +114,7 @@ Invoke-Step "Backup persistent data" {
     )
     foreach ($item in $items) {
         if (Test-Path $item) {
-            $target = Join-Path $BackupRoot ("pre_spyon_3_4_2_{0}_{1}" -f $Timestamp, (Split-Path $item -Leaf))
+            $target = Join-Path $BackupRoot ("pre_spyon_3_4_3_{0}_{1}" -f $Timestamp, (Split-Path $item -Leaf))
             Copy-Item $item $target -Force
             Write-Host "Backed up $item -> $target"
         }
@@ -162,7 +162,7 @@ Invoke-Step "Update code from Git" {
         "-e", "collectors/ozon/chrome_vpn_profile/"
     )
     Invoke-Native "git" @("checkout", "-B", $Branch, $remoteRef)
-    $configBackup = Get-ChildItem $BackupRoot -Filter "pre_spyon_3_4_2_${Timestamp}_config.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $configBackup = Get-ChildItem $BackupRoot -Filter "pre_spyon_3_4_3_${Timestamp}_config.json" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($configBackup -and -not (Test-Path ".\config.local.json")) {
         Copy-Item $configBackup.FullName ".\config.local.json" -Force
         Write-Host "Restored previous config.json as config.local.json"
@@ -195,8 +195,8 @@ Invoke-Step "Clean Python bytecode" {
 
 Invoke-Step "Validate build" {
     Invoke-Native $Python @("-m", "compileall", "-q", ".")
-    if (Test-Path ".\SELF_TEST_3_4_2.py") {
-        Invoke-Native $Python @(".\SELF_TEST_3_4_2.py")
+    if (Test-Path ".\SELF_TEST_3_4_3.py") {
+        Invoke-Native $Python @(".\SELF_TEST_3_4_3.py")
     }
 }
 
