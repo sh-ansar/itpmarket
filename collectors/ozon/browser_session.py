@@ -19,7 +19,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-from ozon_probe_core import parse_catalog_html
+from ozon_probe_core import article_from_url, normalize_product_url, parse_catalog_html, parse_price
 
 
 class BrowserSession:
@@ -184,6 +184,65 @@ class BrowserSession:
         )
 
     @staticmethod
+    def _safe_dom_text(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text or "�" in text or "??" in text:
+            return ""
+        return text
+
+    def dom_catalog_products(self, base_url: str) -> list[dict[str, Any]]:
+        assert self.driver is not None
+        try:
+            rows = self.driver.execute_script(
+                """
+                const anchors = [...document.querySelectorAll('a[href*="/product/"]')];
+                const rows = [];
+                for (const anchor of anchors) {
+                  const href = anchor.href || anchor.getAttribute('href') || '';
+                  if (!href) continue;
+                  let card = anchor;
+                  for (let i = 0; i < 6 && card && card.parentElement; i += 1) {
+                    const text = (card.innerText || '').trim();
+                    if (text && text.length > 25) break;
+                    card = card.parentElement;
+                  }
+                  const img = (card || anchor).querySelector('img');
+                  const text = ((card || anchor).innerText || anchor.textContent || '').trim();
+                  const lines = text.split(/\\n+/).map(v => v.trim()).filter(Boolean);
+                  const title = anchor.getAttribute('aria-label') || (img && (img.alt || img.title)) || lines.find(v => !/[₽₸]/.test(v)) || '';
+                  const priceLine = lines.find(v => /[₽₸]|руб/i.test(v)) || '';
+                  rows.push({
+                    url: href,
+                    name: title,
+                    image_url: img ? (img.currentSrc || img.src || '') : '',
+                    price_text: priceLine
+                  });
+                }
+                return rows;
+                """
+            )
+        except Exception:
+            return []
+        products: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            url = normalize_product_url(str(row.get("url") or ""), base_url)
+            article = article_from_url(url)
+            if not article or not url:
+                continue
+            products[article] = {
+                "article": article,
+                "name": self._safe_dom_text(row.get("name")),
+                "catalog_card_price": parse_price(row.get("price_text")),
+                "catalog_all_prices": [str(row.get("price_text") or "")] if row.get("price_text") else [],
+                "catalog_price_style": "dom",
+                "image_url": str(row.get("image_url") or ""),
+                "url": url,
+            }
+        return list(products.values())
+
+    @staticmethod
     def blocked_state(title: str, text: str, page_html: str) -> bool:
         value = f"{title}\n{text}\n{page_html[:30000]}".lower()
         markers = (
@@ -219,6 +278,90 @@ class BrowserSession:
                 return data, title, text, page_html
         return None, title, text, page_html
 
+    def _collect_catalog_snapshot(
+        self,
+        base_url: str,
+        wait_seconds: int,
+        events: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], str, str, str, str, bool]:
+        assert self.driver is not None
+        deadline = time.monotonic() + wait_seconds
+        unique: dict[str, dict[str, Any]] = {}
+        best_next_page = ""
+        last_title = last_text = last_html = ""
+        saw_block = False
+        last_unique = -1
+        stable_ticks = 0
+
+        try:
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1.0)
+        except Exception as exc:
+            events.append({"event": "scroll_top_error", "error": f"{type(exc).__name__}: {exc}"})
+
+        while time.monotonic() < deadline:
+            try:
+                title, text, page_html = self.snapshot()
+                last_title, last_text, last_html = title, text, page_html
+                state_products, next_page = parse_catalog_html(page_html, base_url)
+                dom_products = self.dom_catalog_products(base_url)
+                products = dom_products + state_products
+                for product in products:
+                    article = str(product.get("article") or "")
+                    if article:
+                        if product.get("name"):
+                            product = {**product, "name": self._safe_dom_text(product.get("name"))}
+                        unique[article] = product
+                if next_page:
+                    best_next_page = next_page
+                blocked = self.blocked_state(title, text, page_html)
+                saw_block = saw_block or blocked
+                scroll_state = self.driver.execute_script(
+                    """
+                    const root = document.scrollingElement || document.documentElement || document.body;
+                    const step = Math.max(700, Math.floor((window.innerHeight || 900) * 0.85));
+                    const before = root ? root.scrollTop : 0;
+                    const height = root ? root.scrollHeight : 0;
+                    if (root) root.scrollTo(0, Math.min(height, before + step));
+                    const after = root ? root.scrollTop : 0;
+                    return {
+                      before,
+                      after,
+                      height,
+                      inner: window.innerHeight || 0,
+                      nearBottom: root ? (after + (window.innerHeight || 0) >= height - 12) : true
+                    };
+                    """
+                )
+                count = len(unique)
+                moved = bool((scroll_state or {}).get("after") != (scroll_state or {}).get("before"))
+                if count == last_unique:
+                    stable_ticks += 1
+                else:
+                    stable_ticks = 0
+                last_unique = count
+                events.append(
+                    {
+                        "event": "scroll_poll",
+                        "visible_products": len(state_products),
+                        "dom_products": len(dom_products),
+                        "unique_products": count,
+                        "next_page": bool(best_next_page),
+                        "moved": moved,
+                        "near_bottom": bool((scroll_state or {}).get("nearBottom")),
+                        "blocked": blocked,
+                    }
+                )
+                if count and bool((scroll_state or {}).get("nearBottom")) and stable_ticks >= 3:
+                    break
+                if count and best_next_page and stable_ticks >= 4:
+                    break
+            except Exception as exc:
+                events.append({"event": "scroll_poll_error", "error": f"{type(exc).__name__}: {exc}"})
+            time.sleep(1.4)
+
+        return list(unique.values()), best_next_page, last_title, last_text, last_html, saw_block
+
     def load_catalog(
         self,
         url: str,
@@ -236,30 +379,23 @@ class BrowserSession:
             except Exception as exc:
                 events.append({"event": "get_error", "error": f"{type(exc).__name__}: {exc}"})
         for attempt in range(reloads + 1):
-            deadline = time.monotonic() + wait_seconds
-            saw_block = False
-            while time.monotonic() < deadline:
-                try:
-                    title, text, page_html = self.snapshot()
-                    last_title, last_text, last_html = title, text, page_html
-                    products, next_page = parse_catalog_html(page_html, url)
-                    if products:
-                        return {
-                            "ok": True,
-                            "status": "CATALOG_OK",
-                            "products": products,
-                            "next_page": next_page,
-                            "html": page_html,
-                            "title": title,
-                            "elapsed_ms": round((time.monotonic() - started) * 1000),
-                            "events": events,
-                        }
-                    blocked = self.blocked_state(title, text, page_html)
-                    saw_block = saw_block or blocked
-                    events.append({"event": "poll", "attempt": attempt + 1, "blocked": blocked})
-                except Exception as exc:
-                    events.append({"event": "poll_error", "error": f"{type(exc).__name__}: {exc}"})
-                time.sleep(2.5)
+            products, next_page, title, text, page_html, saw_block = self._collect_catalog_snapshot(
+                url,
+                wait_seconds,
+                events,
+            )
+            last_title, last_text, last_html = title, text, page_html
+            if products:
+                return {
+                    "ok": True,
+                    "status": "CATALOG_OK",
+                    "products": products,
+                    "next_page": next_page,
+                    "html": page_html,
+                    "title": title,
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "events": events,
+                }
             if attempt < reloads:
                 try:
                     self.driver.refresh()

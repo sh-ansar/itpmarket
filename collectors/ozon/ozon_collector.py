@@ -115,7 +115,7 @@ class Collector:
         stop_all = False
         try:
             print("=" * 78)
-            print("OZON COLLECTOR 3.0 — MULTI-SOURCE DISCOVERY")
+            print("OZON COLLECTOR 3.1 — SCROLL-STABLE MULTI-SOURCE DISCOVERY")
             print("Сначала каталог продавца, затем дополнительные категории.")
             print("Article, canonical URL и каталожная цена сохраняются в SQLite.")
             print("=" * 78)

@@ -21,7 +21,7 @@
     system:[['export_report','Сводный отчёт'],['audit_catalog','Аудит Kaspi'],['backup_database','Резервная копия']]
   };
 
-  const state = {lang:'ru',theme:'system',page:'dashboard',products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],currentTask:null,settings:null};
+  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],currentTask:null,settings:null};
 
   async function api(path, options={}) {
     const opts = {...options, headers:{...(options.headers||{})}};
@@ -53,6 +53,13 @@
   const platformReady = o => `Kaspi ${number(o.kaspi_market_analyzed_count)}/${number(o.kaspi_count||o.kaspi_products)} · Ozon ${number(o.ozon_data_ready_count)}/${number(o.ozon_count||o.ozon_products)} · Halyk ${number(o.halyk_market_analyzed_count)}/${number(o.halyk_count||o.halyk_products)}`;
   const taskStatusTone = v=>({running:'info',completed:'success',failed:'danger',stopped:'warning',interrupted:'warning'}[v]||'neutral');
   const durationText = seconds => { const total=Math.max(0, Math.round(Number(seconds||0))); if(total<60) return `${total} сек`; const mins=Math.floor(total/60); const secs=total%60; if(mins<60) return secs?`${mins} мин ${secs} сек`:`${mins} мин`; const hours=Math.floor(mins/60); const rest=mins%60; return rest?`${hours} ч ${rest} мин`:`${hours} ч`; };
+  const operationLaunchers = [
+    {platform:'operationPlatform', action:'operationAction', scope:'operationScope', launch:'launchOperation'},
+    {platform:'opsOperationPlatform', action:'opsOperationAction', scope:'opsOperationScope', launch:'opsLaunchOperation'}
+  ];
+  const flatActions = () => Object.entries(ACTIONS).flatMap(([platform,items])=>items.map(([id,label])=>({id,label,platform})));
+  const actionInfo = id => flatActions().find(item=>item.id===id) || {id,label:id,platform:'system'};
+  const actionLabel = (id,fallback='') => t(`action_${id}`, actionInfo(id).label || fallback || id);
   const formatEta = task => { const percent=Number(task?.progress?.percent||0); if(!(percent>0 && percent<100) || !task?.started_at) return ''; const elapsed=Math.max(1, (Date.now()-new Date(task.started_at).getTime())/1000); const total=elapsed/(percent/100); const remaining=Math.max(0,total-elapsed); return remaining>0 ? `Осталось ~${durationText(remaining)}` : ''; };
   const looksGarbled = text => {
     const value=String(text||'');
@@ -118,30 +125,34 @@
     state.lang = I18N[lang] ? lang : 'ru';
     window.ITPUI?.setLocale(state.lang,{store:persist,emit:false});
     $$('[data-lang]').forEach(b=>b.classList.toggle('active',b.dataset.lang===state.lang));
+    if($('#languageSelect')) $('#languageSelect').value=state.lang;
     window.ITPUI?.translateTree(document.body);
     const roleNode=$('#profileRole');if(roleNode)roleNode.textContent=roleLabel(user.role);
     renderPageHeading();updateHelpButton();
+    if(state.page==='dashboard'&&state.overview){renderStatusChart(state.overview.status_distribution||[]);renderHealth(state.overview.health||{},state.overview);}
     if(state.products.items.length)renderProducts(state.products.items);
+    $$('[data-i18n-tooltip]').forEach(el=>{const value=t(el.dataset.i18nTooltip,el.getAttribute('aria-label')||'');el.dataset.tooltip=value;el.title=value;});
+    updateOperationActions();
     if(state.page==='operations'&&state.tasks.length)renderTasks();
     if(state.page==='schedules')loadSchedules();
     if(state.page==='users')loadUsers();
   }
-  function renderPageHeading(){ const node=$('#pageTitle'); if(!node)return; const key=`${state.page}_page_title`; node.textContent=t(key,t(`nav_${state.page}`,'Spyon')); }
+  function renderPageHeading(){ const node=$('#pageTitle'),wrap=node?.closest('.page-section-header'); if(!node||!wrap)return; wrap.hidden=['dashboard','products','operations','reports','schedules','users'].includes(state.page); const key=`${state.page}_page_title`; node.textContent=t(key,t(`nav_${state.page}`,'Spyon')); }
   function navigate(page){ state.page=page; $$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`)); $$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page)); renderPageHeading(); if(page==='products')loadProducts(); if(page==='operations')loadTasks(); if(page==='reports')loadReports(); if(page==='schedules')loadSchedules(); if(page==='settings')loadSettings(); if(page==='users')loadUsers(); $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton(); }
 
   async function loadOverview(){
     try{
-      const data=await api('/api/overview'); const o=data.overview; state.tasks=data.tasks||[];
+      const data=await api('/api/overview'); const o=data.overview; state.overview=o; state.tasks=data.tasks||[];
       const dataCoverage=Number(o.data_coverage_pct ?? o.scan_coverage_pct ?? 0);
       const readyCount=Number(o.data_ready_count ?? o.scanned_count ?? 0);
       $('#navProductCount').textContent=number(o.catalog_count); $('#heroProducts').textContent=number(o.catalog_count);$('#heroAnalyzed').textContent=`${dataCoverage.toFixed(0)}%`;$('#heroRisks').textContent=number(o.risk_count);
       $('#metricProducts').textContent=number(o.catalog_count);$('#metricPlatforms').textContent=platformCounts(o);$('#metricAnalyzed').textContent=`${dataCoverage.toFixed(1)}%`;$('#metricAnalyzedSub').textContent=platformReady(o);$('#metricRisks').textContent=number(o.risk_count);$('#metricOpportunity').textContent=money(o.price_potential_monthly_kzt ?? o.potential_margin_monthly_kzt);$('#metricOpportunitySub').textContent=Number(o.potential_position_count||0)>0?`${number(o.potential_position_count)} поз. · ${number(o.potential_units_total)} ед./мес.`:t('no_confirmed_opportunities','нет подтверждённых возможностей');
       $('#metricOpportunity').closest('article').title='Оценка возможного роста выручки: для товаров Kaspi с точными предложениями рассчитывается разница до нижнего квартиля цен продавцов и умножается на заданный месячный объём. Это не бухгалтерская маржа и не прогноз прибыли.';
-      renderStatusChart(o.status_distribution||[]); renderHealth(o.health||{},o); renderActivity(o.recent_events||[]); renderRunningBadge(data.tasks||[]);
+      renderStatusChart(o.status_distribution||[]); renderHealth(o.health||{},o); if($('#activityList')) renderActivity(o.recent_events||[]); renderRunningBadge(data.tasks||[]);
       if(o.preferences?.locale && !localStorage.getItem('itp_lang')) applyI18n(o.preferences.locale);
     }catch(e){toast(e.message,true)}
   }
-  function renderStatusChart(rows){ const total=rows.reduce((a,b)=>a+Number(b.count||0),0)||1; $('#statusChart').innerHTML=rows.length?rows.slice(0,8).map(r=>`<div class="status-row"><label>${esc(statusLabel(r.status))}</label><div class="status-bar"><i style="width:${Math.max(2,Number(r.count)*100/total)}%"></i></div><b>${number(r.count)}</b></div>`).join(''):`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`; }
+  function renderStatusChart(rows){ const total=rows.reduce((a,b)=>a+Number(b.count||0),0)||1; $('#statusChart').innerHTML=rows.length?rows.slice(0,8).map(r=>{const count=Number(r.count||0),pct=Math.min(100,count*100/total);return `<div class="status-row"><div class="status-row-head"><label>${esc(statusLabel(r.status))}</label><b>${number(count)}</b></div><div class="status-bar"><i style="width:${Math.max(2,pct)}%"></i></div><small>${esc(t('status_scale_summary','Из {total} товаров · {pct}% по шкале из 100%').replace('{total}',number(total)).replace('{pct}',pct.toFixed(1)))}</small></div>`}).join(''):`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`; }
   function renderHealth(h,o){ const coverage=Number(o.data_coverage_pct ?? o.scan_coverage_pct ?? 0);const items=[['catalog','Каталог',platformCounts(o),'catalog'],['prices','Цены',`${Number(o.price_coverage_pct||0).toFixed(1)}% покрытия`,'currency'],['market','Обработка данных',`${coverage.toFixed(1)}% · ${platformReady(o)}`,'chart']];$('#healthList').innerHTML=items.map(([k,n,d,ic])=>`<div class="health-item ${esc(h[k]||'empty')}"><span>${icon(ic)}</span><div><b>${n}</b><small>${d}</small></div><i></i></div>`).join(''); }
   function renderActivity(rows){ $('#activityList').innerHTML=rows.length?rows.map(r=>`<div class="activity"><span>${icon('operations')}</span><div><b>${esc(eventLabel(r.event_type))}</b><small>${esc(r.display_name||'Система')}</small></div><time>${dateText(r.created_at)}</time></div>`).join(''):'<div class="empty">Нет событий</div>'; }
   const eventLabel = v => ({task_started:'Операция запущена',task_stopped:'Операция остановлена',task_deleted:'Операция удалена',settings_updated:'Настройки обновлены',product_state_updated:'Карточки обновлены'}[v]||v||'Событие');
@@ -152,7 +163,7 @@
     state.products.requestStartedAt=Date.now();
     $('#productsLoadInfo').textContent=t('loading_catalog','Загружаем каталог…');
     $('#productsBody').innerHTML=`<tr><td colspan="9"><div class="loader">${esc(t('loading_catalog','Загрузка каталога…'))}</div></td></tr>`;
-    try{const d=await api(`/api/products?${productQuery()}`);const r=d.result;state.products={...state.products,page:r.page,pages:r.pages,pageSize:r.page_size,items:r.items,lastDurationMs:Date.now()-state.products.requestStartedAt};$('#productsFound').textContent=number(r.total);$('#pageInfo').textContent=`${r.page} / ${r.pages}`;$('#productsLoadInfo').textContent=`Обновлено за ${(state.products.lastDurationMs/1000).toFixed(2)} сек`;renderProducts(r.items);}catch(e){$('#productsLoadInfo').textContent=t('load_error','Ошибка загрузки');$('#productsBody').innerHTML=`<tr><td colspan="9"><div class="empty">${esc(e.message)}</div></td></tr>`;}
+    try{const d=await api(`/api/products?${productQuery()}`);const r=d.result;state.products={...state.products,page:r.page,pages:r.pages,pageSize:r.page_size,total:r.total,items:r.items,lastDurationMs:Date.now()-state.products.requestStartedAt};$('#productsFound').textContent=number(r.total);$('#pageInfo').textContent=`${r.page} / ${r.pages}`;$('#productsLoadInfo').textContent=t('products_updated_in','Обновлено за {seconds} сек').replace('{seconds}',(state.products.lastDurationMs/1000).toFixed(2));renderProducts(r.items);}catch(e){$('#productsLoadInfo').textContent=t('load_error','Ошибка загрузки');$('#productsBody').innerHTML=`<tr><td colspan="9"><div class="empty">${esc(e.message)}</div></td></tr>`;}
   }
   function renderProducts(items){
     $('#productsBody').innerHTML=items.length?items.map(p=>{
@@ -160,8 +171,8 @@
       const price=kaspi?p.own_price_kzt:p.price_kzt;
       const sellerMeta=p.seller_name?`<small class="cell-meta">${esc(p.seller_name)}</small>`:'';
       const original=!kaspi&&p.price_original?`<small class="cell-meta">${number(p.price_original)} ${esc(p.currency_original)}</small>`:'';
-      const range=p.market_median_price_kzt?`<div class="range"><span>${money(p.market_min_price_kzt)}</span><span class="median">${money(p.market_median_price_kzt)}</span><span>${money(p.market_max_price_kzt)}</span></div>`:'<span class="muted">—</span>';
-      const pot=Number(p.potential_margin_monthly_kzt||0)>0?`<b class="positive">${money(p.potential_margin_monthly_kzt)}</b><small>${money(p.potential_margin_per_unit_kzt)} / ед.</small>`:'<span class="muted">—</span>';
+      const range=p.market_median_price_kzt?`<div class="range price-range"><span class="range-min"><small>${esc(t('min_short','мин'))}</small><b>${money(p.market_min_price_kzt)}</b></span><span class="range-mid"><small>${esc(t('avg_short','ср'))}</small><b>${money(p.market_median_price_kzt)}</b></span><span class="range-max"><small>${esc(t('max_short','макс'))}</small><b>${money(p.market_max_price_kzt)}</b></span></div>`:'<span class="muted">—</span>';
+      const pot=Number(p.potential_margin_monthly_kzt||0)>0?`<div class="potential-stack"><b class="positive">${money(p.potential_margin_monthly_kzt)}</b><small>${money(p.potential_margin_per_unit_kzt)}<br>${esc(t('per_unit_short','ед.'))}</small></div>`:'<span class="muted">—</span>';
       const selected=state.selected.has(p.product_code);
       return `<tr class="${selected?'is-selected':''}"><td><input class="row-check" type="checkbox" data-code="${esc(p.product_code)}" ${selected?'checked':''} aria-label="${esc(t('selected','выбрано'))}"></td><td><div class="product-cell"><img src="${esc(p.image_url||'')}" onerror="this.style.visibility='hidden'"><div><b>${esc(p.title)}</b><small>${esc([productCodeText(p.source_product_code),p.brand,p.size].filter(Boolean).join(' · '))}</small></div></div></td><td><div class="cell-stack"><span class="badge ${p.platform}">${esc(p.platform_label)}</span>${sellerMeta}</div></td><td><div class="cell-stack price-stack"><span class="money">${money(price)}</span>${original}</div></td><td>${range}</td><td><div class="position-stack"><span class="${statusClass(p.status_tone)}">${esc(statusLabel(p.price_status))}</span>${p.price_rank?`<small class="rank-meta">${p.price_rank} / ${p.price_rank_total}</small>`:''}</div></td><td>${pot}</td><td><div class="updated-cell"><span>${dateText(p.updated_at)}</span></div></td><td><button class="open-row" data-open-product="${esc(p.product_code)}">${icon('chevron-right')}</button></td></tr>`;
     }).join(''):'<tr><td colspan="9"><div class="empty">Позиции не найдены</div></td></tr>';
@@ -189,11 +200,43 @@
   const relationLabel = v => ({KASPI_SAME_CARD:'Та же карточка Kaspi',EXACT_MODEL:'Точный товар',REVIEW:'Требует проверки',accepted:'Подтверждено',review:'Проверка',rejected:'Отклонено'}[v]||v||'Точный кандидат');
   function historySvg(points){ const vals=points.map(x=>Number(x.price_kzt??x.price)).filter(x=>x>0);if(vals.length<2)return '<span class="muted">Недостаточно данных для графика</span>';const min=Math.min(...vals),max=Math.max(...vals),w=700,h=170,pad=18;const pts=vals.map((v,i)=>`${pad+i*(w-pad*2)/(vals.length-1)},${h-pad-(v-min)/(max-min||1)*(h-pad*2)}`).join(' ');return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#06a9e7" stop-opacity=".32"/><stop offset="1" stop-color="#06a9e7" stop-opacity="0"/></linearGradient></defs><polyline points="${pts} ${w-pad},${h-pad} ${pad},${h-pad}" fill="url(#g)" stroke="none"/><polyline points="${pts}" fill="none" stroke="#06a9e7" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>`; }
 
-  function updateOperationActions(){ const platform=$('#operationPlatform').value;$('#operationAction').innerHTML=(ACTIONS[platform]||[]).filter(([id])=>id!=='backup_database'||user.platform_role==='superadmin').map(([id,label])=>`<option value="${id}">${esc(label)}</option>`).join('');$('#operationScope').disabled=!['kaspi','halyk_market'].includes(platform);if(!['kaspi','halyk_market'].includes(platform))$('#operationScope').value='all'; }
+  function updateOperationLauncher(ids){
+    const platformNode=$('#'+ids.platform), actionNode=$('#'+ids.action), scopeNode=$('#'+ids.scope);
+    if(!platformNode||!actionNode||!scopeNode)return;
+    const platform=platformNode.value;
+    actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>id!=='backup_database'||user.platform_role==='superadmin').map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
+    scopeNode.disabled=!['kaspi','halyk_market'].includes(platform);
+    if(!['kaspi','halyk_market'].includes(platform))scopeNode.value='all';
+  }
+  function updateOperationActions(){ operationLaunchers.forEach(updateOperationLauncher); }
   async function startTask(action,scope='all',codes=[]){ try{const d=await api('/api/tasks/start',{method:'POST',body:{action,scope,codes}});toast(`Запущено: ${d.task.label}`);navigate('operations');loadTasks();}catch(e){toast(e.message,true)} }
   async function loadTasks(){ try{const d=await api('/api/tasks');state.tasks=d.tasks||[];renderTasks();renderRunningBadge(state.tasks);}catch(e){toast(e.message,true)} }
   function renderRunningBadge(tasks){const n=tasks.filter(t=>t.running).length;$('#navRunning').hidden=!n;$('#navRunning').textContent=n;$('#opsRunning')&&($('#opsRunning').textContent=n);}
-  function renderTasks(){const tasks=state.tasks;$('#opsRunning').textContent=tasks.filter(task=>task.running).length;$('#opsCompleted').textContent=tasks.filter(task=>task.status==='completed').length;$('#opsFailed').textContent=tasks.filter(task=>['failed','interrupted'].includes(task.status)).length;$('#operationsList').innerHTML=tasks.length?tasks.map(task=>{const percent=Number(task?.progress?.percent||0);const eta=formatEta(task);const progressText=taskProgressText(task);const secondary=taskSecondaryText(task);const tone=taskStatusTone(task.status);const stateIcon=task.running?'operations':task.status==='completed'?'check':task.status==='failed'?'risk':'info';return `<article class="operation-card"><span class="op-icon op-icon-${esc(tone)}">${icon(stateIcon)}</span><div class="operation-main"><div class="operation-head"><h4>${esc(task.label)}</h4><span class="${statusClass(tone)}">${esc(taskStatus(task.status))}</span></div><small class="operation-meta"><span class="badge ${esc(task.metadata?.platform||'kaspi')}">${esc((task.metadata?.platform||'kaspi').toUpperCase())}</span> ${dateText(task.started_at)}</small>${task.progress?`<div class="progress"><i style="width:${percent}%"></i></div><div class="progress-meta"><small>${esc(progressText)}</small>${eta?`<small>${esc(eta)}</small>`:''}</div>`:''}<small class="task-preview">${esc(secondary||'')}</small></div><div class="op-actions"><button data-log="${esc(task.id)}">${icon('eye')}<span>${esc(t('operation_log','Журнал'))}</span></button>${task.running?`<button data-stop="${esc(task.id)}" aria-label="${esc(t('stop','Остановить'))}">${icon('stop')}</button>`:`<button data-delete="${esc(task.id)}" aria-label="${esc(t('delete','Удалить'))}">${icon('trash')}</button>`}</div></article>`}).join(''):`<div class="empty">${esc(t('history_empty','История операций пуста'))}</div>`;$$('[data-log]').forEach(x=>x.onclick=()=>openLog(x.dataset.log));$$('[data-stop]').forEach(x=>x.onclick=()=>stopTask(x.dataset.stop));$$('[data-delete]').forEach(x=>x.onclick=()=>deleteTask(x.dataset.delete));}
+  function renderOperationActionGrid(tasks){
+    const node=$('#operationActionGrid');
+    if(!node)return;
+    const groups=[
+      ['kaspi','Kaspi'],
+      ['ozon','Ozon'],
+      ['halyk_market','Halyk Market'],
+      ['system',t('system','Система')]
+    ];
+    const actionCard = item => {
+      const related=tasks.filter(task=>task.name===item.id).sort((a,b)=>String(b.started_at||'').localeCompare(String(a.started_at||'')));
+      const last=related[0];
+      const tone=last?taskStatusTone(last.status):'neutral';
+      const value=last?dateText(last.started_at):t('schedule_never_run','Не запускалось');
+      const sub=last?taskStatus(last.status):t('ready_to_start','Готово к запуску');
+      const toneClass=tone==='success'?'success':tone==='danger'?'danger':tone==='warning'?'warning':'info';
+      return `<button class="operation-launch-card ${esc(toneClass)}" data-start-action="${esc(item.id)}" data-start-platform="${esc(item.platform)}"><b>${esc(actionLabel(item.id,item.label))}</b><span>${esc(value)}</span><em>${esc(sub)}</em></button>`;
+    };
+    node.innerHTML=groups.map(([platform,label])=>{
+      const items=(ACTIONS[platform]||[]).map(([id,fallback])=>({id,label:fallback,platform})).filter(item=>item.id!=='backup_database'||user.platform_role==='superadmin');
+      return `<section class="operation-platform-column"><div class="operation-platform-head"><small>${esc(label)}</small><b>${number(items.length)}</b></div><div>${items.map(actionCard).join('')}</div></section>`;
+    }).join('');
+    $$('[data-start-action]').forEach(card=>card.onclick=()=>startTask(card.dataset.startAction,'all',[]));
+  }
+  function renderTasks(){const tasks=state.tasks;const running=tasks.filter(task=>task.running).length,completed=tasks.filter(task=>task.status==='completed').length,failed=tasks.filter(task=>['failed','interrupted'].includes(task.status)).length;if($('#opsRunning'))$('#opsRunning').textContent=running;if($('#opsSummary'))$('#opsSummary').textContent=`${number(completed)} ${t('completed','завершено')} · ${number(failed)} ${t('failed','с ошибкой')}`;renderOperationActionGrid(tasks);}
 
   async function openLog(id){state.currentTask=id;showModal('logModal');await refreshLog();}
   async function refreshLog(){if(!state.currentTask)return;try{const d=await api(`/api/tasks/${encodeURIComponent(state.currentTask)}/log?lines=800`);$('#logTitle').textContent=d.task.label;$('#logSummary').innerHTML=logSummaryHtml(d.task);$('#logContent').textContent=friendlyLog(d.log);$('#stopTask').hidden=!d.task.running;}catch(e){toast(e.message,true)}}
@@ -400,7 +443,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
   function showModal(id){$('#'+id).hidden=false} function hideModals(){$$('.modal').forEach(m=>m.hidden=true)}
   async function setWatch(){const codes=[...state.selected].filter(c=>!c.startsWith('ozon:'));if(!codes.length)return toast('Для наблюдения выберите позиции Kaspi или Halyk Market',true);try{await api('/api/products/state',{method:'PUT',body:{codes,watched:true}});toast('Позиции добавлены в наблюдение');state.selected.clear();loadProducts();}catch(e){toast(e.message,true)}}
 
-  function updateHelpButton(){const button=$('#helpButton');if(!button)return;button.dataset.page=state.page;button.title=t('help_open','Открыть помощь по текущему разделу');}
+  function updateHelpButton(){const button=$('#helpButton');if(!button)return;button.dataset.page=state.page;button.title=t('help_open','Открыть помощь по текущему разделу');button.dataset.tooltip=button.title;}
   function fallbackHelp(){return{title:t('help','Помощь'),intro:t(`${state.page}_subtitle`,''),sections:[{title:t('help_quick_actions','Быстрые действия'),items:[t('help_contact','Обратитесь к администратору рабочего пространства.')] }]};}
   function openHelp(){const content=window.ITPUI?.helpFor(state.page)||window.ITPUI?.helpFor('dashboard')||fallbackHelp();const title=$('#helpTitle'),body=$('#helpBody'),drawer=$('#helpDrawer'),backdrop=$('#helpBackdrop'),button=$('#helpButton');if(!content||!title||!body||!drawer)return;title.textContent=content.title||t('help','Помощь');body.innerHTML=`<p class="help-intro">${esc(content.intro||'')}</p>${(content.sections||[]).map(section=>`<section><h3>${esc(section.title)}</h3><ul>${(section.items||[]).map(item=>`<li>${esc(item)}</li>`).join('')}</ul></section>`).join('')}${content.tip?`<aside><b>${esc(t('help_tip','Подсказка'))}</b><span>${esc(content.tip)}</span></aside>`:''}`;if(backdrop)backdrop.hidden=false;drawer.classList.add('open');drawer.setAttribute('aria-hidden','false');button?.setAttribute('aria-expanded','true');document.body.classList.add('overlay-open');}
   function closeHelp(){const drawer=$('#helpDrawer');if(!drawer)return;const backdrop=$('#helpBackdrop');drawer.classList.remove('open');drawer.setAttribute('aria-hidden','true');if(backdrop)backdrop.hidden=true;$('#helpButton')?.setAttribute('aria-expanded','false');if(!$('#productDrawer')?.classList.contains('open'))document.body.classList.remove('overlay-open');}
@@ -410,11 +453,11 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
   function bind(){
     $$('.nav').forEach(b=>b.onclick=()=>navigate(b.dataset.page));$$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));$('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))}; 
     $('#profileButton').onclick=e=>{e.stopPropagation();$('#profileMenu').hidden=!$('#profileMenu').hidden};$('#profileMenu').onclick=e=>e.stopPropagation();$('#openPassword').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
-    $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang})});if($('#helpButton'))$('#helpButton').onclick=e=>{e.stopPropagation();openHelp()};if($('#closeHelp'))$('#closeHelp').onclick=closeHelp;if($('#helpBackdrop'))$('#helpBackdrop').onclick=closeHelp;window.ITPUI?.onTheme(handleThemeChange);window.ITPUI?.onLocale(lang=>{state.lang=lang;applyI18n(lang,{persist:false})});
+    $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang});if(state.page==='dashboard')loadOverview()});if($('#languageSelect'))$('#languageSelect').onchange=e=>{applyI18n(e.target.value);persistUiPreference({locale:e.target.value});if(state.page==='dashboard')loadOverview()};if($('#helpButton'))$('#helpButton').onclick=e=>{e.stopPropagation();openHelp()};if($('#closeHelp'))$('#closeHelp').onclick=closeHelp;if($('#helpBackdrop'))$('#helpBackdrop').onclick=closeHelp;if($('#heroCollapse'))$('#heroCollapse').onclick=()=>{const hero=$('#dashboardHero'),button=$('#heroCollapse');const collapsed=!hero.classList.contains('collapsed');hero.classList.toggle('collapsed',collapsed);button.setAttribute('aria-expanded',String(!collapsed));button.title=t(collapsed?'expand_dashboard':'collapse_dashboard',collapsed?'Развернуть обзор':'Свернуть обзор');button.dataset.tooltip=button.title};window.ITPUI?.onTheme(handleThemeChange);window.ITPUI?.onLocale(lang=>{state.lang=lang;applyI18n(lang,{persist:false});if(state.page==='dashboard')loadOverview()});
     $$('[data-quick-action]').forEach(b=>b.onclick=()=>startTask(b.dataset.quickAction));
     $('#refreshProducts').onclick=loadProducts;$('#productSearch').oninput=debounce(()=>{state.products.page=1;loadProducts()},350);['platformFilter','brandFilter','statusFilter','pageSize','sortProducts'].forEach(id=>$('#'+id).onchange=()=>{state.products.page=1;loadProducts()});$('#resetFilters').onclick=()=>{$('#productSearch').value='';$('#platformFilter').value='';$('#brandFilter').value='';$('#statusFilter').value='';if($('#freshnessFilter'))$('#freshnessFilter').value='';state.products.scope='all';$$('#scopeTabs button').forEach(b=>b.classList.toggle('active',b.dataset.scope==='all'));loadProducts()};
     $$('#scopeTabs button').forEach(b=>b.onclick=()=>{state.products.scope=b.dataset.scope;state.products.page=1;$$('#scopeTabs button').forEach(x=>x.classList.toggle('active',x===b));loadProducts()});$('#prevPage').onclick=()=>{if(state.products.page>1){state.products.page--;loadProducts()}};$('#nextPage').onclick=()=>{if(state.products.page<state.products.pages){state.products.page++;loadProducts()}};$('#selectPage').onchange=e=>{state.products.items.forEach(p=>e.target.checked?state.selected.add(p.product_code):state.selected.delete(p.product_code));renderProducts(state.products.items)};$('#clearSelection').onclick=()=>{state.selected.clear();renderProducts(state.products.items)};$('#watchSelected').onclick=setWatch;$('#analyzeSelected').onclick=()=>{const halyk=[...state.selected].filter(c=>c.startsWith('halyk:'));const kaspi=[...state.selected].filter(c=>!c.startsWith('ozon:')&&!c.startsWith('halyk:'));startTask(halyk.length&&!kaspi.length?'halyk_refresh_offers':'scan_market','selected',halyk.length&&!kaspi.length?halyk:kaspi)};$('#exportSelected').onclick=()=>startTask('export_report','selected',[...state.selected]);$('#selectedReport').onclick=()=>startTask('export_report',state.selected.size?'selected':'all',[...state.selected]);
-    $('#operationPlatform').onchange=updateOperationActions;$('#launchOperation').onclick=()=>{const scope=$('#operationScope').value,codes=scope==='selected'?[...state.selected]:[];startTask($('#operationAction').value,scope,codes)};$('#clearOperations').onclick=async()=>{if(!confirm('Удалить историю завершённых операций и журналы?'))return;try{await api('/api/tasks',{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}};$('#refreshLog').onclick=refreshLog;$('#stopTask').onclick=()=>stopTask(state.currentTask);
+    operationLaunchers.forEach(ids=>{const platformNode=$('#'+ids.platform),launchNode=$('#'+ids.launch);if(platformNode)platformNode.onchange=updateOperationActions;if(launchNode)launchNode.onclick=()=>{const scope=$('#'+ids.scope).value,codes=scope==='selected'?[...state.selected]:[];startTask($('#'+ids.action).value,scope,codes)}});if($('#clearOperations'))$('#clearOperations').onclick=async()=>{if(!confirm('Удалить историю завершённых операций и журналы?'))return;try{await api('/api/tasks',{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}};$('#refreshLog').onclick=refreshLog;$('#stopTask').onclick=()=>stopTask(state.currentTask);
     $('#generateReport').onclick=()=>startTask('export_report');$('#saveSettings').onclick=saveSettings;if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
     $('#passwordForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));try{await api('/api/account/password',{method:'POST',body:f});toast(t('password_changed','Пароль изменён'));hideModals();e.target.reset();}catch(err){toast(err.message,true)}};
     if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);body.marketplaces=fd.getAll('marketplaces');const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};

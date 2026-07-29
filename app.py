@@ -51,7 +51,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.7"
+VERSION = "3.4.11"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -784,7 +784,8 @@ def before_request() -> Any:
         if not valid_csrf(token):
             if is_api_request():
                 return json_error("Сессия устарела. Обновите страницу.", 419)
-            abort(419)
+            flash("Сессия устарела. Обновите страницу и повторите действие.", "error")
+            return redirect(request.referrer or url_for("login"))
 
 
 @app.after_request
