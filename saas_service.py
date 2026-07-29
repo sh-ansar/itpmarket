@@ -479,7 +479,16 @@ class SaaSService:
 
     def due_schedules(self)->list[dict[str,Any]]:
         conn=self._connect()
-        try:return [dict(r) for r in conn.execute("SELECT * FROM operation_schedules WHERE is_enabled=1 AND next_run_at IS NOT NULL AND datetime(next_run_at)<=datetime('now','localtime') ORDER BY next_run_at LIMIT 10").fetchall()]
+        try:return [dict(r) for r in conn.execute("""
+            SELECT os.*
+            FROM operation_schedules os
+            LEFT JOIN app_users u ON u.id=os.created_by
+            WHERE os.is_enabled=1
+              AND os.next_run_at IS NOT NULL
+              AND datetime(os.next_run_at)<=datetime('now','localtime')
+              AND (os.action<>'backup_database' OR COALESCE(u.platform_role,'')='superadmin')
+            ORDER BY os.next_run_at LIMIT 10
+            """).fetchall()]
         finally:conn.close()
 
     def begin_schedule_run(self, schedule: dict[str, Any]) -> int:

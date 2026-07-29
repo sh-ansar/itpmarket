@@ -87,15 +87,18 @@ threading.Thread(target=warm_data_cache, daemon=True).start()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SECURE=str(os.environ.get("ITP_COOKIE_SECURE", "0")).strip() == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(CFG["app"].get("session_hours", 12))),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
 
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+FORM_ATTEMPTS: dict[str, list[float]] = {}
 LOGIN_LOCK_SECONDS = 15 * 60
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_MAX_ATTEMPTS = 6
+RECOVERY_MAX_ATTEMPTS = 5
+REGISTRATION_MAX_ATTEMPTS = 8
 CODE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,96}$")
 
 ACTION_INFO = {
@@ -191,6 +194,64 @@ def current_user() -> dict[str, Any] | None:
     return getattr(g, "user", None)
 
 
+def is_superadmin(user: dict[str, Any] | None = None) -> bool:
+    return (user or current_user() or {}).get("platform_role") == "superadmin"
+
+
+def rate_limit_hit(scope: str, key: str, max_attempts: int, window_seconds: int) -> bool:
+    now = now_epoch()
+    bucket = f"{scope}:{request.remote_addr or 'local'}:{key.strip().casefold()[:120]}"
+    attempts = [stamp for stamp in FORM_ATTEMPTS.get(bucket, []) if now - stamp < window_seconds]
+    attempts.append(now)
+    FORM_ATTEMPTS[bucket] = attempts
+    return len(attempts) > max_attempts
+
+
+def tenant_visibility_predicate(alias: str, user: dict[str, Any]) -> tuple[str, list[Any]]:
+    if is_superadmin(user):
+        return "1=1", []
+    tenant_id = user.get("tenant_id")
+    if tenant_id is None:
+        return "0=1", []
+    return (
+        f"({alias}.tenant_id=? OR ({alias}.tenant_id IS NULL AND ?=(SELECT id FROM tenants ORDER BY id LIMIT 1)))",
+        [int(tenant_id), int(tenant_id)],
+    )
+
+
+def visible_tasks(user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    value = user or current_user() or {}
+    tasks = TASKS.states()
+    if is_superadmin(value):
+        return tasks
+    tenant_id = value.get("tenant_id")
+    user_id = value.get("id")
+    result = []
+    for task in tasks:
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        task_tenant_id = metadata.get("tenant_id")
+        if task_tenant_id is not None and tenant_id is not None and int(task_tenant_id) == int(tenant_id):
+            result.append(task)
+        elif task_tenant_id is None and user_id is not None and int(metadata.get("requested_by_id") or 0) == int(user_id):
+            result.append(task)
+    return result
+
+
+def visible_task(task_id: str, user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    return next((task for task in visible_tasks(user) if str(task.get("id")) == str(task_id)), None)
+
+
+def schedule_actions_for_user(user: dict[str, Any]) -> list[dict[str, str]]:
+    blocked = set()
+    if not is_superadmin(user):
+        blocked.add("backup_database")
+    return [
+        {"code": code, "platform": value[0], "name": value[1]}
+        for code, value in SCHEDULE_ACTIONS.items()
+        if code not in blocked
+    ]
+
+
 def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(view)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -238,6 +299,19 @@ def platform_roles_required(*roles: str) -> Callable[[Callable[..., Any]], Calla
 def current_tenant() -> dict[str, Any] | None:
     user = current_user() or {}
     return SAAS.tenant_for_user(int(user["id"])) if user.get("id") and user.get("tenant_id") else None
+
+
+def managed_user_or_error(user_id: int, actor: dict[str, Any]) -> dict[str, Any]:
+    target = AUTH.get_user(int(user_id))
+    if not target:
+        raise LookupError("Пользователь не найден.")
+    if is_superadmin(actor):
+        return target
+    actor_tenant_id = actor.get("tenant_id")
+    target_tenant_id = target.get("tenant_id")
+    if actor_tenant_id is None or target_tenant_id is None or int(actor_tenant_id) != int(target_tenant_id):
+        raise PermissionError("Недостаточно прав для управления этим пользователем.")
+    return target
 
 
 def allowed_marketplaces(user: dict[str, Any] | None = None) -> set[str]:
@@ -664,6 +738,19 @@ def after_request(response: Any) -> Any:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    )
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.path.startswith("/api/") or request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -759,11 +846,15 @@ def login() -> Any:
 def forgot_password() -> Any:
     ensure_csrf()
     if request.method == "POST":
+        email_value = str(request.form.get("email") or "")
+        if rate_limit_hit("recovery", email_value, RECOVERY_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS):
+            flash("Слишком много попыток восстановления. Повторите позже.", "error")
+            return render_template("forgot_password.html"), 429
         try:
             if request.form.get("password") != request.form.get("password_confirm"):
                 raise ValueError("Пароли не совпадают.")
             AUTH.reset_password_with_recovery(
-                request.form.get("email", ""),
+                email_value,
                 request.form.get("recovery_code", ""),
                 request.form.get("password", ""),
             )
@@ -790,6 +881,9 @@ def landing() -> Any:
 def registration() -> Any:
     ensure_csrf()
     if request.method == "POST":
+        if rate_limit_hit("registration", str(request.form.get("email") or ""), REGISTRATION_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS):
+            flash("Слишком много заявок с этого адреса. Повторите позже.", "error")
+            return render_template("register.html", capabilities=PUBLIC_CAPABILITIES), 429
         payload = {
             "company_name": request.form.get("company_name", ""),
             "registration_number": request.form.get("registration_number", ""),
@@ -855,14 +949,15 @@ def api_session() -> Any:
 @app.get("/api/overview")
 @login_required
 def api_overview() -> Any:
+    user = current_user() or {}
     return json_ok(
         overview=DATA.overview(
             int(CFG["kaspi"].get("expected_count", 0)),
             int(CFG["analysis"].get("discover_workers", 2)),
-            int((current_user() or {})["id"]),
+            int(user["id"]),
             allowed_platforms=allowed_marketplaces(),
         ),
-        tasks=TASKS.states()[:12],
+        tasks=visible_tasks(user)[:12],
     )
 
 
@@ -947,7 +1042,7 @@ def api_product_state() -> Any:
 @app.get("/api/tasks")
 @login_required
 def api_tasks() -> Any:
-    return json_ok(tasks=TASKS.states())
+    return json_ok(tasks=visible_tasks())
 
 
 @app.post("/api/tasks/start")
@@ -961,6 +1056,8 @@ def api_task_start() -> Any:
         return json_error("Неизвестная операция.")
     if user.get("role") not in info["roles"]:
         return json_error("Недостаточно прав.", 403)
+    if action == "backup_database" and not is_superadmin(user):
+        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
     task_platform = info.get("platform") or (
         "ozon" if action.startswith("ozon_") else
         "system" if action in {"export_report", "backup_database"} else "kaspi"
@@ -988,6 +1085,7 @@ def api_task_start() -> Any:
                 "codes_count": len(codes),
                 "requested_by": user.get("display_name"),
                 "requested_by_id": user.get("id"),
+                "tenant_id": user.get("tenant_id"),
                 "platform": info.get("platform") or ("ozon" if action.startswith("ozon_") else "kaspi"),
             },
         )
@@ -1000,6 +1098,8 @@ def api_task_start() -> Any:
 @app.post("/api/tasks/<task_id>/stop")
 @roles_required("admin", "operator")
 def api_task_stop(task_id: str) -> Any:
+    if not visible_task(task_id):
+        return json_error("Операция не найдена.", 404)
     task = TASKS.stop(task_id)
     record_event("task_stopped", "task", task_id, {})
     return json_ok(task=task)
@@ -1008,8 +1108,8 @@ def api_task_stop(task_id: str) -> Any:
 @app.get("/api/tasks/<task_id>/log")
 @login_required
 def api_task_log(task_id: str) -> Any:
-    task = TASKS.state(task_id)
-    if task.get("status") == "missing":
+    task = visible_task(task_id)
+    if not task or task.get("status") == "missing":
         return json_error("Операция не найдена.", 404)
     return json_ok(task=task, log=TASKS.tail(task_id, int(request.args.get("lines", 500))))
 
@@ -1017,6 +1117,8 @@ def api_task_log(task_id: str) -> Any:
 @app.delete("/api/tasks/<task_id>")
 @roles_required("admin", "operator")
 def api_task_delete(task_id: str) -> Any:
+    if not visible_task(task_id):
+        return json_error("Операция не найдена.", 404)
     try:
         task = TASKS.delete(task_id)
         record_event("task_deleted", "task", task_id, {})
@@ -1028,7 +1130,17 @@ def api_task_delete(task_id: str) -> Any:
 @app.delete("/api/tasks")
 @roles_required("admin", "operator")
 def api_tasks_clear() -> Any:
-    count = TASKS.clear_finished()
+    if is_superadmin():
+        count = TASKS.clear_finished()
+    else:
+        count = 0
+        for task in list(visible_tasks()):
+            if not task.get("running"):
+                try:
+                    TASKS.delete(str(task["id"]))
+                    count += 1
+                except RuntimeError:
+                    pass
     record_event("tasks_cleared", "task", "finished", {"count": count})
     return json_ok(deleted=count)
 
@@ -1043,15 +1155,19 @@ def api_analytics_dashboard() -> Any:
 @app.get("/api/reports")
 @login_required
 def api_reports() -> Any:
+    user = current_user() or {}
+    clause, params = tenant_visibility_predicate("r", user)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT r.id,r.report_type,r.scope,r.file_name,r.rows_count,r.created_at,u.display_name
             FROM app_reports r LEFT JOIN app_users u ON u.id=r.created_by
+            WHERE {clause}
             ORDER BY r.id DESC LIMIT 100
-            """
+            """,
+            params,
         ).fetchall()
     finally:
         conn.close()
@@ -1061,10 +1177,15 @@ def api_reports() -> Any:
 @app.get("/api/reports/<int:report_id>/download")
 @login_required
 def api_report_download(report_id: int) -> Any:
+    user = current_user() or {}
+    clause, params = tenant_visibility_predicate("app_reports", user)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute("SELECT file_name,file_path FROM app_reports WHERE id=?", (report_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT file_name,file_path FROM app_reports WHERE id=? AND {clause}",
+            [int(report_id), *params],
+        ).fetchone()
     finally:
         conn.close()
     if not row:
@@ -1077,7 +1198,7 @@ def api_report_download(report_id: int) -> Any:
 
 
 @app.get("/api/backups")
-@roles_required("admin")
+@platform_roles_required("superadmin")
 def api_backups() -> Any:
     folder = resolve_path(CFG, "backups")
     items = [
@@ -1092,7 +1213,7 @@ def api_backups() -> Any:
 
 
 @app.get("/api/backups/<path:name>/download")
-@roles_required("admin")
+@platform_roles_required("superadmin")
 def api_backup_download(name: str) -> Any:
     if Path(name).name != name:
         abort(404)
@@ -1106,7 +1227,13 @@ def api_backup_download(name: str) -> Any:
 @app.get("/api/events")
 @login_required
 def api_events() -> Any:
-    return json_ok(events=DATA.latest_events(int(request.args.get("limit", 40))))
+    user = current_user() or {}
+    return json_ok(
+        events=DATA.latest_events(
+            int(request.args.get("limit", 40)),
+            tenant_id=None if is_superadmin(user) else int(user["tenant_id"]),
+        )
+    )
 
 
 @app.get("/api/settings")
@@ -1214,9 +1341,15 @@ def api_users_create() -> Any:
 @app.put("/api/users/<int:user_id>")
 @roles_required("admin")
 def api_users_update(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        user = AUTH.update_user(user_id, json_payload(), int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        user = AUTH.update_user(user_id, json_payload(), int(current["id"]))
         return json_ok(user=user)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
 
@@ -1224,9 +1357,15 @@ def api_users_update(user_id: int) -> Any:
 @app.delete("/api/users/<int:user_id>")
 @roles_required("admin")
 def api_users_delete(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        AUTH.delete_user(user_id, int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        AUTH.delete_user(user_id, int(current["id"]))
         return json_ok(deleted=True)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc), 409)
 
@@ -1234,9 +1373,15 @@ def api_users_delete(user_id: int) -> Any:
 @app.post("/api/users/<int:user_id>/recovery")
 @roles_required("admin")
 def api_users_recovery(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        code = AUTH.regenerate_recovery(user_id, int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        code = AUTH.regenerate_recovery(user_id, int(current["id"]))
         return json_ok(recovery_code=code)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
 
@@ -1256,7 +1401,7 @@ def api_schedules_get() -> Any:
     return json_ok(
         schedules=SAAS.schedules(tenant_id),
         runs=SAAS.schedule_runs(tenant_id, int(request.args.get("limit", 50))),
-        actions=[{"code": code, "platform": value[0], "name": value[1]} for code, value in SCHEDULE_ACTIONS.items()],
+        actions=schedule_actions_for_user(user),
     )
 
 
@@ -1264,8 +1409,11 @@ def api_schedules_get() -> Any:
 @roles_required("admin", "operator")
 def api_schedules_create() -> Any:
     user = current_user() or {}
+    payload = json_payload()
+    if str(payload.get("action") or "") == "backup_database" and not is_superadmin(user):
+        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
     try:
-        return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), json_payload(), int(user["id"])))
+        return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), payload, int(user["id"])))
     except (ValueError, TypeError) as exc:
         return json_error(str(exc))
 

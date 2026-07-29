@@ -1280,13 +1280,24 @@ class DataService:
         self.invalidate()
         return len(clean_codes)
 
-    def latest_events(self, limit: int = 40) -> list[dict[str, Any]]:
+    def latest_events(self, limit: int = 40, tenant_id: int | None = None) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
+            where = ""
+            params: list[Any] = []
+            if tenant_id is not None:
+                where = (
+                    "WHERE e.tenant_id=? OR "
+                    "(e.tenant_id IS NULL AND ?=(SELECT id FROM tenants ORDER BY id LIMIT 1))"
+                )
+                params.extend([int(tenant_id), int(tenant_id)])
+            params.append(max(1, min(int(limit), 200)))
             rows = conn.execute(
-                """SELECT e.id,e.event_type,e.entity_type,e.entity_id,e.details_json,e.created_at,u.display_name,u.email
-                   FROM app_events e LEFT JOIN app_users u ON u.id=e.user_id ORDER BY e.id DESC LIMIT ?""",
-                (max(1, min(int(limit), 200)),),
+                f"""SELECT e.id,e.event_type,e.entity_type,e.entity_id,e.details_json,e.created_at,u.display_name,u.email
+                   FROM app_events e LEFT JOIN app_users u ON u.id=e.user_id
+                   {where}
+                   ORDER BY e.id DESC LIMIT ?""",
+                params,
             ).fetchall()
             result = []
             for row in rows:
