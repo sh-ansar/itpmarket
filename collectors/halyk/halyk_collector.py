@@ -100,11 +100,15 @@ def normalize_specs(params: Any) -> list[dict[str, str]]:
 
 
 def product_url(value: dict[str, Any]) -> str:
-    product_id = clean_text(value.get("id") or value.get("_id"))
-    if product_id:
-        return f"{BASE_URL}/search?{urlencode({'query': product_id})}"
     raw = clean_text(value.get("url") or value.get("canonical_url") or "")
-    return urljoin(BASE_URL, raw) if raw else ""
+    if raw:
+        if raw.startswith("/category/"):
+            return urljoin(BASE_URL, raw)
+        if raw.startswith("/"):
+            return urljoin(BASE_URL, f"/category{raw}")
+        return urljoin(BASE_URL, raw)
+    product_id = clean_text(value.get("id") or value.get("_id"))
+    return f"{BASE_URL}/search?{urlencode({'query': product_id})}" if product_id else ""
 
 
 def image_url(value: dict[str, Any]) -> str:

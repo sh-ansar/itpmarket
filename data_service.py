@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import statistics
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
 from market_intelligence import (
@@ -98,7 +98,20 @@ class DataService:
             return default
 
     @staticmethod
-    def _halyk_public_url(product_id: Any, title: Any = "") -> str:
+    def _halyk_public_url(product_id: Any, title: Any = "", stored_url: Any = "", raw_json: Any = None) -> str:
+        stored = str(stored_url or "").strip()
+        if stored and "/search?" not in stored:
+            return stored
+        raw = DataService._json(raw_json, {}) if raw_json is not None else {}
+        path = ""
+        if isinstance(raw, dict):
+            path = str(raw.get("url") or raw.get("url_handle") or raw.get("canonical_url") or "").strip()
+        if path:
+            if path.startswith("/category/"):
+                return urljoin(HALYK_BASE_URL, path)
+            if path.startswith("/"):
+                return urljoin(HALYK_BASE_URL, f"/category{path}")
+            return urljoin(HALYK_BASE_URL, path)
         query = str(product_id or "").strip() or str(title or "").strip()
         return f"{HALYK_BASE_URL}/search?{urlencode({'query': query})}" if query else ""
 
@@ -785,7 +798,12 @@ class DataService:
             value = dict(row)
             product_id = str(value.get("product_id") or "")
             code = f"halyk:{product_id}"
-            public_url = self._halyk_public_url(product_id, value.get("name"))
+            public_url = self._halyk_public_url(
+                product_id,
+                value.get("name"),
+                value.get("product_url"),
+                value.get("raw_json"),
+            )
             specs = self._json(value.get("specs_json"), [])
             ident = identity(str(value.get("name") or ""), specs, str(value.get("brand") or ""))
             offers = offers_by_product.get(product_id, [])
