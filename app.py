@@ -16,6 +16,7 @@ from datetime import timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse, urlunparse
 
 from flask import (
     Flask,
@@ -50,7 +51,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.6"
+VERSION = "3.4.7"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -520,6 +521,17 @@ def load_ozon_public_config() -> dict[str, Any]:
     return result
 
 
+def ozon_seller_root_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    host = parsed.netloc.lower().split(":")[0]
+    if host not in {"ozon.ru", "www.ozon.ru"}:
+        return ""
+    match = re.search(r"/seller/([^/?#]+)/?", parsed.path, re.IGNORECASE)
+    if not match:
+        return ""
+    return urlunparse(("https", "www.ozon.ru", f"/seller/{match.group(1)}/", "", "", ""))
+
+
 def save_ozon_public_config(payload: dict[str, Any]) -> None:
     root = ROOT / "collectors" / "ozon"
     root.mkdir(parents=True, exist_ok=True)
@@ -545,7 +557,14 @@ def save_ozon_public_config(payload: dict[str, Any]) -> None:
         or payload.get("category_urls")
         or ""
     )
-    urls = [*client_urls, *[url for url in market_urls if url not in client_urls]]
+    normalized_client_urls: list[str] = []
+    for url in client_urls:
+        root_url = ozon_seller_root_url(url)
+        if root_url and root_url not in normalized_client_urls:
+            normalized_client_urls.append(root_url)
+        if url not in normalized_client_urls:
+            normalized_client_urls.append(url)
+    urls = [*normalized_client_urls, *[url for url in market_urls if url not in normalized_client_urls]]
     if urls:
         (root / "START_URLS.txt").write_text("\n".join(urls) + "\n", encoding="utf-8")
         (root / "START_URL.txt").write_text(urls[0] + "\n", encoding="utf-8")
@@ -615,8 +634,8 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
     }
     if action in ozon_actions:
         command = py_command(ozon_cli, ozon_actions[action])
-        if action in {"ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync"}:
-            command += ["--limit", str(500 if action == "ozon_full_sync" else 30 if action == "ozon_market_search" else 100)]
+        if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
+            command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
         return command
     halyk_actions = {
         "halyk_sync_catalog": "sync-catalog",
