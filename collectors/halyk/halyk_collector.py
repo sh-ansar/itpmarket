@@ -24,6 +24,10 @@ from schema import ensure_database
 
 BASE_URL = "https://halykmarket.kz"
 SHOP_ID = "693ff081028570920fd8a6b971eb5e"
+CATALOG_CATEGORY_ALIASES = {
+    "shini-i-diski": "10038",
+    "/shini-i-diski": "10038",
+}
 
 
 def now_iso() -> str:
@@ -192,7 +196,28 @@ def base_params(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def catalog_category_id(args: argparse.Namespace) -> str:
+    raw = clean_text(getattr(args, "catalog_category_id", "") or args.catalog_query)
+    if not raw:
+        return ""
+    if raw.isdigit():
+        return raw
+    slug = raw.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return CATALOG_CATEGORY_ALIASES.get(slug) or CATALOG_CATEGORY_ALIASES.get(f"/{slug}") or ""
+
+
 def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
+    category_id = catalog_category_id(args)
+    if category_id:
+        return {
+            **base_params(args),
+            "categories": category_id,
+            "merchants": args.seller_name,
+            "limit": str(args.page_size),
+            "page": str(page),
+            "sort_by": "popular",
+            "sort_dir": "desc",
+        }
     return {
         "type": "full_search",
         "search_query": args.catalog_query,
@@ -203,6 +228,10 @@ def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
         "page": str(page),
         "sort_by": "popular",
     }
+
+
+def catalog_path(args: argparse.Namespace) -> str:
+    return "/search-api/products" if catalog_category_id(args) else "/search-api/search"
 
 
 def search_params(args: argparse.Namespace, product_id: str) -> dict[str, Any]:
@@ -392,14 +421,14 @@ def save_offers(conn: sqlite3.Connection, run_id: str, product_id: str, offers: 
 
 
 def sync_catalog(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> tuple[int, int, int]:
-    page = 0
+    page = 1 if catalog_category_id(args) else 0
     loaded = 0
     total_reported = 0
     offers_seen = 0
     stamp = now_iso()
     conn.execute("UPDATE halyk_products SET active=0")
     while True:
-        data = halyk_get_json("/search-api/search", catalog_params(args, page), args.timeout)
+        data = halyk_get_json(catalog_path(args), catalog_params(args, page), args.timeout)
         products = data.get("products") if isinstance(data.get("products"), list) else []
         total_reported = int(data.get("products_total") or total_reported or len(products))
         if not products:
@@ -513,6 +542,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--seller-name", default="Unityre")
     parser.add_argument("--location-id", default="-2")
     parser.add_argument("--catalog-query", default="shini-i-diski")
+    parser.add_argument("--catalog-category-id", default="10038")
     parser.add_argument("--shop-id", default=SHOP_ID)
     parser.add_argument("--device-id", default="spyonCollector")
     parser.add_argument("--page-size", type=int, default=200)

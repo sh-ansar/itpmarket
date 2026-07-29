@@ -36,6 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "seller_name": "Unityre",
         "location_id": "-2",
         "catalog_query": "shini-i-diski",
+        "catalog_category_id": "10038",
         "page_size": 200,
         "timeout_seconds": 30,
         "sleep_seconds": 0.25,

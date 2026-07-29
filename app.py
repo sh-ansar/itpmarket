@@ -50,7 +50,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.5"
+VERSION = "3.4.6"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -631,6 +631,7 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
             "--seller-name", str(halyk["seller_name"]),
             "--location-id", str(halyk["location_id"]),
             "--catalog-query", str(halyk.get("catalog_query") or "shini-i-diski"),
+            "--catalog-category-id", str(halyk.get("catalog_category_id") or "10038"),
             "--page-size", str(halyk["page_size"]),
             "--timeout", str(halyk["timeout_seconds"]),
             "--sleep", str(halyk["sleep_seconds"]),
@@ -1325,7 +1326,7 @@ def api_settings_put() -> Any:
                 updated["kaspi"]["max_delay"] = updated["kaspi"]["min_delay"]
             if "headless" in kaspi:
                 updated["kaspi"]["headless"] = bool(kaspi["headless"])
-            for key in ("seller_name", "location_id", "catalog_query"):
+            for key in ("seller_name", "location_id", "catalog_query", "catalog_category_id"):
                 if key in halyk_values:
                     updated["halyk"][key] = str(halyk_values[key]).strip()
             for key, minimum, maximum in (("page_size", 10, 200), ("timeout_seconds", 10, 120), ("max_products", 0, 100000)):
