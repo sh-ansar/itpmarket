@@ -17,9 +17,9 @@ if errorlevel 1 (
 )
 
 echo ================================================================
-echo  ITP MARKET INTELLIGENCE 3.2.0
+echo  SPYON
 echo  Local:  http://127.0.0.1:8765
-echo  Server: http://192.168.1.75:8765
+echo  LAN:    run CHECK_LAN_ACCESS.bat to see this computer's Wi-Fi address
 echo ================================================================
 ".runtime\venv_3_2_0\Scripts\python.exe" -u "app.py"
 if errorlevel 1 (

@@ -50,11 +50,13 @@ class DataService:
         seller_name: str,
         ozon_db_path: Path | None = None,
         seller_id: str = "",
+        halyk_seller_name: str = "Unityre",
     ):
         self.db_path = Path(db_path)
         self.seller_name = seller_name
         self.seller_id = seller_id
         self.ozon_db_path = Path(ozon_db_path) if ozon_db_path else None
+        self.halyk_seller_name = halyk_seller_name
         self.lock = threading.RLock()
         self._rows_cache: list[dict[str, Any]] = []
         self._rows_cached_at = 0.0
@@ -738,6 +740,128 @@ class DataService:
         finally:
             if conn is not None: conn.close()
 
+    def _halyk_rows(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            tables = {
+                str(row[0]) for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "halyk_products" not in tables:
+                return []
+            states = {
+                str(row["product_code"]): dict(row)
+                for row in conn.execute(
+                    "SELECT product_code,watched,priority,note,expected_monthly_units,updated_at FROM app_product_state"
+                ).fetchall()
+            }
+            offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            if "halyk_offers" in tables:
+                for row in conn.execute(
+                    """
+                    SELECT * FROM halyk_offers
+                    WHERE active=1
+                    ORDER BY product_id,is_own DESC,CASE WHEN price_kzt>0 THEN 0 ELSE 1 END,price_kzt,merchant_name
+                    """
+                ).fetchall():
+                    offers_by_product[str(row["product_id"])].append(dict(row))
+            products = conn.execute(
+                "SELECT * FROM halyk_products WHERE active=1 ORDER BY last_seen_at DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        result: list[dict[str, Any]] = []
+        for row in products:
+            value = dict(row)
+            product_id = str(value.get("product_id") or "")
+            code = f"halyk:{product_id}"
+            specs = self._json(value.get("specs_json"), [])
+            ident = identity(str(value.get("name") or ""), specs, str(value.get("brand") or ""))
+            offers = offers_by_product.get(product_id, [])
+            own_offer = next((offer for offer in offers if int(offer.get("is_own") or 0) == 1), None)
+            own_price = (
+                own_offer.get("price_kzt")
+                if own_offer and own_offer.get("price_kzt") is not None
+                else value.get("price_kzt")
+            )
+            competitors = [
+                Candidate(
+                    code=str(offer.get("merchant_key") or offer.get("merchant_name") or ""),
+                    title=str(offer.get("merchant_name") or "Продавец Halyk Market"),
+                    url=str(value.get("product_url") or ""),
+                    price=float(offer.get("price_kzt") or 0),
+                    brand=str(value.get("brand") or ident.get("brand") or ""),
+                    tier="SAME_PRODUCT_CARD",
+                    model=str(value.get("name") or ""),
+                    score=100.0,
+                    relation="HALYK_SAME_CARD",
+                    reasons=["same_halyk_product_id", f"product_id={product_id}", "different_seller"],
+                )
+                for offer in offers
+                if int(offer.get("is_own") or 0) == 0 and float(offer.get("price_kzt") or 0) > 0
+            ]
+            scan_status = "ok" if value.get("last_market_at") else ""
+            position = exact_offer_position(own_price, competitors, scan_status)
+            position.update({
+                "reference_type": "HALYK_SAME_CARD",
+                "match_method": "HALYK_PRODUCT_ID",
+            })
+            status = str(position.get("price_status") or "NOT_ANALYZED")
+            info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+            state = states.get(code, {})
+            result.append({
+                **position,
+                "product_code": code,
+                "source_product_code": product_id,
+                "platform": "halyk_market",
+                "platform_label": "Halyk Market",
+                "source_type": "CLIENT_CATALOG",
+                "title": value.get("name") or "",
+                "brand": value.get("brand") or ident.get("brand") or "",
+                "model": ident.get("model") or "",
+                "size": self._identity_size(ident),
+                "product_type": ident.get("type") or "other",
+                "product_url": value.get("product_url") or "",
+                "image_url": value.get("image_url") or "",
+                "price_kzt": own_price,
+                "own_price_kzt": own_price,
+                "market_price_kzt": position.get("market_price_kzt"),
+                "price_original": own_price,
+                "currency_original": "KZT",
+                "seller_name": self.halyk_seller_name,
+                "seller_url": "",
+                "price_status": status,
+                "status_label": info["label"],
+                "status_tone": info["tone"],
+                "match_method_label": "Та же карточка Halyk Market",
+                "exact_offer_status": scan_status or "not_checked",
+                "exact_offer_checked_at": value.get("last_market_at"),
+                "exact_offer_count": len(offers),
+                "competitor_seller_count": len(competitors),
+                "candidate_count": len(competitors),
+                "reference_count": position.get("reference_count") or len(competitors),
+                "exact_candidates": [item.as_dict() for item in competitors],
+                "segment_candidates": [],
+                "review_candidates": [],
+                "watched": bool(state.get("watched")),
+                "priority": state.get("priority") or "normal",
+                "note": state.get("note") or "",
+                "expected_monthly_units": state.get("expected_monthly_units"),
+                "identity_completeness_percent": 100 if product_id else 0,
+                "catalog_rating": None,
+                "catalog_reviews": None,
+                "updated_at": value.get("last_market_at") or value.get("last_catalog_at") or value.get("last_seen_at"),
+                "freshness_status": self._freshness(value.get("last_market_at") or value.get("last_catalog_at"))[0],
+                "freshness_label": self._freshness(value.get("last_market_at") or value.get("last_catalog_at"))[1],
+                "_price_sort": float(own_price or 0),
+                "_delta_sort": float(position.get("difference_kzt") or 0),
+                "_updated_sort": value.get("last_market_at") or value.get("last_catalog_at") or value.get("last_seen_at") or "",
+                "raw_price_status": status,
+            })
+        return result
+
     def _source_signature(self) -> tuple[int, ...]:
         values: list[int] = []
         paths = [self.db_path]
@@ -757,7 +881,7 @@ class DataService:
             signature = self._source_signature()
             if self._rows_cache and self._rows_signature == signature:
                 return self._rows_cache
-            self._rows_cache = self._kaspi_rows() + self._ozon_rows()
+            self._rows_cache = self._kaspi_rows() + self._ozon_rows() + self._halyk_rows()
             self._rows_cached_at = time.monotonic()
             self._rows_signature = self._source_signature()
             return self._rows_cache
@@ -804,7 +928,9 @@ class DataService:
             rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
-        counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in kaspi_rows)
+        halyk_rows = [row for row in rows if row.get("platform") == "halyk_market"]
+        exact_rows = kaspi_rows + halyk_rows
+        counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in exact_rows)
         active_count = len(rows)
         priced_count = sum(1 for row in rows if row.get("price_kzt") is not None)
         kaspi_analyzed_rows = [
@@ -815,11 +941,15 @@ class DataService:
             row for row in ozon_rows
             if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
         ]
-        data_ready_count = len(kaspi_analyzed_rows) + len(ozon_ready_rows)
+        halyk_analyzed_rows = [
+            row for row in halyk_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") not in UNSCANNED_STATUSES
+        ]
+        data_ready_count = len(kaspi_analyzed_rows) + len(halyk_analyzed_rows) + len(ozon_ready_rows)
         risk_count = sum(counts[key] for key in RISK_STATUSES)
         opportunity_count = sum(counts[key] for key in OPPORTUNITY_STATUSES)
         potential_rows = [
-            row for row in kaspi_rows
+            row for row in exact_rows
             if float(row.get("potential_margin_monthly_kzt") or 0) > 0
         ]
         potential_monthly = sum(
@@ -859,6 +989,7 @@ class DataService:
             "catalog_count": active_count,
             "kaspi_count": len(kaspi_rows),
             "ozon_count": len(ozon_rows),
+            "halyk_count": len(halyk_rows),
             "expected_count": effective_expected,
             "catalog_coverage_pct": round(len(kaspi_rows) / effective_expected * 100, 2) if effective_expected else None,
             "catalog_sync": latest_catalog_sync_value,
@@ -873,6 +1004,8 @@ class DataService:
             "kaspi_market_coverage_pct": round(len(kaspi_analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0,
             "ozon_data_ready_count": len(ozon_ready_rows),
             "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0,
+            "halyk_market_analyzed_count": len(halyk_analyzed_rows),
+            "halyk_market_coverage_pct": round(len(halyk_analyzed_rows) / len(halyk_rows) * 100, 2) if halyk_rows else 0,
             "watched_count": sum(1 for row in rows if row.get("watched")),
             "risk_count": risk_count,
             "favorable_count": opportunity_count,
@@ -889,8 +1022,8 @@ class DataService:
             "preferences": preferences,
             "health": {
                 "catalog": (
-                    "ok" if kaspi_rows and (not effective_expected or len(kaspi_rows) >= effective_expected * 0.97)
-                    else "warning" if kaspi_rows else "empty"
+                    "ok" if exact_rows and (not effective_expected or len(kaspi_rows) >= effective_expected * 0.97)
+                    else "warning" if exact_rows else "empty"
                 ),
                 "prices": "ok" if priced_count >= max(1, active_count * 0.9) else ("warning" if priced_count else "empty"),
                 "market": "ok" if data_ready_count >= max(1, active_count * 0.9) else ("warning" if data_ready_count else "empty"),
@@ -904,18 +1037,20 @@ class DataService:
             rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
+        halyk_rows = [row for row in rows if row.get("platform") == "halyk_market"]
+        exact_rows = kaspi_rows + halyk_rows
 
-        status_counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in kaspi_rows)
-        analyzed_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]
+        status_counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in exact_rows)
+        analyzed_rows = [row for row in exact_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]
         ozon_ready_rows = [
             row for row in ozon_rows
             if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
         ]
         combined_ready_count = len(analyzed_rows) + len(ozon_ready_rows)
-        risk_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") in RISK_STATUSES]
-        opportunity_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") in OPPORTUNITY_STATUSES]
-        review_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") == "REVIEW_REQUIRED"]
-        insufficient_rows = [row for row in kaspi_rows if str(row.get("price_status") or "") == "INSUFFICIENT_DATA"]
+        risk_rows = [row for row in exact_rows if str(row.get("price_status") or "") in RISK_STATUSES]
+        opportunity_rows = [row for row in exact_rows if str(row.get("price_status") or "") in OPPORTUNITY_STATUSES]
+        review_rows = [row for row in exact_rows if str(row.get("price_status") or "") == "REVIEW_REQUIRED"]
+        insufficient_rows = [row for row in exact_rows if str(row.get("price_status") or "") == "INSUFFICIENT_DATA"]
 
         valid_deltas = [float(row.get("difference_pct")) for row in analyzed_rows if row.get("difference_pct") is not None]
         average_delta = round(sum(valid_deltas) / len(valid_deltas), 2) if valid_deltas else 0.0
@@ -930,7 +1065,7 @@ class DataService:
             "brand": "Без бренда", "total": 0, "risks": 0, "opportunities": 0,
             "review": 0, "potential_margin_monthly_kzt": 0.0,
         })
-        for row in kaspi_rows:
+        for row in exact_rows:
             brand = str(row.get("brand") or "Без бренда").strip() or "Без бренда"
             item = brands[brand]
             item["brand"] = brand
@@ -980,7 +1115,7 @@ class DataService:
         )[:10]
 
         platform_rows = []
-        for name, values in (("Kaspi", kaspi_rows), ("Ozon", ozon_rows)):
+        for name, values in (("Kaspi", kaspi_rows), ("Ozon", ozon_rows), ("Halyk Market", halyk_rows)):
             priced = sum(1 for row in values if row.get("price_kzt") is not None or row.get("own_price_kzt") is not None)
             platform_rows.append({
                 "platform": name,
@@ -995,7 +1130,7 @@ class DataService:
             {"label": "100–150 тыс. ₸", "count": 0},
             {"label": "свыше 150 тыс. ₸", "count": 0},
         ]
-        for row in kaspi_rows:
+        for row in exact_rows:
             price = float(row.get("own_price_kzt") or 0)
             if price <= 0:
                 continue
@@ -1024,6 +1159,7 @@ class DataService:
                 "total_products": len(rows),
                 "kaspi_products": len(kaspi_rows),
                 "ozon_products": len(ozon_rows),
+                "halyk_products": len(halyk_rows),
                 "analyzed_count": combined_ready_count,
                 "analysis_coverage_pct": round(combined_ready_count / len(rows) * 100, 2) if rows else 0.0,
                 "data_ready_count": combined_ready_count,
@@ -1032,6 +1168,8 @@ class DataService:
                 "kaspi_market_coverage_pct": round(len(analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0.0,
                 "ozon_data_ready_count": len(ozon_ready_rows),
                 "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0.0,
+                "halyk_market_analyzed_count": len([row for row in halyk_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]),
+                "halyk_market_coverage_pct": round(len([row for row in halyk_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]) / len(halyk_rows) * 100, 2) if halyk_rows else 0.0,
                 "risk_count": len(risk_rows),
                 "opportunity_count": len(opportunity_rows),
                 "review_count": len(review_rows),
@@ -1133,6 +1271,7 @@ class DataService:
                 item for item in [
                     {"value": "kaspi", "label": "Kaspi"},
                     {"value": "ozon", "label": "Ozon"},
+                    {"value": "halyk_market", "label": "Halyk Market"},
                 ] if allowed_platforms is None or item["value"] in allowed_platforms
             ],
             "statuses": [{"value": status, "label": STATUS_INFO.get(status, {}).get("label", status), "tone": STATUS_INFO.get(status, {}).get("tone", "neutral")} for status in statuses],
@@ -1144,6 +1283,40 @@ class DataService:
             return None
         result = self._apply_user_values(base, self.preferences(user_id))
         result.pop("_price_sort", None); result.pop("_delta_sort", None); result.pop("_updated_sort", None)
+        if result.get("platform") == "halyk_market":
+            product_id = str(result.get("source_product_code") or "").removeprefix("halyk:")
+            conn = self._connect()
+            try:
+                detail = conn.execute("SELECT * FROM halyk_products WHERE product_id=?", (product_id,)).fetchone()
+                offers = conn.execute(
+                    """
+                    SELECT merchant_name,merchant_key,price_kzt,offer_type,is_own,last_checked_at
+                    FROM halyk_offers
+                    WHERE product_id=? AND active=1
+                    ORDER BY CASE WHEN is_own=1 THEN 0 ELSE 1 END,price_kzt,merchant_name
+                    LIMIT 100
+                    """,
+                    (product_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+            result["specifications"] = normalize_specifications(detail["specs_json"] if detail else [])
+            result["detail"] = dict(detail) if detail else None
+            result["candidates"] = result.get("exact_candidates") or []
+            result["offers"] = [
+                {
+                    **dict(row),
+                    "merchant_id": row["merchant_key"],
+                    "merchant_rating": None,
+                    "captured_at": row["last_checked_at"],
+                    "product_url": result.get("product_url") or "",
+                    "match_method": "HALYK_PRODUCT_ID",
+                    "match_method_label": "Та же карточка Halyk Market",
+                }
+                for row in offers
+            ]
+            result["history"] = self.price_history(code, user_id=user_id)
+            return result
         if result.get("platform") == "ozon":
             result["specifications"] = self._ozon_specifications(result)
             rate = float(self.preferences(user_id).get("rub_to_kzt") or 5.5)
@@ -1210,6 +1383,31 @@ class DataService:
             conn.close()
 
     def price_history(self, code: str, limit: int = 120, user_id: int | None = None) -> list[dict[str, Any]]:
+        if str(code).startswith("halyk:"):
+            product_id = str(code).split(":", 1)[1]
+            conn = self._connect()
+            try:
+                own = conn.execute(
+                    """
+                    SELECT captured_at AS at,price_kzt AS price,'own' AS series
+                    FROM halyk_price_history
+                    WHERE product_id=? AND is_own=1 AND price_kzt IS NOT NULL
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (product_id, int(limit)),
+                ).fetchall()
+                market = conn.execute(
+                    """
+                    SELECT captured_at AS at,MIN(price_kzt) AS price,'market' AS series
+                    FROM halyk_price_history
+                    WHERE product_id=? AND is_own=0 AND price_kzt IS NOT NULL
+                    GROUP BY run_id,captured_at ORDER BY captured_at DESC LIMIT ?
+                    """,
+                    (product_id, int(limit)),
+                ).fetchall()
+                return sorted([dict(row) for row in own] + [dict(row) for row in market], key=lambda item: item.get("at") or "")
+            finally:
+                conn.close()
         if str(code).startswith("ozon:"):
             article = str(code).split(":", 1)[1]
             if not self.ozon_db_path or not self.ozon_db_path.exists():
@@ -1256,7 +1454,7 @@ class DataService:
         conn = self._connect()
         try:
             for code in clean_codes:
-                raw_code = code.removeprefix("kaspi:")
+                raw_code = code if code.startswith("halyk:") else code.removeprefix("kaspi:")
                 current = conn.execute("SELECT watched,priority,note,expected_monthly_units FROM app_product_state WHERE product_code=?", (raw_code,)).fetchone()
                 current_values = dict(current) if current else {"watched": 0, "priority": "normal", "note": "", "expected_monthly_units": None}
                 units = current_values.get("expected_monthly_units") if expected_monthly_units is None else max(0, int(expected_monthly_units))

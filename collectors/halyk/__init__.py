@@ -1,0 +1,1 @@
+"""Halyk Market collector package."""

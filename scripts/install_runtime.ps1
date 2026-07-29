@@ -78,7 +78,7 @@ function New-Venv {
 }
 
 Write-Host "================================================================"
-Write-Host " ITP MARKET INTELLIGENCE 3.2.0 - RUNTIME INSTALL"
+Write-Host " SPYON RUNTIME INSTALL"
 Write-Host "================================================================"
 Write-Host "Legacy .venv is ignored and never deleted."
 Write-Host "Runtime path: $Venv"

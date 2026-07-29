@@ -50,7 +50,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.1"
+VERSION = "3.4.2"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -65,6 +65,7 @@ DATA = DataService(
     str(CFG["kaspi"]["seller_name"]),
     ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
     seller_id=str(CFG["kaspi"]["seller_id"]),
+    halyk_seller_name=str(CFG["halyk"]["seller_name"]),
 )
 TASKS = TaskManager(
     ROOT,
@@ -151,6 +152,9 @@ ACTION_INFO = {
     "ozon_retry": {"label": "Ozon: повтор ошибок", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_full_sync": {"label": "Ozon: полная синхронизация", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_export": {"label": "Ozon: экспорт реестра", "resource": ["reports"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "halyk_sync_catalog": {"label": "Halyk Market: синхронизация каталога", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
+    "halyk_refresh_offers": {"label": "Halyk Market: точные предложения продавцов", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
+    "halyk_full_sync": {"label": "Halyk Market: полная синхронизация", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
 }
 
 
@@ -318,7 +322,7 @@ def allowed_marketplaces(user: dict[str, Any] | None = None) -> set[str]:
     value = user or current_user() or {}
     access = value.get("marketplaces")
     if not isinstance(access, dict) or not access:
-        return {"kaspi", "ozon"}
+        return {"kaspi", "ozon", "halyk_market"}
     return {code for code, enabled in access.items() if bool(enabled)}
 
 
@@ -326,7 +330,7 @@ def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
     filters = product_filters_from_request()
     allowed = allowed_marketplaces()
     requested = str(filters.get("platform") or "").strip()
-    visible = allowed & {"kaspi", "ozon"}
+    visible = allowed & {"kaspi", "ozon", "halyk_market"}
     if requested and requested not in visible:
         raise PermissionError("Нет доступа к выбранной площадке.")
     if not requested:
@@ -381,6 +385,7 @@ def reload_services() -> None:
         str(CFG["kaspi"]["seller_name"]),
         ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
         seller_id=str(CFG["kaspi"]["seller_id"]),
+        halyk_seller_name=str(CFG["halyk"]["seller_name"]),
     )
     TASKS.max_parallel = max(1, int(CFG["app"].get("max_parallel_tasks", 3)))
     threading.Thread(target=warm_data_cache, daemon=True).start()
@@ -594,8 +599,15 @@ def browser_arguments(workers: int) -> list[str]:
 def build_action_command(action: str, codes: list[str], user_id: int) -> list[str]:
     kaspi = CFG["kaspi"]
     analysis = CFG["analysis"]
-    codes_text = ",".join(code.removeprefix("kaspi:") for code in codes if not code.startswith("ozon:"))
+    codes_text = ",".join(
+        code.removeprefix("kaspi:")
+        for code in codes
+        if not code.startswith(("ozon:", "halyk:"))
+    )
     ozon_cli = ROOT / "collectors" / "ozon" / "ozon_collector.py"
+    halyk_cli = ROOT / "collectors" / "halyk" / "halyk_collector.py"
+    halyk = CFG["halyk"]
+    halyk_codes_text = ",".join(code.removeprefix("halyk:") for code in codes if code.startswith("halyk:"))
     ozon_actions = {
         "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
         "ozon_refresh_prices": "refresh-prices", "ozon_refresh_stale": "refresh-stale",
@@ -605,6 +617,29 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
         command = py_command(ozon_cli, ozon_actions[action])
         if action in {"ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync"}:
             command += ["--limit", str(500 if action == "ozon_full_sync" else 30 if action == "ozon_market_search" else 100)]
+        return command
+    halyk_actions = {
+        "halyk_sync_catalog": "sync-catalog",
+        "halyk_refresh_offers": "refresh-offers",
+        "halyk_full_sync": "full-sync",
+    }
+    if action in halyk_actions:
+        command = py_command(
+            halyk_cli,
+            halyk_actions[action],
+            "--db", str(DB_PATH),
+            "--seller-name", str(halyk["seller_name"]),
+            "--location-id", str(halyk["location_id"]),
+            "--catalog-query", str(halyk.get("catalog_query") or "shini-i-diski"),
+            "--page-size", str(halyk["page_size"]),
+            "--timeout", str(halyk["timeout_seconds"]),
+            "--sleep", str(halyk["sleep_seconds"]),
+        )
+        max_products = int(halyk.get("max_products") or 0)
+        if max_products > 0:
+            command += ["--max-products", str(max_products)]
+        if action == "halyk_refresh_offers" and halyk_codes_text:
+            command += ["--product-ids", halyk_codes_text]
         return command
     if action == "sync_catalog":
         command = py_command(
@@ -1011,7 +1046,7 @@ def api_product_codes() -> Any:
 @app.get("/api/products/<code>")
 @login_required
 def api_product(code: str) -> Any:
-    platform = "ozon" if str(code).startswith("ozon:") else "kaspi"
+    platform = "halyk_market" if str(code).startswith("halyk:") else "ozon" if str(code).startswith("ozon:") else "kaspi"
     if platform not in allowed_marketplaces():
         return json_error("Нет доступа к выбранной площадке.", 403)
     product = DATA.product(code, int((current_user() or {})["id"]))
@@ -1059,16 +1094,17 @@ def api_task_start() -> Any:
     if action == "backup_database" and not is_superadmin(user):
         return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
     task_platform = info.get("platform") or (
+        "halyk_market" if action.startswith("halyk_") else
         "ozon" if action.startswith("ozon_") else
         "system" if action in {"export_report", "backup_database"} else "kaspi"
     )
-    if task_platform in {"kaspi", "ozon"} and task_platform not in allowed_marketplaces(user):
+    if task_platform in {"kaspi", "ozon", "halyk_market"} and task_platform not in allowed_marketplaces(user):
         return json_error("Для пользователя не разрешена эта площадка.", 403)
     codes = clean_codes(payload.get("codes"))
     scope = str(payload.get("scope") or ("selected" if codes else "all"))
     if scope == "selected" and not codes:
         return json_error("Не выбраны товары.")
-    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export"}:
+    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export", "halyk_sync_catalog", "halyk_full_sync"}:
         codes = []
         scope = "all"
     try:
@@ -1086,7 +1122,7 @@ def api_task_start() -> Any:
                 "requested_by": user.get("display_name"),
                 "requested_by_id": user.get("id"),
                 "tenant_id": user.get("tenant_id"),
-                "platform": info.get("platform") or ("ozon" if action.startswith("ozon_") else "kaspi"),
+                "platform": info.get("platform") or ("halyk_market" if action.startswith("halyk_") else "ozon" if action.startswith("ozon_") else "kaspi"),
             },
         )
         record_event("task_started", "task", task["id"], {"action": action, "scope": scope, "codes": len(codes)})
@@ -1275,6 +1311,7 @@ def api_settings_put() -> Any:
             analysis = config_payload.get("analysis") if isinstance(config_payload.get("analysis"), dict) else {}
             app_values = config_payload.get("app") if isinstance(config_payload.get("app"), dict) else {}
             ozon_values = config_payload.get("ozon") if isinstance(config_payload.get("ozon"), dict) else {}
+            halyk_values = config_payload.get("halyk") if isinstance(config_payload.get("halyk"), dict) else {}
             for key in ("seller_id", "seller_name", "city_id", "zone_id"):
                 if key in kaspi:
                     updated["kaspi"][key] = str(kaspi[key]).strip()
@@ -1288,6 +1325,14 @@ def api_settings_put() -> Any:
                 updated["kaspi"]["max_delay"] = updated["kaspi"]["min_delay"]
             if "headless" in kaspi:
                 updated["kaspi"]["headless"] = bool(kaspi["headless"])
+            for key in ("seller_name", "location_id", "catalog_query"):
+                if key in halyk_values:
+                    updated["halyk"][key] = str(halyk_values[key]).strip()
+            for key, minimum, maximum in (("page_size", 10, 200), ("timeout_seconds", 10, 120), ("max_products", 0, 100000)):
+                if key in halyk_values:
+                    updated["halyk"][key] = max(minimum, min(int(halyk_values[key]), maximum))
+            if "sleep_seconds" in halyk_values:
+                updated["halyk"]["sleep_seconds"] = max(0.0, min(float(halyk_values["sleep_seconds"]), 10.0))
             for key, minimum, maximum in (("discover_workers", 1, 4), ("price_workers", 1, 4), ("search_pages", 1, 5), ("validate_top", 1, 12), ("search_cache_days", 0, 90), ("detail_cache_days", 0, 180)):
                 if key in analysis:
                     value = float(analysis[key]) if "days" in key else int(analysis[key])

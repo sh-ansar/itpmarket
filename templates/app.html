@@ -111,14 +111,14 @@
 
       <section class="page" id="page-products">
         <section class="operation-launcher compact" id="productsOperationBar">
-          <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="system" data-i18n="system">Система</option></select></div>
+          <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="halyk_market">Halyk Market</option><option value="system" data-i18n="system">Система</option></select></div>
           <div><label data-i18n="operation">Операция</label><select id="operationAction"></select></div>
           <div><label data-i18n="scope">Область</label><select id="operationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option></select></div>
           <button class="primary launch" id="launchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
         </section>
         <div class="filters">
           <label class="search"><img src="{{ url_for('static', filename='icons/search.svg') }}" alt=""><input id="productSearch" data-i18n-placeholder="search_placeholder" placeholder="Название, код, бренд, размер или продавец"></label>
-          <select id="platformFilter"><option value="" data-i18n="all_platforms">Все площадки</option><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option></select>
+          <select id="platformFilter"><option value="" data-i18n="all_platforms">Все площадки</option><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="halyk_market">Halyk Market</option></select>
           <select id="brandFilter"><option value="" data-i18n="all_brands">Все бренды</option></select>
           <select id="statusFilter"><option value="" data-i18n="all_statuses">Все статусы</option></select><select id="freshnessFilter"><option value="" data-i18n="freshness_any">Любая актуальность</option><option value="fresh" data-i18n="freshness_fresh">Актуальные</option><option value="due" data-i18n="freshness_due">Требуют обновления</option><option value="stale" data-i18n="freshness_stale">Устаревшие</option><option value="never" data-i18n="freshness_never">Не обновлялись</option></select>
         </div>
@@ -174,8 +174,47 @@
           {% if current_user.role == 'admin' %}<article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/users.svg') }}" alt=""></span><div><h3 data-i18n="company_profile">Компания</h3><p data-i18n="company_profile_text">Данные рабочего пространства, которые были указаны при регистрации.</p></div></div><div class="form-grid"><label><span data-i18n="company_name">Название компании</span><input id="tenantName"></label><label><span data-i18n="company_registration_number">Регистрационный номер / БИН</span><input id="tenantRegistrationNumber"></label><label><span data-i18n="company_email">Email компании</span><input id="tenantContactEmail" type="email"></label><label><span data-i18n="company_phone">Телефон компании</span><input id="tenantContactPhone"></label></div></article>{% endif %}
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article><article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/network.svg') }}" alt=""></span><div><h3>Доступ внутри сети</h3><p>Пользователи в той же Wi-Fi/LAN сети открывают панель по локальному IP. Вход по учётной записи остаётся обязательным.</p></div></div><div class="form-grid"><label>На этом компьютере<input id="cfgLocalUrl" readonly></label><label>Адрес в Wi-Fi/LAN<input id="cfgLanUrl" readonly></label><label>Порт<input id="cfgLanPort" readonly></label><label>Состояние<input id="cfgLanState" readonly></label></div></article>
-          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/matching.svg') }}" alt=""></span><div><h3 data-i18n="matching_rules">Правила сопоставления</h3><p data-i18n="matching_text">В MVP применяются консервативные ограничения.</p></div></div><ul class="rules"><li data-i18n="rule_exact">Kaspi: точное сравнение только внутри той же карточки товара.</li><li data-i18n="rule_segment">Ozon и межплатформенные связи: только артикул производителя либо полный строгий набор характеристик.</li><li data-i18n="rule_review">Похожие товары, другие бренды и модели сохраняются только как архив и не участвуют в аналитике.</li></ul></article>
-          {% if current_user.role == 'admin' %}<article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon Collector</h3><p>Каталог клиента и рыночные категории хранятся раздельно. В основной таблице показываются только товары Alfa Tires.</p></div></div><div class="form-grid"><label class="form-span-2">Категории каталога клиента — seller URL, по одной ссылке в строке<textarea id="cfgOzonClientUrls" rows="5" placeholder="https://www.ozon.ru/seller/alfa-tires-3381444/shiny-8502/"></textarea></label><label class="form-span-2">Рыночные категории — по одной ссылке в строке<textarea id="cfgOzonMarketUrls" rows="4" placeholder="https://www.ozon.ru/category/shiny-zimnie-8803/"></textarea></label><label>Ожидаемый продавец<input id="cfgOzonExpectedSeller" placeholder="Alfa Tires"></label><label>Текущий продавец<input id="cfgOzonCurrentSeller" readonly></label><label>Ссылка продавца<input id="cfgOzonCurrentSellerUrl" readonly></label><label>Товаров клиента<input id="cfgOzonCurrentProducts" readonly></label><label>Рыночных карточек<input id="cfgOzonMarketProducts" readonly></label><label>Предложений в реестре<input id="cfgOzonCurrentOffers" readonly></label><div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала все seller-категории Alfa Tires, затем рыночные категории. Чужие товары сохраняются только как рынок и не выводятся отдельными позициями клиенту.</span></div></div></article><article class="settings-card admin-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Kaspi Collector</h3><p>Системные параметры локального сборщика.</p></div></div><div class="form-grid"><label>Seller ID<input id="cfgSellerId"></label><label>Seller name<input id="cfgSellerName"></label><label>City ID<input id="cfgCityId"></label><label>Expected products<input id="cfgExpected" type="number"></label><label>Discover workers<input id="cfgDiscover" type="number" min="1" max="4"></label><label>Price workers<input id="cfgPrice" type="number" min="1" max="4"></label></div></article>{% endif %}
+          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/matching.svg') }}" alt=""></span><div><h3 data-i18n="matching_rules">Правила сопоставления</h3><p data-i18n="matching_text">В MVP применяются консервативные ограничения.</p></div></div><ul class="rules"><li data-i18n="rule_exact">Kaspi и Halyk Market: точное сравнение только внутри той же карточки товара.</li><li data-i18n="rule_segment">Ozon и межплатформенные связи: только артикул производителя либо полный строгий набор характеристик.</li><li data-i18n="rule_review">Похожие товары, другие бренды и модели сохраняются только как архив и не участвуют в аналитике.</li></ul></article>
+          {% if current_user.role == 'admin' %}
+          <article class="settings-card admin-card">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon Collector</h3><p>Каталог клиента и рыночные категории хранятся раздельно. В основной таблице показываются только товары Alfa Tires.</p></div></div>
+            <div class="form-grid">
+              <label class="form-span-2">Категории каталога клиента — seller URL, по одной ссылке в строке<textarea id="cfgOzonClientUrls" rows="5" placeholder="https://www.ozon.ru/seller/alfa-tires-3381444/shiny-8502/"></textarea></label>
+              <label class="form-span-2">Рыночные категории — по одной ссылке в строке<textarea id="cfgOzonMarketUrls" rows="4" placeholder="https://www.ozon.ru/category/shiny-zimnie-8803/"></textarea></label>
+              <label>Ожидаемый продавец<input id="cfgOzonExpectedSeller" placeholder="Alfa Tires"></label>
+              <label>Текущий продавец<input id="cfgOzonCurrentSeller" readonly></label>
+              <label>Ссылка продавца<input id="cfgOzonCurrentSellerUrl" readonly></label>
+              <label>Товаров клиента<input id="cfgOzonCurrentProducts" readonly></label>
+              <label>Рыночных карточек<input id="cfgOzonMarketProducts" readonly></label>
+              <label>Предложений в реестре<input id="cfgOzonCurrentOffers" readonly></label>
+              <div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала все seller-категории Alfa Tires, затем рыночные категории. Чужие товары сохраняются только как рынок и не выводятся отдельными позициями клиента.</span></div>
+            </div>
+          </article>
+          <article class="settings-card admin-card">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Halyk Market Collector</h3><p>Каталог продавца Unityre и точные предложения одной карточки на площадке Halyk Market.</p></div></div>
+            <div class="form-grid">
+              <label>Seller name<input id="cfgHalykSellerName" placeholder="Unityre"></label>
+              <label>Location ID<input id="cfgHalykLocationId" placeholder="-2"></label>
+              <label class="form-span-2">Catalog query<input id="cfgHalykCatalogQuery" placeholder="shini-i-diski"></label>
+              <label>Page size<input id="cfgHalykPageSize" type="number" min="10" max="200"></label>
+              <label>Timeout, sec<input id="cfgHalykTimeout" type="number" min="10" max="120"></label>
+              <label>Pause, sec<input id="cfgHalykSleep" type="number" min="0" max="10" step="0.05"></label>
+              <label>Test limit<input id="cfgHalykMaxProducts" type="number" min="0"></label>
+              <div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала синхронизируется каталог продавца, затем по Halyk product id собираются продавцы и цены той же карточки. Межплатформенный мэтчинг будет отдельной функцией.</span></div>
+            </div>
+          </article>
+          <article class="settings-card admin-card">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Kaspi Collector</h3><p>Системные параметры локального сборщика.</p></div></div>
+            <div class="form-grid">
+              <label>Seller ID<input id="cfgSellerId"></label>
+              <label>Seller name<input id="cfgSellerName"></label>
+              <label>City ID<input id="cfgCityId"></label>
+              <label>Expected products<input id="cfgExpected" type="number"></label>
+              <label>Discover workers<input id="cfgDiscover" type="number" min="1" max="4"></label>
+              <label>Price workers<input id="cfgPrice" type="number" min="1" max="4"></label>
+            </div>
+          </article>
+          {% endif %}
         </div>
       </section>
     </main>
@@ -251,7 +290,29 @@
   </div>
 </div>
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="12" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
-{% if current_user.role == 'admin' %}<div class="modal" id="userModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="add_user">Добавить пользователя</h3><button class="icon modal-close">×</button></div><form id="userForm"><label>Имя<input name="display_name" required></label><label>Email<input name="email" type="email" required></label><label>Роль<select name="role"><option value="operator">Оператор</option><option value="viewer">Наблюдатель</option><option value="admin">Администратор</option></select></label><fieldset class="marketplace-access-field"><legend>Доступ к площадкам</legend><div class="marketplace-access-grid"><label><input type="checkbox" name="marketplaces" value="kaspi" checked><span>Kaspi</span></label><label><input type="checkbox" name="marketplaces" value="ozon" checked><span>Ozon</span></label><label class="coming"><input type="checkbox" name="marketplaces" value="forte_market" disabled><span>Forte Market · скоро</span></label><label class="coming"><input type="checkbox" name="marketplaces" value="halyk_market" disabled><span>Halyk Market · скоро</span></label></div></fieldset><label>Временный пароль<input name="password" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Создать</button></div></form></div></div>{% endif %}
+{% if current_user.role == 'admin' %}
+<div class="modal" id="userModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><h3 data-i18n="add_user">Добавить пользователя</h3><button class="icon modal-close">×</button></div>
+    <form id="userForm">
+      <label>Имя<input name="display_name" required></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Роль<select name="role"><option value="operator">Оператор</option><option value="viewer">Наблюдатель</option><option value="admin">Администратор</option></select></label>
+      <fieldset class="marketplace-access-field">
+        <legend>Доступ к площадкам</legend>
+        <div class="marketplace-access-grid">
+          <label><input type="checkbox" name="marketplaces" value="kaspi" checked><span>Kaspi</span></label>
+          <label><input type="checkbox" name="marketplaces" value="ozon" checked><span>Ozon</span></label>
+          <label><input type="checkbox" name="marketplaces" value="halyk_market" checked><span>Halyk Market</span></label>
+          <label class="coming"><input type="checkbox" name="marketplaces" value="forte_market" disabled><span>Forte Market · скоро</span></label>
+        </div>
+      </fieldset>
+      <label>Временный пароль<input name="password" type="password" minlength="12" required></label>
+      <div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Создать</button></div>
+    </form>
+  </div>
+</div>
+{% endif %}
 <div class="toast-stack" id="toasts"></div>
 <script>window.ITP_USER={{ current_user|tojson }};window.ITP_VERSION={{ version|tojson }};</script>
 <script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>

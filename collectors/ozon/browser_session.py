@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
+import shutil
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 from ozon_probe_core import parse_catalog_html
 
@@ -31,8 +36,17 @@ class BrowserSession:
             f"{self.debug_base}{path}",
             headers={"User-Agent": "Unityre-Ozon-Collector/3.0"},
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8", errors="replace"))
+        except urllib.error.URLError as exc:
+            if path == "/json/list":
+                raise RuntimeError(
+                    "Ozon debug-браузер недоступен на 127.0.0.1:"
+                    f"{self.debug_port}. Запустите collectors\\ozon\\1_OPEN_VPN_BROWSER.bat, "
+                    "откройте Ozon через VPN и оставьте это окно Chrome открытым."
+                ) from exc
+            raise
 
     @staticmethod
     def _is_ozon_page(url: str) -> bool:
@@ -80,7 +94,19 @@ class BrowserSession:
         options = Options()
         options.debugger_address = f"127.0.0.1:{self.debug_port}"
         options.page_load_strategy = "none"
-        self.driver = webdriver.Chrome(options=options)
+        service = self._chromedriver_service()
+        try:
+            if service is not None:
+                self.driver = webdriver.Chrome(options=options, service=service)
+            else:
+                self.driver = webdriver.Chrome(options=options)
+        except WebDriverException as exc:
+            raise RuntimeError(
+                "ChromeDriver для Ozon не найден или не подходит к установленному Chrome. "
+                "Запустите collectors\\ozon\\0_SETUP.bat. Если сервер без доступа к Selenium/Google, "
+                "положите подходящий chromedriver.exe в collectors\\ozon\\drivers\\chromedriver.exe "
+                "или задайте переменную CHROMEDRIVER_PATH."
+            ) from exc
         self.driver.set_script_timeout(25)
         try:
             self.driver.command_executor._client_config.timeout = 60
@@ -111,6 +137,21 @@ class BrowserSession:
             pass
         self._switch_to_target()
         return self
+
+    @staticmethod
+    def _chromedriver_service() -> Service | None:
+        root = Path(__file__).resolve().parent
+        candidates = [
+            os.environ.get("CHROMEDRIVER_PATH", ""),
+            os.environ.get("CHROMEDRIVER", ""),
+            str(root / "drivers" / "chromedriver.exe"),
+            str(root / ".drivers" / "chromedriver.exe"),
+            shutil.which("chromedriver") or "",
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return Service(executable_path=candidate)
+        return None
 
     def _switch_to_target(self) -> None:
         assert self.driver is not None

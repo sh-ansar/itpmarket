@@ -13,7 +13,7 @@ INTEGRATION_CATALOG = [
     {"code":"kaspi","name":"Kaspi","description":"Каталог, точные предложения одной карточки и история цен.","availability":"available"},
     {"code":"ozon","name":"Ozon","description":"Каталог клиента, рыночные карточки и строгое сопоставление.","availability":"available"},
     {"code":"forte_market","name":"Forte Market","description":"Подключение запланировано после стабилизации общего API интеграций.","availability":"coming_soon"},
-    {"code":"halyk_market","name":"Halyk Market","description":"Подключение запланировано как отдельный модуль маркетплейса.","availability":"coming_soon"},
+    {"code":"halyk_market","name":"Halyk Market","description":"Каталог продавца, точные предложения одной карточки и история цен.","availability":"available"},
 ]
 
 SCHEDULE_ACTIONS = {
@@ -28,6 +28,9 @@ SCHEDULE_ACTIONS = {
     "ozon_refresh_stale": ("Ozon","Обновление характеристик"),
     "ozon_retry": ("Ozon","Повтор ошибок"),
     "ozon_full_sync": ("Ozon","Полная синхронизация"),
+    "halyk_sync_catalog": ("Halyk Market","Синхронизация каталога"),
+    "halyk_refresh_offers": ("Halyk Market","Точные предложения продавцов"),
+    "halyk_full_sync": ("Halyk Market","Полная синхронизация"),
     "export_report": ("Система","Формирование отчёта"),
     "backup_database": ("Система","Резервное копирование"),
 }

@@ -2032,6 +2032,8 @@ html[data-theme="dark"] .schedule-modal-note{
   }
 }
 
+.badge.halyk_market{background:#e7f7f0;color:#137b5a}
+
 /* Narrow phones */
 @media(max-width:420px){
   .global-header__row{
@@ -2098,6 +2100,8 @@ html[data-theme="dark"] img[src*="spyon-logo.svg"]{content:url("../images/spyon-
 .modal pre{border:1px solid rgba(120,167,188,.16)}
 
 .drawer-product p{line-height:1.5}
+.drawer-product-link{margin-top:10px;display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2,#f5f8fa);color:#087eae;text-decoration:none;font-size:13px;font-weight:600}
+.drawer-product-link:hover{border-color:#9fd9eb;background:#eaf8fd}
 .position-card{min-width:0}
 .position-card b{font-variant-numeric:tabular-nums}
 .position-card span,
