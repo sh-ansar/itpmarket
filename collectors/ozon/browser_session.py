@@ -7,12 +7,14 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -27,9 +29,11 @@ class BrowserSession:
         self.debug_port = debug_port
         self.start_url = start_url
         self.debug_base = f"http://127.0.0.1:{debug_port}"
+        self.profile_dir = Path(__file__).resolve().parent / "chrome_vpn_profile"
         self.driver = None
         self.target_id = ""
         self.original_url = ""
+        self.launched_browser = False
 
     def debugger_json(self, path: str, timeout: int = 8) -> Any:
         request = urllib.request.Request(
@@ -56,6 +60,97 @@ class BrowserSession:
             return False
         host = parsed.netloc.lower().split(":")[0]
         return host in {"ozon.ru", "www.ozon.ru"} and "/api/" not in parsed.path
+
+    def _debugger_ready(self, timeout: int = 2) -> bool:
+        try:
+            self.debugger_json("/json/list", timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _chrome_executable() -> str:
+        env_value = os.environ.get("OZON_CHROME_PATH") or os.environ.get("CHROME_PATH") or os.environ.get("CHROME")
+        candidates = [
+            env_value or "",
+            shutil.which("chrome.exe") or "",
+            shutil.which("chrome") or "",
+            shutil.which("google-chrome") or "",
+        ]
+        if sys.platform.startswith("win"):
+            candidates.extend(
+                [
+                    os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                    os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                    os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+                ]
+            )
+        elif sys.platform == "darwin":
+            candidates.append("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return candidate
+        raise RuntimeError(
+            "Google Chrome was not found. Install Chrome or set OZON_CHROME_PATH to chrome.exe."
+        )
+
+    def _launch_debug_browser(self) -> None:
+        if os.environ.get("OZON_AUTO_OPEN_BROWSER", "1").strip().casefold() in {"0", "false", "no", "off"}:
+            raise RuntimeError(
+                "Ozon debug browser is not open and OZON_AUTO_OPEN_BROWSER is disabled."
+            )
+        chrome = self._chrome_executable()
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        args = [
+            chrome,
+            f"--remote-debugging-port={self.debug_port}",
+            "--remote-allow-origins=*",
+            f"--user-data-dir={self.profile_dir}",
+            "--profile-directory=Default",
+            "--lang=ru-RU",
+            "--start-maximized",
+            "--no-first-run",
+            "--disable-popup-blocking",
+            self.start_url,
+        ]
+        creationflags = 0
+        if sys.platform.startswith("win"):
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
+        self.launched_browser = True
+        print(f"Ozon browser opened on port {self.debug_port}. Profile: {self.profile_dir}")
+
+    def ensure_debug_browser(self) -> None:
+        if self._debugger_ready():
+            return
+        self._launch_debug_browser()
+        deadline = time.monotonic() + float(os.environ.get("OZON_BROWSER_STARTUP_WAIT", "45"))
+        while time.monotonic() < deadline:
+            if self._debugger_ready():
+                return
+            time.sleep(1.0)
+        raise RuntimeError(
+            f"Ozon browser was opened, but debugger port {self.debug_port} did not become ready."
+        )
+
+    def _open_debug_tab(self, url: str) -> None:
+        encoded = quote(url, safe=":/?&=%")
+        for method in ("PUT", "GET"):
+            request = urllib.request.Request(f"{self.debug_base}/json/new?{encoded}", method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    response.read()
+                return
+            except Exception:
+                pass
+
+    def ensure_ozon_tab(self) -> None:
+        targets = self.debugger_json("/json/list")
+        for target in targets if isinstance(targets, list) else []:
+            if str(target.get("type") or "") == "page" and self._is_ozon_page(str(target.get("url") or "")):
+                return
+        self._open_debug_tab(self.start_url)
+        time.sleep(3.0)
 
     def _find_target(self) -> dict[str, Any]:
         targets = self.debugger_json("/json/list")
@@ -87,6 +182,8 @@ class BrowserSession:
         return candidates[0]
 
     def connect(self) -> "BrowserSession":
+        self.ensure_debug_browser()
+        self.ensure_ozon_tab()
         target = self._find_target()
         self.target_id = str(target.get("id") or "")
         self.original_url = str(target.get("url") or self.start_url)

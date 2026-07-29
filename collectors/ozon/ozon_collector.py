@@ -59,6 +59,17 @@ class Collector:
             print(f"Рабочая вкладка: {self.browser.original_url}")
         return self.browser
 
+    def open_browser(self) -> dict[str, Any]:
+        browser = self.ensure_browser()
+        print("Ozon browser is ready.")
+        print(f"Working tab: {browser.original_url}")
+        print("Choose a Russian city or pickup point in this Chrome profile if Ozon asks for it.")
+        return {
+            "status": "READY",
+            "debug_port": self.settings.debug_port,
+            "url": browser.original_url,
+        }
+
     def _run_dir(self, run_id: str) -> Path:
         path = self.settings.runs_dir / run_id
         path.mkdir(parents=True, exist_ok=True)
@@ -525,6 +536,7 @@ class Collector:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ozon Collector 3.0")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("open-browser")
     discover = sub.add_parser("discover")
     discover.add_argument("--limit", type=int, default=None)
     discover.add_argument("--pages", type=int, default=None)
@@ -546,7 +558,9 @@ def main() -> int:
     settings = load_settings()
     collector = Collector(settings)
     try:
-        if args.command == "discover":
+        if args.command == "open-browser":
+            collector.open_browser()
+        elif args.command == "discover":
             collector.discover(args.limit, args.pages)
         elif args.command in {"enrich-new", "refresh-prices", "refresh-stale", "retry-failed", "stress-test"}:
             collector.process(args.command, args.limit)

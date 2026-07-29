@@ -145,6 +145,7 @@ ACTION_INFO = {
         "roles": {"admin"},
         "platform": "system",
     },
+    "ozon_open_browser": {"label": "Ozon: open browser", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_discover": {"label": "Ozon: обнаружение товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_enrich": {"label": "Ozon: характеристики новых товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_market_search": {"label": "Ozon: поиск рыночных предложений", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
@@ -628,7 +629,7 @@ def build_action_command(action: str, codes: list[str], user_id: int) -> list[st
     halyk = CFG["halyk"]
     halyk_codes_text = ",".join(code.removeprefix("halyk:") for code in codes if code.startswith("halyk:"))
     ozon_actions = {
-        "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
+        "ozon_open_browser": "open-browser", "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
         "ozon_refresh_prices": "refresh-prices", "ozon_refresh_stale": "refresh-stale",
         "ozon_retry": "retry-failed", "ozon_full_sync": "full-sync", "ozon_export": "export",
     }
@@ -1125,7 +1126,7 @@ def api_task_start() -> Any:
     scope = str(payload.get("scope") or ("selected" if codes else "all"))
     if scope == "selected" and not codes:
         return json_error("Не выбраны товары.")
-    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export", "halyk_sync_catalog", "halyk_full_sync"}:
+    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_open_browser", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export", "halyk_sync_catalog", "halyk_full_sync"}:
         codes = []
         scope = "all"
     try:

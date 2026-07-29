@@ -1,197 +1,491 @@
 window.ITP_HELP_CONTENT = {
-  ru: {
-    dashboard: {
-      title: "Обзор",
-      intro: "Главная страница показывает состояние каталога, покрытия данными и ценовых рисков по всем подключенным площадкам.",
-      sections: [
-        {title: "На что смотреть", items: ["Всего товаров показывает общий размер каталога.", "Данные обработаны показывает, где уже есть актуальные рыночные предложения.", "Ценовые риски и потенциал помогают быстро понять, какие позиции требуют внимания."]},
-        {title: "Быстрые действия", items: ["Откройте каталог для проверки конкретных товаров.", "Перейдите в отчеты, чтобы посмотреть аналитику и выгрузки."]}
+  "ru": {
+    "dashboard": {
+      "title": "Обзор",
+      "intro": "Сводная картина по каталогу, качеству данных, ценовым рискам и последним операциям.",
+      "sections": [
+        {
+          "title": "Что здесь видно",
+          "items": [
+            "Общее количество клиентских позиций по подключённым каналам.",
+            "Доля товаров с готовыми ценами и рыночными данными.",
+            "Риски и ценовой потенциал только по подтверждённым сопоставлениям."
+          ]
+        },
+        {
+          "title": "Как действовать",
+          "items": [
+            "Откройте «Товары» для проверки отдельных позиций.",
+            "Используйте «Операции» для обновления каталога и цен.",
+            "Переходите в «Отчёты» для сводной аналитики."
+          ]
+        }
       ],
-      tip: "Сравнение выполняется только по подтвержденным совпадениям, без смешивания похожих товаров."
+      "tip": "Показатели пересчитываются после завершения операций и обновления страницы."
     },
-    products: {
-      title: "Товары",
-      intro: "Каталог объединяет позиции Kaspi, Ozon и Halyk Market, но площадки и правила сравнения остаются разделенными.",
-      sections: [
-        {title: "Фильтры", items: ["Используйте вкладки Все, Риски, Потенциал, Требуют проверки и Наблюдение.", "Фильтруйте по площадке, бренду, статусу и актуальности данных.", "Сортировка помогает быстро найти свежие изменения или самые дорогие позиции."]},
-        {title: "Карточка товара", items: ["Откройте строку товара, чтобы увидеть цену, диапазон рынка, продавцов, историю и характеристики.", "Кнопка открытия карточки ведет на страницу товара или поиск по площадке, если прямой URL недоступен."]}
+    "products": {
+      "title": "Товары",
+      "intro": "Основной каталог клиента. Рыночные карточки других продавцов не выводятся отдельными строками.",
+      "sections": [
+        {
+          "title": "Фильтры и поиск",
+          "items": [
+            "Поиск работает по названию, коду, бренду, размеру и продавцу.",
+            "Площадка, бренд, статус и актуальность сужают выдачу.",
+            "Выбранные позиции можно анализировать или включать в наблюдение."
+          ]
+        },
+        {
+          "title": "Рыночная позиция",
+          "items": [
+            "Kaspi сравнивается внутри одной товарной карточки.",
+            "Ozon использует подтверждённые совпадения и сопоставимые позиции бренда и размера.",
+            "При отсутствии других продавцов позиция не рассчитывается."
+          ]
+        }
       ],
-      tip: "Для Halyk Market сравнение идет внутри той же карточки товара."
+      "tip": "Откройте строку стрелкой справа, чтобы увидеть характеристики, историю цены и найденные предложения."
     },
-    operations: {
-      title: "Операции",
-      intro: "Раздел управляет сбором данных, обновлением цен, отчетами и служебными задачами.",
-      sections: [
-        {title: "Запуск", items: ["Выберите площадку, операцию и область запуска.", "Для выбранных товаров отметьте позиции в каталоге и запустите анализ.", "Во время выполнения показывается прогресс и примерное оставшееся время."]},
-        {title: "Журнал", items: ["Журнал показывает понятные этапы операции и результат.", "Если операция завершилась ошибкой, откройте журнал и проверьте последнюю строку."]}
+    "operations": {
+      "title": "Операции",
+      "intro": "Здесь выполняются серверные сборщики и отображается их прогресс.",
+      "sections": [
+        {
+          "title": "Перед запуском",
+          "items": [
+            "Для Kaspi должен быть доступен рабочий браузерный профиль.",
+            "??? Ozon ??????????? ???????? ???????????? ????????: Chrome ????????? ???, ???????? ?????????? ????? ??? ????? ??????.",
+            "Не запускайте одновременно две операции, использующие один профиль."
+          ]
+        },
+        {
+          "title": "Статусы",
+          "items": [
+            "«Выполняется» — процесс активен.",
+            "«Окончено» — операция завершилась успешно.",
+            "«Ошибка» — откройте журнал и повторите проблемные позиции."
+          ]
+        }
       ],
-      tip: "Ozon требует открытый отладочный браузер, а Kaspi и Halyk запускаются напрямую."
+      "tip": "Окно браузера можно свернуть, но нельзя закрывать до завершения операции."
     },
-    reports: {
-      title: "Отчеты",
-      intro: "Отчеты собирают состояние рынка, риски, потенциал и готовые файлы для выгрузки.",
-      sections: [
-        {title: "Аналитика", items: ["KPI показывают покрытие данных по площадкам.", "Графики и таблицы помогают найти позиции выше рынка и товары с потенциалом.", "Клик по строке аналитики открывает карточку товара."]},
-        {title: "Файлы", items: ["Сформированные отчеты можно скачать из списка внизу страницы.", "CSV подходит для таблиц, JSON для интеграций, HTML для просмотра."]}
+    "reports": {
+      "title": "Отчёты",
+      "intro": "Сводная аналитика по качеству данных, рискам, ценовым диапазонам и возможностям.",
+      "sections": [
+        {
+          "title": "Интерпретация",
+          "items": [
+            "Риски строятся только по подтверждённым рыночным данным.",
+            "Потенциал является оценкой возможного изменения выручки, а не гарантированной прибылью.",
+            "Покрытие показывает долю обработанных позиций."
+          ]
+        },
+        {
+          "title": "Экспорт",
+          "items": [
+            "HTML подходит для просмотра руководителем.",
+            "CSV используется для дальнейшего анализа.",
+            "JSON предназначен для интеграционных сценариев."
+          ]
+        }
       ],
-      tip: "Пустые блоки обычно означают, что по товарам еще не запускался сбор рынка."
+      "tip": "Перед формированием отчёта обновите цены и рыночные предложения."
     },
-    schedules: {
-      title: "Расписание",
-      intro: "Расписание автоматизирует повторные операции сбора и обновления данных.",
-      sections: [
-        {title: "Настройка", items: ["Создайте задачу, выберите операцию и периодичность.", "Время запуска берется по времени сервера.", "Отключайте расписание, если временно не нужно запускать сбор."]},
-        {title: "Контроль", items: ["Следите за последним результатом и ближайшим запуском.", "История показывает, какие плановые операции уже выполнялись."]}
+    "schedules": {
+      "title": "Расписание",
+      "intro": "Плановые задания запускают операции на серверном компьютере без ручного участия.",
+      "sections": [
+        {
+          "title": "Варианты",
+          "items": [
+            "Ежедневно в указанное время.",
+            "По выбранным дням недели.",
+            "Через фиксированный интервал."
+          ]
+        },
+        {
+          "title": "Требования",
+          "items": [
+            "Сервер должен быть включён и пользовательская сессия Windows активна.",
+            "?????????? ??????? ?????? ???? ??????; ??? Ozon ??????? ???????? ?????????? ????? ??? ????? ??????.",
+            "Операции одного ресурса выполняются последовательно."
+          ]
+        }
       ],
-      tip: "Перед демонстрацией лучше запускать тяжелые операции вручную, чтобы контролировать результат."
+      "tip": "Первое расписание лучше создать на безопасное время и проверить журнал запуска."
     },
-    users: {
-      title: "Сотрудники",
-      intro: "Здесь администратор управляет учетками, ролями и доступом к площадкам.",
-      sections: [
-        {title: "Роли", items: ["Администратор управляет настройками и пользователями.", "Оператор запускает операции и работает с каталогом.", "Наблюдатель смотрит данные без критичных изменений."]},
-        {title: "Доступ", items: ["Площадки можно включать отдельно для каждого сотрудника.", "Временный пароль нужно передать пользователю безопасным способом."]}
+    "users": {
+      "title": "Сотрудники",
+      "intro": "Управление ролями, активностью учётных записей и доступом к каналам продаж.",
+      "sections": [
+        {
+          "title": "Роли",
+          "items": [
+            "Администратор управляет сотрудниками и системными параметрами.",
+            "Оператор запускает рабочие операции.",
+            "Наблюдатель просматривает данные без изменений."
+          ]
+        },
+        {
+          "title": "Доступ",
+          "items": [
+            "Активность учётной записи управляется переключателем.",
+            "Доступ к Kaspi и Ozon назначается независимо.",
+            "Удаление сотрудника необратимо."
+          ]
+        }
       ],
-      tip: "Системная админ-панель доступна только владельцу платформы."
+      "tip": "Для временного восстановления доступа создайте новый код восстановления."
     },
-    settings: {
-      title: "Настройки",
-      intro: "Настройки хранят данные компании, интерфейса, валют и параметров сборщиков.",
-      sections: [
-        {title: "Компания", items: ["Клиент может заполнить название, БИН, email и телефон компании.", "Эти данные используются в рабочем пространстве и публичных документах."]},
-        {title: "Сборщики", items: ["Kaspi, Ozon и Halyk Market настраиваются отдельно.", "Меняйте параметры аккуратно и проверяйте результат через операции."]}
+    "settings": {
+      "title": "Настройки",
+      "intro": "Персональные параметры интерфейса и системные настройки подключённых сборщиков.",
+      "sections": [
+        {
+          "title": "Персональные параметры",
+          "items": [
+            "Язык и тема сохраняются для текущего сотрудника.",
+            "Курсы валют используются только для отображения и расчётов.",
+            "Системная тема следует настройке Windows."
+          ]
+        },
+        {
+          "title": "Параметры администратора",
+          "items": [
+            "Источники каталога клиента и рыночные категории хранятся раздельно.",
+            "После изменения ссылок сохраните настройки и выполните обнаружение товаров.",
+            "Работающие профили браузеров не удаляются."
+          ]
+        }
       ],
-      tip: "После изменения настроек запустите нужную операцию, чтобы обновить данные."
+      "tip": "Изменения темы применяются сразу; остальные параметры сохраняются кнопкой «Сохранить»."
     }
   },
-  kk: {
-    dashboard: {
-      title: "Шолу",
-      intro: "Басты бет каталог күйін, деректер қамтылуын және барлық қосылған алаңдардағы баға тәуекелдерін көрсетеді.",
-      sections: [
-        {title: "Нені қарау керек", items: ["Тауарлар саны каталогтың жалпы көлемін көрсетеді.", "Деректер өңделді көрсеткіші қай жерде өзекті нарық ұсыныстары бар екенін көрсетеді.", "Баға тәуекелі мен әлеует назар қажет позицияларды тез табуға көмектеседі."]},
-        {title: "Жылдам әрекеттер", items: ["Нақты тауарды тексеру үшін каталогты ашыңыз.", "Аналитика мен файлдарды көру үшін есептерге өтіңіз."]}
+  "kk": {
+    "dashboard": {
+      "title": "Шолу",
+      "intro": "Каталог, дерек сапасы, баға тәуекелдері және соңғы операциялар бойынша жиынтық көрініс.",
+      "sections": [
+        {
+          "title": "Не көрсетіледі",
+          "items": [
+            "Қосылған арналардағы клиент тауарларының жалпы саны.",
+            "Бағалары мен нарық деректері дайын тауарлар үлесі.",
+            "Тек расталған сәйкестіктер бойынша тәуекелдер мен баға әлеуеті."
+          ]
+        },
+        {
+          "title": "Қалай әрекет ету керек",
+          "items": [
+            "Жеке позицияларды тексеру үшін «Тауарлар» бөлімін ашыңыз.",
+            "Каталог пен бағаларды жаңарту үшін «Операциялар» бөлімін пайдаланыңыз.",
+            "Жиынтық талдау үшін «Есептер» бөліміне өтіңіз."
+          ]
+        }
       ],
-      tip: "Салыстыру тек расталған сәйкестіктер бойынша орындалады."
+      "tip": "Көрсеткіштер операция аяқталып, бет жаңартылғаннан кейін қайта есептеледі."
     },
-    products: {
-      title: "Тауарлар",
-      intro: "Каталог Kaspi, Ozon және Halyk Market позицияларын біріктіреді, бірақ алаңдар мен салыстыру ережелері бөлек сақталады.",
-      sections: [
-        {title: "Сүзгілер", items: ["Барлығы, Тәуекел, Әлеует, Тексеру қажет және Бақылау қойындыларын пайдаланыңыз.", "Алаң, бренд, мәртебе және дерек өзектілігі бойынша сүзуге болады.", "Сұрыптау соңғы өзгерістерді немесе қымбат позицияларды табуға көмектеседі."]},
-        {title: "Тауар карточкасы", items: ["Жолды ашып, бағаны, нарық диапазонын, сатушыларды, тарихты және сипаттамаларды көріңіз.", "Тікелей URL болмаса, ашу батырмасы алаңдағы іздеуге апарады."]}
+    "products": {
+      "title": "Тауарлар",
+      "intro": "Клиенттің негізгі каталогы. Басқа сатушылардың нарық карточкалары жеке жолдар ретінде көрсетілмейді.",
+      "sections": [
+        {
+          "title": "Сүзгілер және іздеу",
+          "items": [
+            "Іздеу атау, код, бренд, өлшем және сатушы бойынша жұмыс істейді.",
+            "Арна, бренд, мәртебе және өзектілік нәтижені тарылтады.",
+            "Таңдалған позицияларды талдауға немесе бақылауға қосуға болады."
+          ]
+        },
+        {
+          "title": "Нарық позициясы",
+          "items": [
+            "Kaspi бір тауар карточкасының ішінде салыстырылады.",
+            "Ozon расталған сәйкестіктерді және бренд пен өлшем бойынша салыстырмалы позицияларды қолданады.",
+            "Басқа сатушылар болмаса, позиция есептелмейді."
+          ]
+        }
       ],
-      tip: "Halyk Market үшін салыстыру сол бір тауар карточкасының ішінде жүреді."
+      "tip": "Сипаттамалар, баға тарихы және ұсыныстарды көру үшін оң жақтағы көрсеткіні басыңыз."
     },
-    operations: {
-      title: "Операциялар",
-      intro: "Бұл бөлім дерек жинауды, баға жаңартуды, есептерді және қызметтік тапсырмаларды басқарады.",
-      sections: [
-        {title: "Іске қосу", items: ["Алаңды, операцияны және іске қосу аймағын таңдаңыз.", "Таңдалған тауарлар үшін каталогта позицияларды белгілеңіз.", "Орындалу кезінде прогресс және шамамен қалған уақыт көрсетіледі."]},
-        {title: "Журнал", items: ["Журнал операция кезеңдерін және нәтижесін түсінікті түрде көрсетеді.", "Қате болса, журналды ашып, соңғы жолды тексеріңіз."]}
+    "operations": {
+      "title": "Операциялар",
+      "intro": "Серверлік жинаушылардың орындалуы мен прогресі осы жерде көрсетіледі.",
+      "sections": [
+        {
+          "title": "Іске қосар алдында",
+          "items": [
+            "Kaspi үшін жұмыс браузер профилі қолжетімді болуы керек.",
+            "Ozon ???? ?????????? ????????? ???????? ??????????: Chrome ??? ???????, ???????? ???? ?????? ???? ??????? ????????.",
+            "Бір профильді пайдаланатын екі операцияны қатар іске қоспаңыз."
+          ]
+        },
+        {
+          "title": "Мәртебелер",
+          "items": [
+            "«Орындалуда» — процесс белсенді.",
+            "«Аяқталды» — операция сәтті аяқталды.",
+            "«Қате» — журналды ашып, проблемалы позицияларды қайталаңыз."
+          ]
+        }
       ],
-      tip: "Ozon үшін ашық debug браузер керек, Kaspi және Halyk тікелей іске қосылады."
+      "tip": "Браузер терезесін кішірейтуге болады, бірақ операция аяқталғанша жаппаңыз."
     },
-    reports: {
-      title: "Есептер",
-      intro: "Есептер нарық күйін, тәуекелдерді, әлеуетті және дайын файлдарды жинайды.",
-      sections: [
-        {title: "Аналитика", items: ["KPI алаңдар бойынша дерек қамтылуын көрсетеді.", "Кестелер нарықтан жоғары позицияларды және әлеуеті бар тауарларды табуға көмектеседі.", "Аналитика жолын бассаңыз, тауар карточкасы ашылады."]},
-        {title: "Файлдар", items: ["Дайын есептерді төмендегі тізімнен жүктеуге болады.", "CSV кестелерге, JSON интеграцияға, HTML қарауға ыңғайлы."]}
+    "reports": {
+      "title": "Есептер",
+      "intro": "Дерек сапасы, тәуекелдер, баға диапазондары және мүмкіндіктер бойынша жиынтық талдау.",
+      "sections": [
+        {
+          "title": "Түсіндіру",
+          "items": [
+            "Тәуекелдер тек расталған нарық деректерімен есептеледі.",
+            "Әлеует — табыстың ықтимал өзгеру бағасы, кепілденген пайда емес.",
+            "Қамту өңделген позициялар үлесін көрсетеді."
+          ]
+        },
+        {
+          "title": "Экспорт",
+          "items": [
+            "HTML басшыға қарауға ыңғайлы.",
+            "CSV кейінгі талдау үшін қолданылады.",
+            "JSON интеграциялық сценарийлерге арналған."
+          ]
+        }
       ],
-      tip: "Бос блоктар әдетте нарық жинау әлі іске қосылмағанын білдіреді."
+      "tip": "Есеп жасамас бұрын бағалар мен нарық ұсыныстарын жаңартыңыз."
     },
-    schedules: {
-      title: "Кесте",
-      intro: "Кесте дерек жинау мен жаңартуды автоматты қайталауға көмектеседі.",
-      sections: [
-        {title: "Баптау", items: ["Тапсырма жасап, операцияны және қайталау тәртібін таңдаңыз.", "Іске қосу уақыты сервер уақытымен алынады.", "Қажет болмаса, кестені уақытша өшіріңіз."]},
-        {title: "Бақылау", items: ["Соңғы нәтиже мен келесі іске қосуды бақылаңыз.", "Тарих орындалған жоспарлы операцияларды көрсетеді."]}
+    "schedules": {
+      "title": "Кесте",
+      "intro": "Жоспарлы тапсырмалар серверде операцияларды қолмен араласпай іске қосады.",
+      "sections": [
+        {
+          "title": "Нұсқалар",
+          "items": [
+            "Күн сайын көрсетілген уақытта.",
+            "Таңдалған апта күндері.",
+            "Белгіленген аралықпен."
+          ]
+        },
+        {
+          "title": "Талаптар",
+          "items": [
+            "Сервер қосулы, Windows пайдаланушы сессиясы белсенді болуы керек.",
+            "??????? ??????????? ????? ????? ?????; Ozon ???? ???????? ???? ?????? ???? ??????? ????? ??? ????????.",
+            "Бір ресурс операциялары кезекпен орындалады."
+          ]
+        }
       ],
-      tip: "Көрсетілім алдында ауыр операцияларды қолмен іске қосқан дұрыс."
+      "tip": "Алғашқы кестені қауіпсіз уақытқа қойып, іске қосу журналын тексеріңіз."
     },
-    users: {
-      title: "Қызметкерлер",
-      intro: "Мұнда әкімші аккаунттарды, рөлдерді және алаңдарға қолжетімділікті басқарады.",
-      sections: [
-        {title: "Рөлдер", items: ["Әкімші баптаулар мен пайдаланушыларды басқарады.", "Оператор операцияларды іске қосып, каталогпен жұмыс істейді.", "Бақылаушы маңызды өзгеріссіз деректерді көреді."]},
-        {title: "Қолжетімділік", items: ["Әр қызметкерге алаңдарды бөлек қосуға болады.", "Уақытша құпиясөзді қауіпсіз жолмен беріңіз."]}
+    "users": {
+      "title": "Қызметкерлер",
+      "intro": "Рөлдерді, есептік жазба белсенділігін және сату арналарына қолжетімділікті басқару.",
+      "sections": [
+        {
+          "title": "Рөлдер",
+          "items": [
+            "Әкімші қызметкерлер мен жүйелік параметрлерді басқарады.",
+            "Оператор жұмыс операцияларын іске қосады.",
+            "Бақылаушы деректерді өзгертпей қарайды."
+          ]
+        },
+        {
+          "title": "Қолжетімділік",
+          "items": [
+            "Есептік жазба белсенділігі ауыстырғышпен басқарылады.",
+            "Kaspi және Ozon қолжетімділігі бөлек тағайындалады.",
+            "Қызметкерді жою қайтарылмайды."
+          ]
+        }
       ],
-      tip: "Жүйелік админ панель тек платформа иесіне қолжетімді."
+      "tip": "Уақытша қолжетімділікті қалпына келтіру үшін жаңа қалпына келтіру кодын жасаңыз."
     },
-    settings: {
-      title: "Баптаулар",
-      intro: "Баптаулар компания деректерін, интерфейсті, валюталарды және жинаушылар параметрлерін сақтайды.",
-      sections: [
-        {title: "Компания", items: ["Клиент компания атауын, БСН, email және телефонды толтыра алады.", "Бұл деректер жұмыс кеңістігі мен жария құжаттарда қолданылады."]},
-        {title: "Жинаушылар", items: ["Kaspi, Ozon және Halyk Market бөлек бапталады.", "Параметрлерді мұқият өзгертіп, нәтижені операциялар арқылы тексеріңіз."]}
+    "settings": {
+      "title": "Баптаулар",
+      "intro": "Интерфейстің жеке параметрлері және қосылған жинаушылардың жүйелік баптаулары.",
+      "sections": [
+        {
+          "title": "Жеке параметрлер",
+          "items": [
+            "Тіл мен тақырып ағымдағы қызметкер үшін сақталады.",
+            "Валюта бағамдары тек көрсету және есептеу үшін қолданылады.",
+            "Жүйелік тақырып Windows баптауына сәйкес келеді."
+          ]
+        },
+        {
+          "title": "Әкімші параметрлері",
+          "items": [
+            "Клиент каталогының көздері мен нарық санаттары бөлек сақталады.",
+            "Сілтемелерді өзгерткен соң баптауларды сақтап, тауарларды анықтауды іске қосыңыз.",
+            "Жұмыс браузер профильдері жойылмайды."
+          ]
+        }
       ],
-      tip: "Баптаудан кейін деректерді жаңарту үшін керек операцияны іске қосыңыз."
+      "tip": "Тақырып бірден қолданылады; басқа параметрлер «Сақтау» батырмасымен бекітіледі."
     }
   },
-  en: {
-    dashboard: {
-      title: "Overview",
-      intro: "The overview shows catalogue health, data coverage and price risks across connected marketplaces.",
-      sections: [
-        {title: "What to watch", items: ["Total products shows the catalogue size.", "Data processed shows where current market offers are available.", "Price risks and potential highlight positions that need attention."]},
-        {title: "Quick actions", items: ["Open the catalogue to inspect specific products.", "Open reports to review analytics and generated files."]}
+  "en": {
+    "dashboard": {
+      "title": "Overview",
+      "intro": "A consolidated view of the catalogue, data quality, price risks and recent operations.",
+      "sections": [
+        {
+          "title": "What you see",
+          "items": [
+            "Total client products across connected sales channels.",
+            "Share of products with ready prices and market data.",
+            "Risks and price potential based only on confirmed matches."
+          ]
+        },
+        {
+          "title": "What to do next",
+          "items": [
+            "Open Products to review individual positions.",
+            "Use Operations to refresh catalogues and prices.",
+            "Open Reports for consolidated analytics."
+          ]
+        }
       ],
-      tip: "Comparisons use confirmed matches only."
+      "tip": "Metrics are recalculated after operations finish and the page is refreshed."
     },
-    products: {
-      title: "Products",
-      intro: "The catalogue combines Kaspi, Ozon and Halyk Market positions while keeping marketplace rules separate.",
-      sections: [
-        {title: "Filters", items: ["Use All, Risks, Potential, Needs review and Watched tabs.", "Filter by marketplace, brand, status and freshness.", "Sorting helps find recent changes or high-value positions."]},
-        {title: "Product card", items: ["Open a row to see price, market range, sellers, history and specifications.", "If a direct URL is unavailable, the open button uses marketplace search."]}
+    "products": {
+      "title": "Products",
+      "intro": "The client catalogue. Market listings from other sellers are not shown as separate client rows.",
+      "sections": [
+        {
+          "title": "Filters and search",
+          "items": [
+            "Search by title, code, brand, size or seller.",
+            "Channel, brand, status and freshness narrow the results.",
+            "Selected products can be analyzed or added to watch."
+          ]
+        },
+        {
+          "title": "Market position",
+          "items": [
+            "Kaspi is compared within the same product card.",
+            "Ozon uses confirmed matches and comparable brand-size positions.",
+            "Position is not calculated when no other sellers are found."
+          ]
+        }
       ],
-      tip: "Halyk Market comparison is limited to the same marketplace product card."
+      "tip": "Use the arrow on the right to open specifications, price history and found offers."
     },
-    operations: {
-      title: "Operations",
-      intro: "Operations control data collection, price refreshes, reports and service tasks.",
-      sections: [
-        {title: "Starting", items: ["Choose the marketplace, operation and scope.", "For selected products, mark catalogue rows before starting analysis.", "Progress and estimated remaining time are shown while the task runs."]},
-        {title: "Log", items: ["The log shows readable task stages and the result.", "If a task fails, open the log and check the last line."]}
+    "operations": {
+      "title": "Operations",
+      "intro": "Server-side collectors and their progress are managed here.",
+      "sections": [
+        {
+          "title": "Before starting",
+          "items": [
+            "A working browser profile must be available for Kaspi.",
+            "For Ozon, use ?Prepare browser?: Chrome opens automatically, then choose a Russian city or pickup point.",
+            "Do not run two operations that use the same profile at once."
+          ]
+        },
+        {
+          "title": "Statuses",
+          "items": [
+            "Running — the process is active.",
+            "Completed — the operation finished successfully.",
+            "Failed — open the log and retry the affected products."
+          ]
+        }
       ],
-      tip: "Ozon requires an open debug browser. Kaspi and Halyk run directly."
+      "tip": "The browser may be minimized, but do not close it until the operation finishes."
     },
-    reports: {
-      title: "Reports",
-      intro: "Reports collect market state, risks, potential and generated export files.",
-      sections: [
-        {title: "Analytics", items: ["KPIs show data coverage by marketplace.", "Charts and tables help find overpriced positions and opportunities.", "Click an analytics row to open the product card."]},
-        {title: "Files", items: ["Generated reports can be downloaded from the lower list.", "CSV is for spreadsheets, JSON for integrations and HTML for review."]}
+    "reports": {
+      "title": "Reports",
+      "intro": "Consolidated analytics for data quality, risks, price bands and opportunities.",
+      "sections": [
+        {
+          "title": "Interpretation",
+          "items": [
+            "Risks use confirmed market data only.",
+            "Potential estimates possible revenue movement; it is not guaranteed profit.",
+            "Coverage shows the share of processed products."
+          ]
+        },
+        {
+          "title": "Export",
+          "items": [
+            "HTML is suitable for management review.",
+            "CSV supports further analysis.",
+            "JSON is intended for integration scenarios."
+          ]
+        }
       ],
-      tip: "Empty blocks usually mean market collection has not been run yet."
+      "tip": "Refresh prices and market offers before generating a report."
     },
-    schedules: {
-      title: "Schedules",
-      intro: "Schedules automate repeated collection and refresh operations.",
-      sections: [
-        {title: "Setup", items: ["Create a task, choose the operation and recurrence.", "Run time uses the server time zone.", "Disable schedules when automatic collection is temporarily not needed."]},
-        {title: "Control", items: ["Track the last result and next run.", "History shows completed scheduled operations."]}
+    "schedules": {
+      "title": "Schedules",
+      "intro": "Scheduled jobs run operations on the server without manual action.",
+      "sections": [
+        {
+          "title": "Options",
+          "items": [
+            "Daily at a specified time.",
+            "On selected weekdays.",
+            "At a fixed interval."
+          ]
+        },
+        {
+          "title": "Requirements",
+          "items": [
+            "The server must be on and the Windows user session active.",
+            "Browser profiles must be ready; for Ozon, choose a Russian city or pickup point first.",
+            "Operations using the same resource run sequentially."
+          ]
+        }
       ],
-      tip: "Before a demo, it is better to run heavy operations manually."
+      "tip": "Create the first schedule at a safe time and verify its run log."
     },
-    users: {
-      title: "Employees",
-      intro: "Administrators manage accounts, roles and marketplace access here.",
-      sections: [
-        {title: "Roles", items: ["Administrator manages settings and users.", "Operator runs operations and works with the catalogue.", "Viewer sees data without critical changes."]},
-        {title: "Access", items: ["Marketplaces can be enabled per employee.", "Share temporary passwords through a safe channel."]}
+    "users": {
+      "title": "Employees",
+      "intro": "Manage roles, account status and access to sales channels.",
+      "sections": [
+        {
+          "title": "Roles",
+          "items": [
+            "Administrators manage employees and system settings.",
+            "Operators run working operations.",
+            "Viewers can inspect data without modifying it."
+          ]
+        },
+        {
+          "title": "Access",
+          "items": [
+            "Account status is controlled with a switch.",
+            "Kaspi and Ozon access is assigned independently.",
+            "Deleting an employee cannot be undone."
+          ]
+        }
       ],
-      tip: "The system admin panel is available only to the platform owner."
+      "tip": "Generate a new recovery code for temporary access recovery."
     },
-    settings: {
-      title: "Settings",
-      intro: "Settings store company details, interface preferences, currencies and collector parameters.",
-      sections: [
-        {title: "Company", items: ["The client can fill company name, registration number, email and phone.", "These details are used in the workspace and public documents."]},
-        {title: "Collectors", items: ["Kaspi, Ozon and Halyk Market are configured separately.", "Change parameters carefully and verify the result through operations."]}
+    "settings": {
+      "title": "Settings",
+      "intro": "Personal interface preferences and system settings for connected collectors.",
+      "sections": [
+        {
+          "title": "Personal preferences",
+          "items": [
+            "Language and theme are stored for the current employee.",
+            "Exchange rates are used only for display and calculations.",
+            "System theme follows the Windows appearance setting."
+          ]
+        },
+        {
+          "title": "Administrator settings",
+          "items": [
+            "Client catalogue sources and market categories are stored separately.",
+            "After changing URLs, save settings and run product discovery.",
+            "Working browser profiles are preserved."
+          ]
+        }
       ],
-      tip: "After changing settings, run the required operation to refresh data."
+      "tip": "Theme changes immediately; save other settings with the Save button."
     }
   }
 };

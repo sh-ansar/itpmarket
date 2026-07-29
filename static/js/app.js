@@ -16,7 +16,7 @@
 
   const ACTIONS = {
     kaspi:[['sync_catalog','Синхронизация каталога'],['update_own_prices','Обновление цен Unityre'],['scan_market','Точные предложения всех продавцов'],['refresh_market','Обновить устаревшие точные цены'],['retry_errors','Повтор ошибок точных карточек']],
-    ozon:[['ozon_discover','Обнаружение товаров'],['ozon_enrich','Характеристики новых товаров'],['ozon_market_search','Поиск рыночных предложений'],['ozon_refresh_prices','Обновление цен'],['ozon_refresh_stale','Обновление устаревших характеристик'],['ozon_retry','Повтор ошибок'],['ozon_full_sync','Полная синхронизация'],['ozon_export','Экспорт реестра']],
+    ozon:[['ozon_open_browser','Подготовить браузер'],['ozon_discover','Обнаружение товаров'],['ozon_enrich','Характеристики новых товаров'],['ozon_market_search','Поиск рыночных предложений'],['ozon_refresh_prices','Обновление цен'],['ozon_refresh_stale','Обновление устаревших характеристик'],['ozon_retry','Повтор ошибок'],['ozon_full_sync','Полная синхронизация'],['ozon_export','Экспорт реестра']],
     halyk_market:[['halyk_sync_catalog','Синхронизация каталога'],['halyk_refresh_offers','Точные предложения продавцов'],['halyk_full_sync','Полная синхронизация']],
     system:[['export_report','Сводный отчёт'],['audit_catalog','Аудит Kaspi'],['backup_database','Резервная копия']]
   };

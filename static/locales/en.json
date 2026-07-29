@@ -398,6 +398,7 @@
     "action_export_report": "Consolidated report",
     "action_audit_catalog": "Kaspi audit",
     "action_backup_database": "Backup",
+    "action_ozon_open_browser": "Ozon: prepare browser",
     "action_ozon_discover": "Ozon: product discovery",
     "action_ozon_enrich": "Ozon: new product attributes",
     "action_ozon_market_search": "Ozon: market offer search",
@@ -713,7 +714,7 @@
           "title": "Before starting",
           "items": [
             "A working browser profile must be available for Kaspi.",
-            "The dedicated Chrome window must be open and VPN connected for Ozon.",
+            "For Ozon, use ?Prepare browser?: Chrome opens automatically, then choose a Russian city or pickup point.",
             "Do not run two operations that use the same profile at once."
           ]
         },
@@ -767,7 +768,7 @@
           "title": "Requirements",
           "items": [
             "The server must be on and the Windows user session active.",
-            "Browser profiles and VPN must be ready.",
+            "Browser profiles must be ready; for Ozon, choose a Russian city or pickup point first.",
             "Operations using the same resource run sequentially."
           ]
         }
