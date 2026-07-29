@@ -37,7 +37,7 @@ C:\Temp\UPGRADE_SERVER_FROM_3_0_2.ps1 -ProjectRoot C:\ITPMarket\app -Branch feat
 - сохраняет локальные изменения рабочей папки в `backups\pre_upgrade_worktree_*`;
 - точечно скачивает `feature/spyon-admin-panel`, приводит код к состоянию этой ветки и не делает лишний `pull`;
 - сохраняет рабочие данные: `data`, `collectors\ozon\data`, `.runtime`, `.venv`, `.kaspi_profile`, `.playwright`, `logs`, `output`, `backups`;
-- запускает миграции `migrate_3_1_0.py` ... `migrate_3_4_1.py`;
+- запускает единую актуальную миграцию `migrate_spyon.py`;
 - чистит `__pycache__`;
 - запускает self-test, сервер и проверяет `/health`.
 

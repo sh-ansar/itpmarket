@@ -53,23 +53,8 @@ try {
     & powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\configure_server.ps1" -ServerIp $ServerIp -Port 8765
     if ($LASTEXITCODE -ne 0) { Write-Warning "Server setup returned $LASTEXITCODE" }
 
-    $migrations = @(
-        "migrate_3_1_0.py",
-        "migrate_3_2_4.py",
-        "migrate_3_3_0.py",
-        "migrate_3_3_1.py",
-        "migrate_3_3_2.py",
-        "migrate_3_3_3.py",
-        "migrate_3_4_0.py",
-        "migrate_3_4_1.py"
-    )
-    foreach ($migration in $migrations) {
-        if (Test-Path ".\$migration") {
-            Write-Host "Running $migration..."
-            & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\$migration"
-            if ($LASTEXITCODE -ne 0) { throw "Database migration failed: $migration" }
-        }
-    }
+    & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\migrate_spyon.py"
+    if ($LASTEXITCODE -ne 0) { throw "Database migration failed: migrate_spyon.py" }
 
     Get-ChildItem -Path $AppRoot -Directory -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue

@@ -185,22 +185,7 @@ if (-not (Test-Path $Python)) {
 }
 
 Invoke-Step "Run database migrations" {
-    $migrations = @(
-        "migrate_3_1_0.py",
-        "migrate_3_2_4.py",
-        "migrate_3_3_0.py",
-        "migrate_3_3_1.py",
-        "migrate_3_3_2.py",
-        "migrate_3_3_3.py",
-        "migrate_3_4_0.py",
-        "migrate_3_4_1.py"
-    )
-    foreach ($migration in $migrations) {
-        if (Test-Path $migration) {
-            Write-Host "Running $migration"
-            Invoke-Native $Python @($migration)
-        }
-    }
+    Invoke-Native $Python @("migrate_spyon.py")
 }
 
 Invoke-Step "Clean Python bytecode" {

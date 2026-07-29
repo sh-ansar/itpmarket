@@ -28,3 +28,38 @@
 }
 img[src*="spyon-logo.svg"]{object-fit:contain}
 html[data-theme="dark"] img[src*="spyon-logo.svg"]{content:url("../images/spyon-logo-dark.svg")}
+
+/* Current landing CTA override */
+.public-cta{
+  min-height:230px;
+  color:var(--ink);
+  background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 96%,#fff),color-mix(in srgb,var(--surface-2) 88%,#fff));
+  border-color:color-mix(in srgb,var(--blue) 18%,var(--line));
+  box-shadow:0 18px 50px rgba(8,43,60,.055);
+}
+.public-cta:after{display:none}
+.public-cta>div{position:relative;z-index:2;max-width:840px}
+.public-cta .eyebrow{color:var(--blue)}
+.public-cta h2{
+  max-width:820px;
+  color:var(--ink);
+  opacity:1;
+  text-shadow:none;
+  letter-spacing:0;
+}
+.public-cta .site-button{
+  position:relative;
+  z-index:2;
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+html[data-theme=dark] .public-cta{
+  background:linear-gradient(135deg,#0b202b,#0e2937);
+  color:var(--ink);
+  box-shadow:0 22px 60px rgba(0,0,0,.2);
+}
+html[data-theme=dark] .public-cta h2{color:var(--ink)}
+@media(max-width:640px){
+  .public-cta{min-height:0}
+  .public-cta .site-button{width:100%}
+}
