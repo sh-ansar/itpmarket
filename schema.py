@@ -437,6 +437,81 @@ CREATE INDEX IF NOT EXISTS idx_exact_offer_snapshots_product_time
 ON exact_offer_snapshots(product_code,captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_exact_offer_snapshots_run
 ON exact_offer_snapshots(run_id,product_code);
+
+CREATE TABLE IF NOT EXISTS halyk_products (
+    product_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    brand TEXT NOT NULL DEFAULT '',
+    product_url TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    price_full_kzt REAL,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    category_ids_json TEXT NOT NULL DEFAULT '[]',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    specs_json TEXT NOT NULL DEFAULT '[]',
+    params_json TEXT NOT NULL DEFAULT '{}',
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    seller_name TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_catalog_at TEXT,
+    last_market_at TEXT,
+    last_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_halyk_products_active_brand
+ON halyk_products(active,brand,last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS halyk_offers (
+    product_id TEXT NOT NULL,
+    merchant_key TEXT NOT NULL,
+    merchant_name TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    offer_type TEXT NOT NULL DEFAULT '',
+    is_own INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_checked_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY(product_id,merchant_key),
+    FOREIGN KEY(product_id) REFERENCES halyk_products(product_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_halyk_offers_product_active
+ON halyk_offers(product_id,active,is_own,price_kzt);
+
+CREATE TABLE IF NOT EXISTS halyk_price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    merchant_key TEXT NOT NULL,
+    merchant_name TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    is_own INTEGER NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL,
+    UNIQUE(run_id,product_id,merchant_key),
+    FOREIGN KEY(product_id) REFERENCES halyk_products(product_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_halyk_price_history_product_time
+ON halyk_price_history(product_id,captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS halyk_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    seller_name TEXT NOT NULL DEFAULT '',
+    location_id TEXT NOT NULL DEFAULT '',
+    total_reported INTEGER NOT NULL DEFAULT 0,
+    products_seen INTEGER NOT NULL DEFAULT 0,
+    offers_seen INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_halyk_sync_runs_time
+ON halyk_sync_runs(started_at DESC);
 """
 
 
@@ -496,7 +571,7 @@ def ensure_database(path: Path) -> None:
             ('kaspi','Kaspi','active'),
             ('ozon','Ozon','active'),
             ('forte_market','Forte Market','coming_soon'),
-            ('halyk_market','Halyk Market','coming_soon'),
+            ('halyk_market','Halyk Market','active'),
         )
         for code,title,status in integrations:
             conn.execute(
@@ -521,6 +596,11 @@ def ensure_database(path: Path) -> None:
         memberships = conn.execute(
             "SELECT tenant_id,user_id FROM tenant_users WHERE is_active=1"
         ).fetchall()
+        conn.execute(
+            "UPDATE tenant_integrations SET status='active',updated_at=? "
+            "WHERE integration_code='halyk_market' AND status='coming_soon'",
+            (stamp,),
+        )
         for membership in memberships:
             tenant_id = int(membership[0])
             user_id = int(membership[1])
@@ -539,6 +619,20 @@ def ensure_database(path: Path) -> None:
                     """,
                     (tenant_id,user_id,str(integration_code),enabled,stamp,stamp),
                 )
+
+        conn.execute(
+            """
+            UPDATE user_marketplace_access
+            SET is_enabled=1,updated_at=?
+            WHERE marketplace_code='halyk_market'
+              AND is_enabled=0
+              AND tenant_id IN (
+                  SELECT tenant_id FROM tenant_integrations
+                  WHERE integration_code='halyk_market' AND status='active'
+              )
+            """,
+            (stamp,),
+        )
 
         first_admin = conn.execute("SELECT id FROM app_users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
         if first_admin is not None:

@@ -52,8 +52,20 @@ function Stop-ProjectProcesses {
 
 function Test-Venv {
     if (-not (Test-Path $Python)) { return $false }
-    & $Python -c "import sys, pip, setuptools; assert sys.prefix" *> $null
-    return $LASTEXITCODE -eq 0
+    try {
+        $output = & $Python -c "import sys, pip, setuptools; assert sys.prefix" 2>&1
+        if ($LASTEXITCODE -eq 0) { return $true }
+        if (-not $Silent) {
+            Write-Warning "Existing runtime failed validation and will be recreated."
+            $output | Select-Object -First 8 | ForEach-Object { Write-Warning $_ }
+        }
+        return $false
+    } catch {
+        if (-not $Silent) {
+            Write-Warning "Existing runtime failed validation and will be recreated: $($_.Exception.Message)"
+        }
+        return $false
+    }
 }
 
 function New-Venv {
@@ -78,7 +90,7 @@ function New-Venv {
 }
 
 Write-Host "================================================================"
-Write-Host " ITP MARKET INTELLIGENCE 3.2.0 - RUNTIME INSTALL"
+Write-Host " SPYON RUNTIME INSTALL"
 Write-Host "================================================================"
 Write-Host "Legacy .venv is ignored and never deleted."
 Write-Host "Runtime path: $Venv"

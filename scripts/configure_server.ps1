@@ -19,7 +19,7 @@ $config = @{
 }
 $config | ConvertTo-Json -Depth 8 | Set-Content -Path $LocalConfig -Encoding UTF8
 
-$ruleName = "ITP Market Intelligence LAN $Port"
+$ruleName = "Spyon LAN $Port"
 try {
     Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
     New-NetFirewallRule `
@@ -32,7 +32,7 @@ try {
         -Profile Any | Out-Null
     Write-Host "Firewall rule created for LocalSubnet." -ForegroundColor Green
 } catch {
-    Write-Warning "Firewall rule was not created. Run SERVER_SETUP_192_168_1_75.bat as Administrator."
+    Write-Warning "Firewall rule was not created. Run CONFIGURE_SERVER.bat as Administrator."
 }
 
 $addresses = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |

@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ================================================================
-echo  ITP MARKET INTELLIGENCE FRONTEND CHECK
+echo  SPYON FRONTEND CHECK
 echo ================================================================
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^

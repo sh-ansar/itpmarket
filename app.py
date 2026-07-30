@@ -16,6 +16,7 @@ from datetime import timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse, urlunparse
 
 from flask import (
     Flask,
@@ -50,7 +51,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 
-VERSION = "3.4.1"
+VERSION = "3.4.11"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -65,6 +66,7 @@ DATA = DataService(
     str(CFG["kaspi"]["seller_name"]),
     ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
     seller_id=str(CFG["kaspi"]["seller_id"]),
+    halyk_seller_name=str(CFG["halyk"]["seller_name"]),
 )
 TASKS = TaskManager(
     ROOT,
@@ -87,15 +89,18 @@ threading.Thread(target=warm_data_cache, daemon=True).start()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SECURE=str(os.environ.get("ITP_COOKIE_SECURE", "0")).strip() == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(CFG["app"].get("session_hours", 12))),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
 
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+FORM_ATTEMPTS: dict[str, list[float]] = {}
 LOGIN_LOCK_SECONDS = 15 * 60
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_MAX_ATTEMPTS = 6
+RECOVERY_MAX_ATTEMPTS = 5
+REGISTRATION_MAX_ATTEMPTS = 8
 CODE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,96}$")
 
 ACTION_INFO = {
@@ -140,6 +145,7 @@ ACTION_INFO = {
         "roles": {"admin"},
         "platform": "system",
     },
+    "ozon_open_browser": {"label": "Ozon: open browser", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_discover": {"label": "Ozon: обнаружение товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_enrich": {"label": "Ozon: характеристики новых товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_market_search": {"label": "Ozon: поиск рыночных предложений", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
@@ -148,6 +154,9 @@ ACTION_INFO = {
     "ozon_retry": {"label": "Ozon: повтор ошибок", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_full_sync": {"label": "Ozon: полная синхронизация", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
     "ozon_export": {"label": "Ozon: экспорт реестра", "resource": ["reports"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "halyk_sync_catalog": {"label": "Halyk Market: синхронизация каталога", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
+    "halyk_refresh_offers": {"label": "Halyk Market: точные предложения продавцов", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
+    "halyk_full_sync": {"label": "Halyk Market: полная синхронизация", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
 }
 
 
@@ -189,6 +198,64 @@ def is_api_request() -> bool:
 
 def current_user() -> dict[str, Any] | None:
     return getattr(g, "user", None)
+
+
+def is_superadmin(user: dict[str, Any] | None = None) -> bool:
+    return (user or current_user() or {}).get("platform_role") == "superadmin"
+
+
+def rate_limit_hit(scope: str, key: str, max_attempts: int, window_seconds: int) -> bool:
+    now = now_epoch()
+    bucket = f"{scope}:{request.remote_addr or 'local'}:{key.strip().casefold()[:120]}"
+    attempts = [stamp for stamp in FORM_ATTEMPTS.get(bucket, []) if now - stamp < window_seconds]
+    attempts.append(now)
+    FORM_ATTEMPTS[bucket] = attempts
+    return len(attempts) > max_attempts
+
+
+def tenant_visibility_predicate(alias: str, user: dict[str, Any]) -> tuple[str, list[Any]]:
+    if is_superadmin(user):
+        return "1=1", []
+    tenant_id = user.get("tenant_id")
+    if tenant_id is None:
+        return "0=1", []
+    return (
+        f"({alias}.tenant_id=? OR ({alias}.tenant_id IS NULL AND ?=(SELECT id FROM tenants ORDER BY id LIMIT 1)))",
+        [int(tenant_id), int(tenant_id)],
+    )
+
+
+def visible_tasks(user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    value = user or current_user() or {}
+    tasks = TASKS.states()
+    if is_superadmin(value):
+        return tasks
+    tenant_id = value.get("tenant_id")
+    user_id = value.get("id")
+    result = []
+    for task in tasks:
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        task_tenant_id = metadata.get("tenant_id")
+        if task_tenant_id is not None and tenant_id is not None and int(task_tenant_id) == int(tenant_id):
+            result.append(task)
+        elif task_tenant_id is None and user_id is not None and int(metadata.get("requested_by_id") or 0) == int(user_id):
+            result.append(task)
+    return result
+
+
+def visible_task(task_id: str, user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    return next((task for task in visible_tasks(user) if str(task.get("id")) == str(task_id)), None)
+
+
+def schedule_actions_for_user(user: dict[str, Any]) -> list[dict[str, str]]:
+    blocked = set()
+    if not is_superadmin(user):
+        blocked.add("backup_database")
+    return [
+        {"code": code, "platform": value[0], "name": value[1]}
+        for code, value in SCHEDULE_ACTIONS.items()
+        if code not in blocked
+    ]
 
 
 def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
@@ -240,11 +307,24 @@ def current_tenant() -> dict[str, Any] | None:
     return SAAS.tenant_for_user(int(user["id"])) if user.get("id") and user.get("tenant_id") else None
 
 
+def managed_user_or_error(user_id: int, actor: dict[str, Any]) -> dict[str, Any]:
+    target = AUTH.get_user(int(user_id))
+    if not target:
+        raise LookupError("Пользователь не найден.")
+    if is_superadmin(actor):
+        return target
+    actor_tenant_id = actor.get("tenant_id")
+    target_tenant_id = target.get("tenant_id")
+    if actor_tenant_id is None or target_tenant_id is None or int(actor_tenant_id) != int(target_tenant_id):
+        raise PermissionError("Недостаточно прав для управления этим пользователем.")
+    return target
+
+
 def allowed_marketplaces(user: dict[str, Any] | None = None) -> set[str]:
     value = user or current_user() or {}
     access = value.get("marketplaces")
     if not isinstance(access, dict) or not access:
-        return {"kaspi", "ozon"}
+        return {"kaspi", "ozon", "halyk_market"}
     return {code for code, enabled in access.items() if bool(enabled)}
 
 
@@ -252,7 +332,7 @@ def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
     filters = product_filters_from_request()
     allowed = allowed_marketplaces()
     requested = str(filters.get("platform") or "").strip()
-    visible = allowed & {"kaspi", "ozon"}
+    visible = allowed & {"kaspi", "ozon", "halyk_market"}
     if requested and requested not in visible:
         raise PermissionError("Нет доступа к выбранной площадке.")
     if not requested:
@@ -307,6 +387,7 @@ def reload_services() -> None:
         str(CFG["kaspi"]["seller_name"]),
         ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
         seller_id=str(CFG["kaspi"]["seller_id"]),
+        halyk_seller_name=str(CFG["halyk"]["seller_name"]),
     )
     TASKS.max_parallel = max(1, int(CFG["app"].get("max_parallel_tasks", 3)))
     threading.Thread(target=warm_data_cache, daemon=True).start()
@@ -441,6 +522,17 @@ def load_ozon_public_config() -> dict[str, Any]:
     return result
 
 
+def ozon_seller_root_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    host = parsed.netloc.lower().split(":")[0]
+    if host not in {"ozon.ru", "www.ozon.ru"}:
+        return ""
+    match = re.search(r"/seller/([^/?#]+)/?", parsed.path, re.IGNORECASE)
+    if not match:
+        return ""
+    return urlunparse(("https", "www.ozon.ru", f"/seller/{match.group(1)}/", "", "", ""))
+
+
 def save_ozon_public_config(payload: dict[str, Any]) -> None:
     root = ROOT / "collectors" / "ozon"
     root.mkdir(parents=True, exist_ok=True)
@@ -466,7 +558,14 @@ def save_ozon_public_config(payload: dict[str, Any]) -> None:
         or payload.get("category_urls")
         or ""
     )
-    urls = [*client_urls, *[url for url in market_urls if url not in client_urls]]
+    normalized_client_urls: list[str] = []
+    for url in client_urls:
+        root_url = ozon_seller_root_url(url)
+        if root_url and root_url not in normalized_client_urls:
+            normalized_client_urls.append(root_url)
+        if url not in normalized_client_urls:
+            normalized_client_urls.append(url)
+    urls = [*normalized_client_urls, *[url for url in market_urls if url not in normalized_client_urls]]
     if urls:
         (root / "START_URLS.txt").write_text("\n".join(urls) + "\n", encoding="utf-8")
         (root / "START_URL.txt").write_text(urls[0] + "\n", encoding="utf-8")
@@ -520,17 +619,48 @@ def browser_arguments(workers: int) -> list[str]:
 def build_action_command(action: str, codes: list[str], user_id: int) -> list[str]:
     kaspi = CFG["kaspi"]
     analysis = CFG["analysis"]
-    codes_text = ",".join(code.removeprefix("kaspi:") for code in codes if not code.startswith("ozon:"))
+    codes_text = ",".join(
+        code.removeprefix("kaspi:")
+        for code in codes
+        if not code.startswith(("ozon:", "halyk:"))
+    )
     ozon_cli = ROOT / "collectors" / "ozon" / "ozon_collector.py"
+    halyk_cli = ROOT / "collectors" / "halyk" / "halyk_collector.py"
+    halyk = CFG["halyk"]
+    halyk_codes_text = ",".join(code.removeprefix("halyk:") for code in codes if code.startswith("halyk:"))
     ozon_actions = {
-        "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
+        "ozon_open_browser": "open-browser", "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
         "ozon_refresh_prices": "refresh-prices", "ozon_refresh_stale": "refresh-stale",
         "ozon_retry": "retry-failed", "ozon_full_sync": "full-sync", "ozon_export": "export",
     }
     if action in ozon_actions:
         command = py_command(ozon_cli, ozon_actions[action])
-        if action in {"ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync"}:
-            command += ["--limit", str(500 if action == "ozon_full_sync" else 30 if action == "ozon_market_search" else 100)]
+        if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
+            command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
+        return command
+    halyk_actions = {
+        "halyk_sync_catalog": "sync-catalog",
+        "halyk_refresh_offers": "refresh-offers",
+        "halyk_full_sync": "full-sync",
+    }
+    if action in halyk_actions:
+        command = py_command(
+            halyk_cli,
+            halyk_actions[action],
+            "--db", str(DB_PATH),
+            "--seller-name", str(halyk["seller_name"]),
+            "--location-id", str(halyk["location_id"]),
+            "--catalog-query", str(halyk.get("catalog_query") or "shini-i-diski"),
+            "--catalog-category-id", str(halyk.get("catalog_category_id") or "10038"),
+            "--page-size", str(halyk["page_size"]),
+            "--timeout", str(halyk["timeout_seconds"]),
+            "--sleep", str(halyk["sleep_seconds"]),
+        )
+        max_products = int(halyk.get("max_products") or 0)
+        if max_products > 0:
+            command += ["--max-products", str(max_products)]
+        if action == "halyk_refresh_offers" and halyk_codes_text:
+            command += ["--product-ids", halyk_codes_text]
         return command
     if action == "sync_catalog":
         command = py_command(
@@ -655,7 +785,8 @@ def before_request() -> Any:
         if not valid_csrf(token):
             if is_api_request():
                 return json_error("Сессия устарела. Обновите страницу.", 419)
-            abort(419)
+            flash("Сессия устарела. Обновите страницу и повторите действие.", "error")
+            return redirect(request.referrer or url_for("login"))
 
 
 @app.after_request
@@ -664,6 +795,19 @@ def after_request(response: Any) -> Any:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    )
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.path.startswith("/api/") or request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -759,11 +903,15 @@ def login() -> Any:
 def forgot_password() -> Any:
     ensure_csrf()
     if request.method == "POST":
+        email_value = str(request.form.get("email") or "")
+        if rate_limit_hit("recovery", email_value, RECOVERY_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS):
+            flash("Слишком много попыток восстановления. Повторите позже.", "error")
+            return render_template("forgot_password.html"), 429
         try:
             if request.form.get("password") != request.form.get("password_confirm"):
                 raise ValueError("Пароли не совпадают.")
             AUTH.reset_password_with_recovery(
-                request.form.get("email", ""),
+                email_value,
                 request.form.get("recovery_code", ""),
                 request.form.get("password", ""),
             )
@@ -790,6 +938,9 @@ def landing() -> Any:
 def registration() -> Any:
     ensure_csrf()
     if request.method == "POST":
+        if rate_limit_hit("registration", str(request.form.get("email") or ""), REGISTRATION_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS):
+            flash("Слишком много заявок с этого адреса. Повторите позже.", "error")
+            return render_template("register.html", capabilities=PUBLIC_CAPABILITIES), 429
         payload = {
             "company_name": request.form.get("company_name", ""),
             "registration_number": request.form.get("registration_number", ""),
@@ -834,7 +985,7 @@ def app_index() -> Any:
 
 
 @app.get("/platform")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def platform_index() -> Any:
     return render_template("platform.html")
 
@@ -855,14 +1006,15 @@ def api_session() -> Any:
 @app.get("/api/overview")
 @login_required
 def api_overview() -> Any:
+    user = current_user() or {}
     return json_ok(
         overview=DATA.overview(
             int(CFG["kaspi"].get("expected_count", 0)),
             int(CFG["analysis"].get("discover_workers", 2)),
-            int((current_user() or {})["id"]),
+            int(user["id"]),
             allowed_platforms=allowed_marketplaces(),
         ),
-        tasks=TASKS.states()[:12],
+        tasks=visible_tasks(user)[:12],
     )
 
 
@@ -916,7 +1068,7 @@ def api_product_codes() -> Any:
 @app.get("/api/products/<code>")
 @login_required
 def api_product(code: str) -> Any:
-    platform = "ozon" if str(code).startswith("ozon:") else "kaspi"
+    platform = "halyk_market" if str(code).startswith("halyk:") else "ozon" if str(code).startswith("ozon:") else "kaspi"
     if platform not in allowed_marketplaces():
         return json_error("Нет доступа к выбранной площадке.", 403)
     product = DATA.product(code, int((current_user() or {})["id"]))
@@ -947,7 +1099,7 @@ def api_product_state() -> Any:
 @app.get("/api/tasks")
 @login_required
 def api_tasks() -> Any:
-    return json_ok(tasks=TASKS.states())
+    return json_ok(tasks=visible_tasks())
 
 
 @app.post("/api/tasks/start")
@@ -961,17 +1113,20 @@ def api_task_start() -> Any:
         return json_error("Неизвестная операция.")
     if user.get("role") not in info["roles"]:
         return json_error("Недостаточно прав.", 403)
+    if action == "backup_database" and not is_superadmin(user):
+        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
     task_platform = info.get("platform") or (
+        "halyk_market" if action.startswith("halyk_") else
         "ozon" if action.startswith("ozon_") else
         "system" if action in {"export_report", "backup_database"} else "kaspi"
     )
-    if task_platform in {"kaspi", "ozon"} and task_platform not in allowed_marketplaces(user):
+    if task_platform in {"kaspi", "ozon", "halyk_market"} and task_platform not in allowed_marketplaces(user):
         return json_error("Для пользователя не разрешена эта площадка.", 403)
     codes = clean_codes(payload.get("codes"))
     scope = str(payload.get("scope") or ("selected" if codes else "all"))
     if scope == "selected" and not codes:
         return json_error("Не выбраны товары.")
-    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export"}:
+    if action in {"sync_catalog", "audit_catalog", "backup_database", "ozon_open_browser", "ozon_discover", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry", "ozon_full_sync", "ozon_export", "halyk_sync_catalog", "halyk_full_sync"}:
         codes = []
         scope = "all"
     try:
@@ -988,7 +1143,8 @@ def api_task_start() -> Any:
                 "codes_count": len(codes),
                 "requested_by": user.get("display_name"),
                 "requested_by_id": user.get("id"),
-                "platform": info.get("platform") or ("ozon" if action.startswith("ozon_") else "kaspi"),
+                "tenant_id": user.get("tenant_id"),
+                "platform": info.get("platform") or ("halyk_market" if action.startswith("halyk_") else "ozon" if action.startswith("ozon_") else "kaspi"),
             },
         )
         record_event("task_started", "task", task["id"], {"action": action, "scope": scope, "codes": len(codes)})
@@ -1000,6 +1156,8 @@ def api_task_start() -> Any:
 @app.post("/api/tasks/<task_id>/stop")
 @roles_required("admin", "operator")
 def api_task_stop(task_id: str) -> Any:
+    if not visible_task(task_id):
+        return json_error("Операция не найдена.", 404)
     task = TASKS.stop(task_id)
     record_event("task_stopped", "task", task_id, {})
     return json_ok(task=task)
@@ -1008,8 +1166,8 @@ def api_task_stop(task_id: str) -> Any:
 @app.get("/api/tasks/<task_id>/log")
 @login_required
 def api_task_log(task_id: str) -> Any:
-    task = TASKS.state(task_id)
-    if task.get("status") == "missing":
+    task = visible_task(task_id)
+    if not task or task.get("status") == "missing":
         return json_error("Операция не найдена.", 404)
     return json_ok(task=task, log=TASKS.tail(task_id, int(request.args.get("lines", 500))))
 
@@ -1017,6 +1175,8 @@ def api_task_log(task_id: str) -> Any:
 @app.delete("/api/tasks/<task_id>")
 @roles_required("admin", "operator")
 def api_task_delete(task_id: str) -> Any:
+    if not visible_task(task_id):
+        return json_error("Операция не найдена.", 404)
     try:
         task = TASKS.delete(task_id)
         record_event("task_deleted", "task", task_id, {})
@@ -1028,7 +1188,17 @@ def api_task_delete(task_id: str) -> Any:
 @app.delete("/api/tasks")
 @roles_required("admin", "operator")
 def api_tasks_clear() -> Any:
-    count = TASKS.clear_finished()
+    if is_superadmin():
+        count = TASKS.clear_finished()
+    else:
+        count = 0
+        for task in list(visible_tasks()):
+            if not task.get("running"):
+                try:
+                    TASKS.delete(str(task["id"]))
+                    count += 1
+                except RuntimeError:
+                    pass
     record_event("tasks_cleared", "task", "finished", {"count": count})
     return json_ok(deleted=count)
 
@@ -1043,15 +1213,19 @@ def api_analytics_dashboard() -> Any:
 @app.get("/api/reports")
 @login_required
 def api_reports() -> Any:
+    user = current_user() or {}
+    clause, params = tenant_visibility_predicate("r", user)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT r.id,r.report_type,r.scope,r.file_name,r.rows_count,r.created_at,u.display_name
             FROM app_reports r LEFT JOIN app_users u ON u.id=r.created_by
+            WHERE {clause}
             ORDER BY r.id DESC LIMIT 100
-            """
+            """,
+            params,
         ).fetchall()
     finally:
         conn.close()
@@ -1061,10 +1235,15 @@ def api_reports() -> Any:
 @app.get("/api/reports/<int:report_id>/download")
 @login_required
 def api_report_download(report_id: int) -> Any:
+    user = current_user() or {}
+    clause, params = tenant_visibility_predicate("app_reports", user)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute("SELECT file_name,file_path FROM app_reports WHERE id=?", (report_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT file_name,file_path FROM app_reports WHERE id=? AND {clause}",
+            [int(report_id), *params],
+        ).fetchone()
     finally:
         conn.close()
     if not row:
@@ -1077,7 +1256,7 @@ def api_report_download(report_id: int) -> Any:
 
 
 @app.get("/api/backups")
-@roles_required("admin")
+@platform_roles_required("superadmin")
 def api_backups() -> Any:
     folder = resolve_path(CFG, "backups")
     items = [
@@ -1092,7 +1271,7 @@ def api_backups() -> Any:
 
 
 @app.get("/api/backups/<path:name>/download")
-@roles_required("admin")
+@platform_roles_required("superadmin")
 def api_backup_download(name: str) -> Any:
     if Path(name).name != name:
         abort(404)
@@ -1106,7 +1285,13 @@ def api_backup_download(name: str) -> Any:
 @app.get("/api/events")
 @login_required
 def api_events() -> Any:
-    return json_ok(events=DATA.latest_events(int(request.args.get("limit", 40))))
+    user = current_user() or {}
+    return json_ok(
+        events=DATA.latest_events(
+            int(request.args.get("limit", 40)),
+            tenant_id=None if is_superadmin(user) else int(user["tenant_id"]),
+        )
+    )
 
 
 @app.get("/api/settings")
@@ -1120,6 +1305,7 @@ def api_settings_get() -> Any:
     return json_ok(
         preferences=DATA.preferences(int(user["id"])),
         config=config_result,
+        tenant=current_tenant(),
         network=network_public_config(),
     )
 
@@ -1132,6 +1318,13 @@ def api_settings_put() -> Any:
     try:
         preferences_payload = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else payload
         preferences = DATA.save_preferences(int(user["id"]), preferences_payload)
+        tenant_result = None
+        if user.get("role") == "admin" and isinstance(payload.get("tenant"), dict) and user.get("tenant_id"):
+            tenant_result = SAAS.update_tenant_profile(
+                int(user["tenant_id"]),
+                payload["tenant"],
+                int(user["id"]),
+            )
         config_result = None
         if user.get("role") == "admin" and isinstance(payload.get("config"), dict):
             config_payload = payload["config"]
@@ -1140,6 +1333,7 @@ def api_settings_put() -> Any:
             analysis = config_payload.get("analysis") if isinstance(config_payload.get("analysis"), dict) else {}
             app_values = config_payload.get("app") if isinstance(config_payload.get("app"), dict) else {}
             ozon_values = config_payload.get("ozon") if isinstance(config_payload.get("ozon"), dict) else {}
+            halyk_values = config_payload.get("halyk") if isinstance(config_payload.get("halyk"), dict) else {}
             for key in ("seller_id", "seller_name", "city_id", "zone_id"):
                 if key in kaspi:
                     updated["kaspi"][key] = str(kaspi[key]).strip()
@@ -1153,6 +1347,14 @@ def api_settings_put() -> Any:
                 updated["kaspi"]["max_delay"] = updated["kaspi"]["min_delay"]
             if "headless" in kaspi:
                 updated["kaspi"]["headless"] = bool(kaspi["headless"])
+            for key in ("seller_name", "location_id", "catalog_query", "catalog_category_id"):
+                if key in halyk_values:
+                    updated["halyk"][key] = str(halyk_values[key]).strip()
+            for key, minimum, maximum in (("page_size", 10, 200), ("timeout_seconds", 10, 120), ("max_products", 0, 100000)):
+                if key in halyk_values:
+                    updated["halyk"][key] = max(minimum, min(int(halyk_values[key]), maximum))
+            if "sleep_seconds" in halyk_values:
+                updated["halyk"]["sleep_seconds"] = max(0.0, min(float(halyk_values["sleep_seconds"]), 10.0))
             for key, minimum, maximum in (("discover_workers", 1, 4), ("price_workers", 1, 4), ("search_pages", 1, 5), ("validate_top", 1, 12), ("search_cache_days", 0, 90), ("detail_cache_days", 0, 180)):
                 if key in analysis:
                     value = float(analysis[key]) if "days" in key else int(analysis[key])
@@ -1168,7 +1370,7 @@ def api_settings_put() -> Any:
             config_result = public_config(CFG)
             config_result["ozon"] = load_ozon_public_config()
         record_event("settings_updated", "settings", "user", {"locale": preferences.get("locale")})
-        return json_ok(preferences=preferences, config=config_result)
+        return json_ok(preferences=preferences, config=config_result, tenant=tenant_result)
     except (ValueError, TypeError) as exc:
         return json_error(f"Некорректные настройки: {exc}")
 
@@ -1206,9 +1408,15 @@ def api_users_create() -> Any:
 @app.put("/api/users/<int:user_id>")
 @roles_required("admin")
 def api_users_update(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        user = AUTH.update_user(user_id, json_payload(), int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        user = AUTH.update_user(user_id, json_payload(), int(current["id"]))
         return json_ok(user=user)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
 
@@ -1216,9 +1424,15 @@ def api_users_update(user_id: int) -> Any:
 @app.delete("/api/users/<int:user_id>")
 @roles_required("admin")
 def api_users_delete(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        AUTH.delete_user(user_id, int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        AUTH.delete_user(user_id, int(current["id"]))
         return json_ok(deleted=True)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc), 409)
 
@@ -1226,9 +1440,15 @@ def api_users_delete(user_id: int) -> Any:
 @app.post("/api/users/<int:user_id>/recovery")
 @roles_required("admin")
 def api_users_recovery(user_id: int) -> Any:
+    current = current_user() or {}
     try:
-        code = AUTH.regenerate_recovery(user_id, int((current_user() or {})["id"]))
+        managed_user_or_error(user_id, current)
+        code = AUTH.regenerate_recovery(user_id, int(current["id"]))
         return json_ok(recovery_code=code)
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
 
@@ -1248,7 +1468,7 @@ def api_schedules_get() -> Any:
     return json_ok(
         schedules=SAAS.schedules(tenant_id),
         runs=SAAS.schedule_runs(tenant_id, int(request.args.get("limit", 50))),
-        actions=[{"code": code, "platform": value[0], "name": value[1]} for code, value in SCHEDULE_ACTIONS.items()],
+        actions=schedule_actions_for_user(user),
     )
 
 
@@ -1256,8 +1476,11 @@ def api_schedules_get() -> Any:
 @roles_required("admin", "operator")
 def api_schedules_create() -> Any:
     user = current_user() or {}
+    payload = json_payload()
+    if str(payload.get("action") or "") == "backup_database" and not is_superadmin(user):
+        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
     try:
-        return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), json_payload(), int(user["id"])))
+        return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), payload, int(user["id"])))
     except (ValueError, TypeError) as exc:
         return json_error(str(exc))
 
@@ -1284,7 +1507,7 @@ def api_schedules_delete(schedule_id: int) -> Any:
 
 
 @app.get("/api/platform/overview")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_overview() -> Any:
     user = current_user() or {}
     overview = DATA.overview(int(CFG["kaspi"].get("expected_count", 0)), int(CFG["analysis"].get("discover_workers", 2)), int(user["id"]))
@@ -1293,14 +1516,14 @@ def api_platform_overview() -> Any:
 
 
 @app.get("/api/platform/tenants/<int:tenant_id>/detail")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_tenant_detail(tenant_id: int) -> Any:
     try: return json_ok(**SAAS.tenant_detail(tenant_id))
     except ValueError as exc: return json_error(str(exc),404)
 
 
 @app.get("/api/platform/public-settings")
-@platform_roles_required("superadmin", "support", "technical")
+@platform_roles_required("superadmin")
 def api_platform_public_settings_get() -> Any:
     return json_ok(settings=PUBLIC.settings())
 
@@ -1316,7 +1539,7 @@ def api_platform_public_settings_put() -> Any:
 
 
 @app.put("/api/platform/tenants/<int:tenant_id>")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_tenant_update(tenant_id: int) -> Any:
     try:
         return json_ok(tenant=SAAS.update_tenant(tenant_id, json_payload(), int((current_user() or {})["id"])))
@@ -1325,7 +1548,7 @@ def api_platform_tenant_update(tenant_id: int) -> Any:
 
 
 @app.post("/api/platform/tenants/<int:tenant_id>/admin")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_tenant_admin_create(tenant_id: int) -> Any:
     payload=json_payload()
     try:
@@ -1336,7 +1559,7 @@ def api_platform_tenant_admin_create(tenant_id: int) -> Any:
 
 
 @app.post("/api/platform/registration-requests/<int:request_id>/<decision>")
-@platform_roles_required("superadmin", "support")
+@platform_roles_required("superadmin")
 def api_platform_registration_review(request_id: int, decision: str) -> Any:
     try:
         return json_ok(request=SAAS.review_registration(request_id,decision,int((current_user() or {})["id"])))
@@ -1404,7 +1627,7 @@ if __name__ == "__main__":
     threading.Thread(target=open_panel, daemon=True).start()
     host, port = runtime_host(), runtime_port()
     print("=" * 72)
-    print(f" ITP MARKET INTELLIGENCE {VERSION}")
+    print(f" SPYON {VERSION}")
     print(f" Local: http://127.0.0.1:{port}")
     for address in local_ipv4_addresses():
         print(f" Wi-Fi/LAN: http://{address}:{port}")

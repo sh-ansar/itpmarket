@@ -5,7 +5,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install_runtim
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" (
   echo.
-  echo ERROR: ITP runtime installation failed. Exit code: %RC%
+  echo ERROR: Spyon runtime installation failed. Exit code: %RC%
   pause
   exit /b %RC%
 )

@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
-from ozon_probe_core import parse_catalog_html
+from ozon_probe_core import article_from_url, normalize_product_url, parse_catalog_html, parse_price
 
 
 class BrowserSession:
@@ -22,17 +29,28 @@ class BrowserSession:
         self.debug_port = debug_port
         self.start_url = start_url
         self.debug_base = f"http://127.0.0.1:{debug_port}"
+        self.profile_dir = Path(__file__).resolve().parent / "chrome_vpn_profile"
         self.driver = None
         self.target_id = ""
         self.original_url = ""
+        self.launched_browser = False
 
     def debugger_json(self, path: str, timeout: int = 8) -> Any:
         request = urllib.request.Request(
             f"{self.debug_base}{path}",
             headers={"User-Agent": "Unityre-Ozon-Collector/3.0"},
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8", errors="replace"))
+        except urllib.error.URLError as exc:
+            if path == "/json/list":
+                raise RuntimeError(
+                    "Ozon debug-браузер недоступен на 127.0.0.1:"
+                    f"{self.debug_port}. Запустите collectors\\ozon\\1_OPEN_VPN_BROWSER.bat, "
+                    "откройте Ozon через VPN и оставьте это окно Chrome открытым."
+                ) from exc
+            raise
 
     @staticmethod
     def _is_ozon_page(url: str) -> bool:
@@ -42,6 +60,97 @@ class BrowserSession:
             return False
         host = parsed.netloc.lower().split(":")[0]
         return host in {"ozon.ru", "www.ozon.ru"} and "/api/" not in parsed.path
+
+    def _debugger_ready(self, timeout: int = 2) -> bool:
+        try:
+            self.debugger_json("/json/list", timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _chrome_executable() -> str:
+        env_value = os.environ.get("OZON_CHROME_PATH") or os.environ.get("CHROME_PATH") or os.environ.get("CHROME")
+        candidates = [
+            env_value or "",
+            shutil.which("chrome.exe") or "",
+            shutil.which("chrome") or "",
+            shutil.which("google-chrome") or "",
+        ]
+        if sys.platform.startswith("win"):
+            candidates.extend(
+                [
+                    os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                    os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                    os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+                ]
+            )
+        elif sys.platform == "darwin":
+            candidates.append("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return candidate
+        raise RuntimeError(
+            "Google Chrome was not found. Install Chrome or set OZON_CHROME_PATH to chrome.exe."
+        )
+
+    def _launch_debug_browser(self) -> None:
+        if os.environ.get("OZON_AUTO_OPEN_BROWSER", "1").strip().casefold() in {"0", "false", "no", "off"}:
+            raise RuntimeError(
+                "Ozon debug browser is not open and OZON_AUTO_OPEN_BROWSER is disabled."
+            )
+        chrome = self._chrome_executable()
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        args = [
+            chrome,
+            f"--remote-debugging-port={self.debug_port}",
+            "--remote-allow-origins=*",
+            f"--user-data-dir={self.profile_dir}",
+            "--profile-directory=Default",
+            "--lang=ru-RU",
+            "--start-maximized",
+            "--no-first-run",
+            "--disable-popup-blocking",
+            self.start_url,
+        ]
+        creationflags = 0
+        if sys.platform.startswith("win"):
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
+        self.launched_browser = True
+        print(f"Ozon browser opened on port {self.debug_port}. Profile: {self.profile_dir}")
+
+    def ensure_debug_browser(self) -> None:
+        if self._debugger_ready():
+            return
+        self._launch_debug_browser()
+        deadline = time.monotonic() + float(os.environ.get("OZON_BROWSER_STARTUP_WAIT", "45"))
+        while time.monotonic() < deadline:
+            if self._debugger_ready():
+                return
+            time.sleep(1.0)
+        raise RuntimeError(
+            f"Ozon browser was opened, but debugger port {self.debug_port} did not become ready."
+        )
+
+    def _open_debug_tab(self, url: str) -> None:
+        encoded = quote(url, safe=":/?&=%")
+        for method in ("PUT", "GET"):
+            request = urllib.request.Request(f"{self.debug_base}/json/new?{encoded}", method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    response.read()
+                return
+            except Exception:
+                pass
+
+    def ensure_ozon_tab(self) -> None:
+        targets = self.debugger_json("/json/list")
+        for target in targets if isinstance(targets, list) else []:
+            if str(target.get("type") or "") == "page" and self._is_ozon_page(str(target.get("url") or "")):
+                return
+        self._open_debug_tab(self.start_url)
+        time.sleep(3.0)
 
     def _find_target(self) -> dict[str, Any]:
         targets = self.debugger_json("/json/list")
@@ -73,6 +182,8 @@ class BrowserSession:
         return candidates[0]
 
     def connect(self) -> "BrowserSession":
+        self.ensure_debug_browser()
+        self.ensure_ozon_tab()
         target = self._find_target()
         self.target_id = str(target.get("id") or "")
         self.original_url = str(target.get("url") or self.start_url)
@@ -80,7 +191,19 @@ class BrowserSession:
         options = Options()
         options.debugger_address = f"127.0.0.1:{self.debug_port}"
         options.page_load_strategy = "none"
-        self.driver = webdriver.Chrome(options=options)
+        service = self._chromedriver_service()
+        try:
+            if service is not None:
+                self.driver = webdriver.Chrome(options=options, service=service)
+            else:
+                self.driver = webdriver.Chrome(options=options)
+        except WebDriverException as exc:
+            raise RuntimeError(
+                "ChromeDriver для Ozon не найден или не подходит к установленному Chrome. "
+                "Запустите collectors\\ozon\\0_SETUP.bat. Если сервер без доступа к Selenium/Google, "
+                "положите подходящий chromedriver.exe в collectors\\ozon\\drivers\\chromedriver.exe "
+                "или задайте переменную CHROMEDRIVER_PATH."
+            ) from exc
         self.driver.set_script_timeout(25)
         try:
             self.driver.command_executor._client_config.timeout = 60
@@ -112,6 +235,21 @@ class BrowserSession:
         self._switch_to_target()
         return self
 
+    @staticmethod
+    def _chromedriver_service() -> Service | None:
+        root = Path(__file__).resolve().parent
+        candidates = [
+            os.environ.get("CHROMEDRIVER_PATH", ""),
+            os.environ.get("CHROMEDRIVER", ""),
+            str(root / "drivers" / "chromedriver.exe"),
+            str(root / ".drivers" / "chromedriver.exe"),
+            shutil.which("chromedriver") or "",
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return Service(executable_path=candidate)
+        return None
+
     def _switch_to_target(self) -> None:
         assert self.driver is not None
         deadline = time.monotonic() + 15
@@ -141,6 +279,94 @@ class BrowserSession:
             str((probe or {}).get("text") or "").strip(),
             str((probe or {}).get("html") or ""),
         )
+
+    @staticmethod
+    def _safe_dom_text(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text or "�" in text or "??" in text:
+            return ""
+        return text
+
+    def dom_catalog_products(self, base_url: str) -> list[dict[str, Any]]:
+        assert self.driver is not None
+        try:
+            rows = self.driver.execute_script(
+                """
+                const anchors = [...document.querySelectorAll('a[href*="/product/"]')];
+                const rows = [];
+                for (const anchor of anchors) {
+                  const href = anchor.href || anchor.getAttribute('href') || '';
+                  if (!href) continue;
+                  let card = anchor;
+                  for (let i = 0; i < 6 && card && card.parentElement; i += 1) {
+                    const text = (card.innerText || '').trim();
+                    if (text && text.length > 25) break;
+                    card = card.parentElement;
+                  }
+                  const imageFromSrcset = (value) => {
+                    const parts = String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+                    if (!parts.length) return '';
+                    return parts[parts.length - 1].split(/\\s+/)[0] || '';
+                  };
+                  const absoluteImage = (value) => {
+                    const raw = String(value || '').trim();
+                    if (!raw) return '';
+                    try { return new URL(raw, location.href).href; } catch (_) { return raw; }
+                  };
+                  const imageFromNode = (node) => {
+                    if (!node) return '';
+                    const img = node.querySelector('img');
+                    if (img) {
+                      const src = img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original') || imageFromSrcset(img.getAttribute('srcset') || img.getAttribute('data-srcset'));
+                      if (src) return absoluteImage(src);
+                    }
+                    const lazy = node.querySelector('[data-src],[data-original],[srcset],[data-srcset]');
+                    if (lazy) {
+                      const src = lazy.getAttribute('data-src') || lazy.getAttribute('data-original') || imageFromSrcset(lazy.getAttribute('srcset') || lazy.getAttribute('data-srcset'));
+                      if (src) return absoluteImage(src);
+                    }
+                    const styled = [...node.querySelectorAll('[style*="background"]')].find(el => /url\\(/i.test(el.getAttribute('style') || ''));
+                    if (styled) {
+                      const match = String(styled.getAttribute('style') || '').match(/url\\((['"]?)(.*?)\\1\\)/i);
+                      if (match && match[2]) return absoluteImage(match[2]);
+                    }
+                    return '';
+                  };
+                  const img = (card || anchor).querySelector('img');
+                  const text = ((card || anchor).innerText || anchor.textContent || '').trim();
+                  const lines = text.split(/\\n+/).map(v => v.trim()).filter(Boolean);
+                  const title = anchor.getAttribute('aria-label') || (img && (img.alt || img.title)) || lines.find(v => !/[₽₸]/.test(v)) || '';
+                  const priceLine = lines.find(v => /[₽₸]|руб/i.test(v)) || '';
+                  rows.push({
+                    url: href,
+                    name: title,
+                    image_url: imageFromNode(card || anchor),
+                    price_text: priceLine
+                  });
+                }
+                return rows;
+                """
+            )
+        except Exception:
+            return []
+        products: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            url = normalize_product_url(str(row.get("url") or ""), base_url)
+            article = article_from_url(url)
+            if not article or not url:
+                continue
+            products[article] = {
+                "article": article,
+                "name": self._safe_dom_text(row.get("name")),
+                "catalog_card_price": parse_price(row.get("price_text")),
+                "catalog_all_prices": [str(row.get("price_text") or "")] if row.get("price_text") else [],
+                "catalog_price_style": "dom",
+                "image_url": str(row.get("image_url") or ""),
+                "url": url,
+            }
+        return list(products.values())
 
     @staticmethod
     def blocked_state(title: str, text: str, page_html: str) -> bool:
@@ -178,6 +404,90 @@ class BrowserSession:
                 return data, title, text, page_html
         return None, title, text, page_html
 
+    def _collect_catalog_snapshot(
+        self,
+        base_url: str,
+        wait_seconds: int,
+        events: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], str, str, str, str, bool]:
+        assert self.driver is not None
+        deadline = time.monotonic() + wait_seconds
+        unique: dict[str, dict[str, Any]] = {}
+        best_next_page = ""
+        last_title = last_text = last_html = ""
+        saw_block = False
+        last_unique = -1
+        stable_ticks = 0
+
+        try:
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1.0)
+        except Exception as exc:
+            events.append({"event": "scroll_top_error", "error": f"{type(exc).__name__}: {exc}"})
+
+        while time.monotonic() < deadline:
+            try:
+                title, text, page_html = self.snapshot()
+                last_title, last_text, last_html = title, text, page_html
+                state_products, next_page = parse_catalog_html(page_html, base_url)
+                dom_products = self.dom_catalog_products(base_url)
+                products = dom_products + state_products
+                for product in products:
+                    article = str(product.get("article") or "")
+                    if article:
+                        if product.get("name"):
+                            product = {**product, "name": self._safe_dom_text(product.get("name"))}
+                        unique[article] = product
+                if next_page:
+                    best_next_page = next_page
+                blocked = self.blocked_state(title, text, page_html)
+                saw_block = saw_block or blocked
+                scroll_state = self.driver.execute_script(
+                    """
+                    const root = document.scrollingElement || document.documentElement || document.body;
+                    const step = Math.max(700, Math.floor((window.innerHeight || 900) * 0.85));
+                    const before = root ? root.scrollTop : 0;
+                    const height = root ? root.scrollHeight : 0;
+                    if (root) root.scrollTo(0, Math.min(height, before + step));
+                    const after = root ? root.scrollTop : 0;
+                    return {
+                      before,
+                      after,
+                      height,
+                      inner: window.innerHeight || 0,
+                      nearBottom: root ? (after + (window.innerHeight || 0) >= height - 12) : true
+                    };
+                    """
+                )
+                count = len(unique)
+                moved = bool((scroll_state or {}).get("after") != (scroll_state or {}).get("before"))
+                if count == last_unique:
+                    stable_ticks += 1
+                else:
+                    stable_ticks = 0
+                last_unique = count
+                events.append(
+                    {
+                        "event": "scroll_poll",
+                        "visible_products": len(state_products),
+                        "dom_products": len(dom_products),
+                        "unique_products": count,
+                        "next_page": bool(best_next_page),
+                        "moved": moved,
+                        "near_bottom": bool((scroll_state or {}).get("nearBottom")),
+                        "blocked": blocked,
+                    }
+                )
+                if count and bool((scroll_state or {}).get("nearBottom")) and stable_ticks >= 3:
+                    break
+                if count and best_next_page and stable_ticks >= 4:
+                    break
+            except Exception as exc:
+                events.append({"event": "scroll_poll_error", "error": f"{type(exc).__name__}: {exc}"})
+            time.sleep(1.4)
+
+        return list(unique.values()), best_next_page, last_title, last_text, last_html, saw_block
+
     def load_catalog(
         self,
         url: str,
@@ -195,30 +505,23 @@ class BrowserSession:
             except Exception as exc:
                 events.append({"event": "get_error", "error": f"{type(exc).__name__}: {exc}"})
         for attempt in range(reloads + 1):
-            deadline = time.monotonic() + wait_seconds
-            saw_block = False
-            while time.monotonic() < deadline:
-                try:
-                    title, text, page_html = self.snapshot()
-                    last_title, last_text, last_html = title, text, page_html
-                    products, next_page = parse_catalog_html(page_html, url)
-                    if products:
-                        return {
-                            "ok": True,
-                            "status": "CATALOG_OK",
-                            "products": products,
-                            "next_page": next_page,
-                            "html": page_html,
-                            "title": title,
-                            "elapsed_ms": round((time.monotonic() - started) * 1000),
-                            "events": events,
-                        }
-                    blocked = self.blocked_state(title, text, page_html)
-                    saw_block = saw_block or blocked
-                    events.append({"event": "poll", "attempt": attempt + 1, "blocked": blocked})
-                except Exception as exc:
-                    events.append({"event": "poll_error", "error": f"{type(exc).__name__}: {exc}"})
-                time.sleep(2.5)
+            products, next_page, title, text, page_html, saw_block = self._collect_catalog_snapshot(
+                url,
+                wait_seconds,
+                events,
+            )
+            last_title, last_text, last_html = title, text, page_html
+            if products:
+                return {
+                    "ok": True,
+                    "status": "CATALOG_OK",
+                    "products": products,
+                    "next_page": next_page,
+                    "html": page_html,
+                    "title": title,
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "events": events,
+                }
             if attempt < reloads:
                 try:
                     self.driver.refresh()

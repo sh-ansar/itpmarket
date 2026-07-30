@@ -13,8 +13,8 @@ call "%~dp0CHECK_ENV.bat"
 if errorlevel 1 exit /b 1
 
 echo ================================================================
-echo  ITP MARKET INTELLIGENCE 3.2.0 - SERVER
-echo  LAN: http://192.168.1.75:8765
+echo  SPYON SERVER
+echo  LAN: app.py prints the active LAN addresses below
 echo ================================================================
 ".runtime\venv_3_2_0\Scripts\python.exe" -u "app.py"
 exit /b %ERRORLEVEL%

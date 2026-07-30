@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 ROOT = Path(__file__).resolve().parent
 
@@ -24,6 +26,17 @@ def _values(path: Path) -> list[str]:
 def _first_value(path: Path) -> str:
     values = _values(path)
     return values[0] if values else ""
+
+
+def seller_root_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    host = parsed.netloc.lower().split(":")[0]
+    if host not in {"ozon.ru", "www.ozon.ru"}:
+        return ""
+    match = re.search(r"/seller/([^/?#]+)/?", parsed.path, re.IGNORECASE)
+    if not match:
+        return ""
+    return urlunparse(("https", "www.ozon.ru", f"/seller/{match.group(1)}/", "", "", ""))
 
 
 def _pair(value: Any, default: tuple[float, float]) -> tuple[float, float]:
@@ -91,12 +104,18 @@ def load_settings() -> Settings:
     if not start_urls:
         start_urls = ["https://www.ozon.ru/category/shiny-zimnie-8803/?__rr=1"]
 
-    # Storefront URLs are always processed first. Additional seller categories
-    # and general categories are processed afterwards with global de-duplication.
+    # Storefront roots are processed first, so saved seller-category links do not
+    # accidentally limit discovery to only one storefront section.
     sellers = [url for url in start_urls if "/seller/" in url.lower()]
     others = [url for url in start_urls if url not in sellers]
     ordered_urls: list[str] = []
-    for url in [*sellers, *others]:
+    for url in sellers:
+        root_url = seller_root_url(url)
+        if root_url and root_url not in ordered_urls:
+            ordered_urls.append(root_url)
+        if url not in ordered_urls:
+            ordered_urls.append(url)
+    for url in others:
         if url not in ordered_urls:
             ordered_urls.append(url)
 

@@ -2,7 +2,7 @@
 
 ## 3.0.0
 
-- Rebranded application to ITP Market Intelligence.
+- Rebranded application to Spyon.
 - Added conservative exact/segment/review matching model.
 - Removed cross-tier brand candidates from automatic price calculations.
 - Added minimum/median/maximum market prices and source links.
@@ -26,5 +26,5 @@
 - Fixed repeated analysis: full exact refresh no longer depends on legacy `ok/partial` discovery states.
 - Added per-product checkpoint, retry queue and exact-offer history.
 - Added dynamic catalogue coverage based on Kaspi reported total.
-- Added safe migration and backup script `APPLY_3_1_0_HOTFIX.bat`.
+- Added safe migration and backup flow for 3.1.0.
 - Classified Ozon motorcycle tubes, motorcycle tyres, truck tyres and passenger tyres separately.

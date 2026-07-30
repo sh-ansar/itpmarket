@@ -32,6 +32,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_delay": 1.0,
         "max_delay": 2.2,
     },
+    "halyk": {
+        "seller_name": "Unityre",
+        "location_id": "-2",
+        "catalog_query": "shini-i-diski",
+        "catalog_category_id": "10038",
+        "page_size": 200,
+        "timeout_seconds": 30,
+        "sleep_seconds": 0.25,
+        "max_products": 0,
+    },
     "analysis": {
         "discover_workers": 2,
         "price_workers": 2,
