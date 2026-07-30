@@ -21,7 +21,9 @@ Settings → Actions → Runners → New self-hosted runner → Windows x64
 Установите runner в `C:\actions-runner`, добавьте дополнительную метку
 `itpmarket-demo` и установите его как Windows service.
 
-Workflow `.github/workflows/deploy-windows.yml` запускается при push в `main`.
+Workflow `.github/workflows/deploy-windows.yml` запускается при push в `production`.
+Рабочий порядок: проверяйте изменения в feature-ветках, а на сервер отправляйте только то,
+что смержено или запушено в `production`.
 Он останавливает приложение, делает резервную копию базы, обновляет код,
 проверяет зависимости, выполняет миграцию, запускает сервер и проверяет `/health`.
 

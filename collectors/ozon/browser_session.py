@@ -303,6 +303,35 @@ class BrowserSession:
                     if (text && text.length > 25) break;
                     card = card.parentElement;
                   }
+                  const imageFromSrcset = (value) => {
+                    const parts = String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+                    if (!parts.length) return '';
+                    return parts[parts.length - 1].split(/\\s+/)[0] || '';
+                  };
+                  const absoluteImage = (value) => {
+                    const raw = String(value || '').trim();
+                    if (!raw) return '';
+                    try { return new URL(raw, location.href).href; } catch (_) { return raw; }
+                  };
+                  const imageFromNode = (node) => {
+                    if (!node) return '';
+                    const img = node.querySelector('img');
+                    if (img) {
+                      const src = img.currentSrc || img.src || img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original') || imageFromSrcset(img.getAttribute('srcset') || img.getAttribute('data-srcset'));
+                      if (src) return absoluteImage(src);
+                    }
+                    const lazy = node.querySelector('[data-src],[data-original],[srcset],[data-srcset]');
+                    if (lazy) {
+                      const src = lazy.getAttribute('data-src') || lazy.getAttribute('data-original') || imageFromSrcset(lazy.getAttribute('srcset') || lazy.getAttribute('data-srcset'));
+                      if (src) return absoluteImage(src);
+                    }
+                    const styled = [...node.querySelectorAll('[style*="background"]')].find(el => /url\\(/i.test(el.getAttribute('style') || ''));
+                    if (styled) {
+                      const match = String(styled.getAttribute('style') || '').match(/url\\((['"]?)(.*?)\\1\\)/i);
+                      if (match && match[2]) return absoluteImage(match[2]);
+                    }
+                    return '';
+                  };
                   const img = (card || anchor).querySelector('img');
                   const text = ((card || anchor).innerText || anchor.textContent || '').trim();
                   const lines = text.split(/\\n+/).map(v => v.trim()).filter(Boolean);
@@ -311,7 +340,7 @@ class BrowserSession:
                   rows.push({
                     url: href,
                     name: title,
-                    image_url: img ? (img.currentSrc || img.src || '') : '',
+                    image_url: imageFromNode(card || anchor),
                     price_text: priceLine
                   });
                 }

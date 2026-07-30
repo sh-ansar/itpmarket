@@ -2958,3 +2958,61 @@ html[data-theme="dark"] .operation-launch-card em{color:#9db0ba}
     justify-self:start;
   }
 }
+
+/* Products filter row refinements */
+#page-products .filters{
+  grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(140px,1fr)) 40px!important;
+  align-items:center!important;
+}
+#page-products .filter-clear-command{
+  height:42px!important;
+  align-self:center!important;
+}
+.products-command-row .scope-tabs{
+  gap:14px!important;
+}
+.products-command-row .scope-tabs button{
+  position:relative!important;
+  min-height:34px!important;
+  padding:6px 0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+.products-command-row .scope-tabs button::after{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  height:2px;
+  border-radius:2px;
+  background:transparent;
+  transition:background .15s ease;
+}
+.products-command-row .scope-tabs button.active,
+.products-command-row .scope-tabs button:hover{
+  background:transparent!important;
+  border-color:transparent!important;
+  color:#0788bf!important;
+  box-shadow:none!important;
+}
+.products-command-row .scope-tabs button.active::after{
+  background:#0788bf;
+}
+html[data-theme="dark"] .products-command-row .scope-tabs button.active,
+html[data-theme="dark"] .products-command-row .scope-tabs button:hover{
+  background:transparent!important;
+  border-color:transparent!important;
+}
+@media(max-width:1160px){
+  #page-products .filters{grid-template-columns:1fr 1fr 40px!important}
+  #page-products .filters .search{grid-column:1/-1!important}
+}
+@media(max-width:760px){
+  .products-command-actions{grid-template-columns:40px 40px minmax(0,1fr)!important}
+  #page-products .filters{grid-template-columns:1fr 40px!important}
+  #page-products .filters .search{grid-column:1/-1!important}
+  #page-products .filter-clear-command{grid-column:2}
+}
