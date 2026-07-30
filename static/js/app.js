@@ -281,13 +281,13 @@
   }
   function renderProducts(items){
     $('#productsBody').innerHTML=items.length?items.map(p=>{
-      const isKaspi = p.platform==='kaspi';
-      // Primary price: Kaspi -> KZT own price, Ozon -> RUB original if present else KZT
-      const pricePrimary = isKaspi ? money(p.own_price_kzt) : (p.price_original ? `${number(p.price_original)} ₽` : money(p.price_kzt));
-      const priceSecondary = !isKaspi && p.price_original && p.price_kzt ? `<small class="cell-meta">${money(p.price_kzt)}</small>` : '';
+      const isOzon = p.platform==='ozon';
+      // Only Ozon uses RUB. Kaspi and Halyk Market are always displayed in KZT.
+      const pricePrimary = isOzon && p.price_original ? `${number(p.price_original)} ₽` : money(p.own_price_kzt??p.price_kzt);
+      const priceSecondary = isOzon && p.price_original && p.price_kzt ? `<small class="cell-meta">${money(p.price_kzt)}</small>` : '';
       const sellerMeta=p.seller_name?`<small class="cell-meta">${esc(p.seller_name)}</small>`:'';
       // Market range: show in RUB for Ozon, in KZT for others
-      const range = isKaspi && p.market_median_price_kzt ?
+      const range = !isOzon && p.market_median_price_kzt ?
         `<div class="range price-range"><span class="range-min"><small>${esc(t('min_short','мин'))}</small><b>${money(p.market_min_price_kzt)}</b></span><span class="range-mid"><small>${esc(t('avg_short','ср'))}</small><b>${money(p.market_median_price_kzt)}</b></span><span class="range-max"><small>${esc(t('max_short','макс'))}</small><b>${money(p.market_max_price_kzt)}</b></span></div>` :
         (p.platform==='ozon' && p.market_median_price_original ? `<div class="range price-range"><span class="range-min"><small>${esc(t('min_short','мин'))}</small><b>${number(p.market_min_price_original)} ₽</b></span><span class="range-mid"><small>${esc(t('avg_short','ср'))}</small><b>${number(p.market_median_price_original)} ₽</b></span><span class="range-max"><small>${esc(t('max_short','макс'))}</small><b>${number(p.market_max_price_original)} ₽</b></span></div>` : '<span class="muted">—</span>');
       const pot=Number(p.potential_margin_monthly_kzt||0)>0?`<div class="potential-stack"><b class="positive">${money(p.potential_margin_monthly_kzt)}</b><small>${money(p.potential_margin_per_unit_kzt)}<br>${esc(t('per_unit_short','ед.'))}</small></div>`:'<span class="muted">—</span>';
@@ -383,9 +383,10 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   function closeDrawer(){ $('#productDrawer').classList.remove('open');$('#backdrop').hidden=true;$('#productDrawer').setAttribute('aria-hidden','true'); }
   function renderDrawer(p){
     $('#drawerTitle').textContent=p.title||t('product','Товар');
-    // Current price: for Ozon show RUB primary (original) and KZT secondary; for Kaspi show KZT
-    const currentPrimary = p.platform==='kaspi' ? money(p.own_price_kzt) : (p.price_original ? `${number(p.price_original)} ₽` : money(p.price_kzt));
-    const currentSecondary = p.platform==='kaspi' ? '' : (p.price_kzt ? `<span>${money(p.price_kzt)}</span>` : '');
+    // Only Ozon uses RUB. Kaspi and Halyk Market are always displayed in KZT.
+    const isOzon = p.platform==='ozon';
+    const currentPrimary = isOzon && p.price_original ? `${number(p.price_original)} ₽` : money(p.own_price_kzt??p.price_kzt);
+    const currentSecondary = isOzon && p.price_original && p.price_kzt ? `<span>${money(p.price_kzt)}</span>` : '';
     const productLink=externalHref(p.product_url)?`<a class="drawer-product-link" href="${esc(externalHref(p.product_url))}" target="_blank" rel="noopener noreferrer">${esc(t('open_catalog_button','Открыть карточку'))}</a>`:'';
     const lowLink=externalHref(p.lowest_product_url)?`<a href="${esc(externalHref(p.lowest_product_url))}" target="_blank" rel="noopener noreferrer">${esc(p.lowest_product_title||t('open_catalog_button','Открыть карточку'))}</a>`:''; const highLink=externalHref(p.highest_product_url)?`<a href="${esc(externalHref(p.highest_product_url))}" target="_blank" rel="noopener noreferrer">${esc(p.highest_product_title||t('open_catalog_button','Открыть карточку'))}</a>`:'';
     const specs=(p.specifications||[]).map(s=>`<div class="spec"><small>${esc(s.name)}</small><b>${esc(s.value)}</b></div>`).join('')||`<div class="empty">${esc(t('specs_empty','Характеристики не получены'))}</div>`;

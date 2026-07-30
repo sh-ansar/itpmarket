@@ -1,3 +1,10 @@
+## 3.4.15
+
+- Fixed Halyk Market price rendering: KZT is now used in product rows, market ranges and the product drawer.
+- Restricted RUB rendering to Ozon products only.
+- Ozon comparison now uses the lower payable price for each seller when both Ozon-bank/card and other-bank prices are available.
+- Added a defensive lowest-price calculation for already collected Ozon offers, so existing registries are corrected without database recreation.
+
 ## 3.4.14
 
 - Added accessible multi-value filters for marketplaces, brands, statuses, sizes, seasons and characteristic groups in Products and Reports.

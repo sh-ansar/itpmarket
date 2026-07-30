@@ -582,6 +582,28 @@ class DataService:
     def _normalized_ozon(value: Any) -> str:
         return re.sub(r"[^a-zа-я0-9]+", "", str(value or "").casefold())
 
+    @staticmethod
+    def _ozon_effective_price(offer: dict[str, Any] | None, fallback: Any = 0) -> int:
+        value = offer or {}
+        current_prices: list[int] = []
+        for key in ("card_price", "regular_price"):
+            try:
+                price = int(value.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                current_prices.append(price)
+        if current_prices:
+            return min(current_prices)
+        for candidate in (value.get("catalog_price"), fallback):
+            try:
+                price = int(candidate or 0)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                return price
+        return 0
+
     def _ozon_owner_config(self) -> tuple[str, set[str]]:
         expected_name = ""
         seller_ids: set[str] = set()
@@ -816,11 +838,11 @@ class DataService:
                 if not value: continue
                 article_offers=offers_by_article.get(article,[])
                 own_offer=next((o for o in article_offers if self._is_own_ozon_offer(o,expected_name,seller_ids)),None)
-                own_price=int((own_offer or {}).get("card_price") or value.get("catalog_price") or 0)
+                own_price=self._ozon_effective_price(own_offer, value.get("catalog_price"))
                 accepted: dict[tuple[str,str],dict[str,Any]]={}
                 def add_candidate(candidate_article:str,offer:dict[str,Any],method:str,label:str,level:str,score:float=100,reason:str=''):
                     if self._is_own_ozon_offer(offer,expected_name,seller_ids): return
-                    price=int(offer.get("card_price") or offer.get("catalog_price") or 0)
+                    price=self._ozon_effective_price(offer)
                     if price<=0:return
                     seller_key=str(offer.get("seller_id") or offer.get("seller_name") or '').strip()
                     if not seller_key:return

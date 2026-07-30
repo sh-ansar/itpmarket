@@ -149,10 +149,27 @@ def extract_tire_identity(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lowest_current_price(*values: Any) -> int:
+    prices: list[int] = []
+    for value in values:
+        try:
+            price = int(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else 0
+
+
 def normalize_for_import(item: dict[str, Any], collected_at: str, run_id: str) -> dict[str, Any]:
     identity = extract_tire_identity(item)
-    price = int(item.get("card_price") or item.get("catalog_card_price") or item.get("regular_price") or 0)
+    card_price = int(item.get("card_price") or 0)
+    regular_price = int(item.get("regular_price") or 0)
     catalog_price = int(item.get("catalog_card_price") or 0)
+    # Ozon can expose two simultaneously payable prices for one seller:
+    # the Ozon-bank/card price and the price for other banks. Comparisons use
+    # the lower current price; original_price is a crossed-out reference only.
+    price = _lowest_current_price(card_price, regular_price) or catalog_price
     return {
         "source": "ozon_ru",
         "source_product_id": str(item.get("article") or ""),
@@ -177,10 +194,15 @@ def normalize_for_import(item: dict[str, Any], collected_at: str, run_id: str) -
         "identity_completeness_percent": identity["identity_completeness_percent"],
         "price": price,
         "catalog_price": catalog_price,
-        "regular_price": int(item.get("regular_price") or 0),
+        "regular_price": regular_price,
         "original_price": int(item.get("original_price") or 0),
         "price_difference_catalog_vs_pdp": item.get("price_difference_catalog_vs_pdp"),
-        "price_source": "PDP_CARD" if int(item.get("card_price") or 0) > 0 else "CATALOG_CARD",
+        "price_source": (
+            "PDP_LOWEST_CURRENT" if card_price > 0 and regular_price > 0
+            else "PDP_CARD" if card_price > 0
+            else "PDP_REGULAR" if regular_price > 0
+            else "CATALOG_CARD"
+        ),
         "currency": "RUB",
         "image_url": str(item.get("image_url") or ""),
         "seller_rating": item.get("seller_rating"),
