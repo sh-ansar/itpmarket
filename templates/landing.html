@@ -6,12 +6,18 @@
   <link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
   <script>(function(){var p=localStorage.getItem('itp_theme')||'system',d=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.dataset.theme=d;document.documentElement.style.colorScheme=d;}());</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
+  <style>
+    /* Minimal language-select styles copied from app.css so public page matches system */
+    .language-select{position:relative;display:block;width:76px;flex:0 0 76px;margin-right:8px}
+    .language-select select{width:100%;height:40px;padding:0 12px;border:1px solid #d9e7ed;border-radius:12px;background:#fff;color:#0a2533;font-size:12px;font-weight:800}
+    @media(max-width:640px){.language-select{width:64px}}
+  </style>
 </head>
 <body>
 <header class="site-header" id="siteHeader">
   <a class="site-brand" href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span>Spyon</span></a>
   <nav class="site-nav"><a href="#capabilities" data-pi18n="public_nav_capabilities">Возможности</a><a href="#process" data-pi18n="public_nav_process">Как работает</a><a href="#results" data-pi18n="public_nav_results">Для бизнеса</a></nav>
-  <div class="site-tools"><button class="site-theme" data-public-theme aria-label="Theme"><img class="light-icon" src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><img class="dark-icon" src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></button><div class="site-languages"><button data-public-lang="ru">RU</button><button data-public-lang="kk">KZ</button><button data-public-lang="en">EN</button></div>{% if current_user %}<a class="site-button secondary" href="{{ url_for('app_index') }}" data-pi18n="public_open_system">Открыть систему</a>{% elif has_users %}<a class="site-button secondary login-button" href="{{ url_for('login') }}" data-pi18n="public_login">Войти</a><a class="site-button primary" href="{{ url_for('registration') }}" data-pi18n="public_connect">Подключить компанию</a>{% else %}<a class="site-button primary" href="{{ url_for('setup') }}" data-pi18n="public_setup">Настроить систему</a>{% endif %}</div>
+  <div class="site-tools"><button class="site-theme" data-public-theme aria-label="Theme"><img class="light-icon" src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><img class="dark-icon" src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></button><label class="language-select"><select id="languageSelect" aria-label="Язык"><option value="ru">RU</option><option value="kk">KZ</option><option value="en">EN</option></select></label>{% if current_user %}<a class="site-button secondary" href="{{ url_for('app_index') }}" data-pi18n="public_open_system">Открыть систему</a>{% elif has_users %}<a class="site-button secondary login-button" href="{{ url_for('login') }}" data-pi18n="public_login">Войти</a><a class="site-button primary" href="{{ url_for('registration') }}" data-pi18n="public_connect">Подключить компанию</a>{% else %}<a class="site-button primary" href="{{ url_for('setup') }}" data-pi18n="public_setup">Настроить систему</a>{% endif %}</div>
 </header>
 <main>
 <section class="hero">
@@ -26,4 +32,13 @@
 </main>
 <footer class="site-footer"><div><a class="site-brand" href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span>Spyon</span></a><p data-pi18n="public_footer_text">Информационно-аналитическая система для управления онлайн-продажами.</p></div><nav><a data-legal-link href="{{ url_for('legal_document', document='privacy') }}" data-pi18n="public_legal_privacy">Конфиденциальность</a><a data-legal-link href="{{ url_for('legal_document', document='terms') }}" data-pi18n="public_legal_terms">Условия использования</a><a data-legal-link href="{{ url_for('legal_document', document='cookies') }}" data-pi18n="public_legal_cookies">Cookies</a><a data-legal-link href="{{ url_for('legal_document', document='consent') }}" data-pi18n="public_legal_consent">Согласие</a>{% if public_settings.offer_enabled %}<a data-legal-link href="{{ url_for('legal_document', document='offer') }}" data-pi18n="public_legal_offer">Публичная оферта</a>{% endif %}</nav><small>© 2026 Spyon</small></footer>
 <script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script><script src="{{ url_for('static', filename='js/public.js') }}?v={{ version }}"></script>
+<script>
+  // Wire language select on public landing (persist same key as app)
+  (function(){
+    var select = document.getElementById('languageSelect');
+    if(!select) return;
+    try{ var lang = localStorage.getItem('itp_lang') || 'ru'; select.value = lang; }catch(e){}
+    select.onchange = function(e){ try{ localStorage.setItem('itp_lang', e.target.value); location.reload(); }catch(err){ location.reload(); } };
+  }());
+</script>
 </body></html>
