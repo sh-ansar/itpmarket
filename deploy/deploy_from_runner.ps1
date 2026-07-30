@@ -50,13 +50,14 @@ try {
     & .\INSTALL.bat
     if ($LASTEXITCODE -ne 0) { throw "Runtime installation failed" }
 
-    & .\SERVER_SETUP_192_168_1_75.bat
+    & powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\configure_server.ps1" -ServerIp $ServerIp -Port 8765
     if ($LASTEXITCODE -ne 0) { Write-Warning "Server setup returned $LASTEXITCODE" }
 
-    if (Test-Path ".\migrate_3_1_0.py") {
-        & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\migrate_3_1_0.py"
-        if ($LASTEXITCODE -ne 0) { throw "Database migration failed" }
-    }
+    & ".\.runtime\venv_3_2_0\Scripts\python.exe" ".\migrate_spyon.py"
+    if ($LASTEXITCODE -ne 0) { throw "Database migration failed: migrate_spyon.py" }
+
+    Get-ChildItem -Path $AppRoot -Directory -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     & ".\.runtime\venv_3_2_0\Scripts\python.exe" -m compileall -q .
     if ($LASTEXITCODE -ne 0) { throw "Python compile check failed" }

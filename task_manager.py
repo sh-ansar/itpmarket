@@ -85,6 +85,16 @@ class TaskManager:
             return ""
         try:
             raw = path.read_bytes()
+            for encoding in ("utf-8-sig", "cp1251", "cp866"):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                text = raw.decode("utf-8", errors="replace")
+            content = text.splitlines(keepends=True)
+            return "".join(content[-max(1, min(int(lines), 3000)):])
             # Новые процессы всегда пишут UTF-8. Для старых Windows-логов
             # оставлен автоматический fallback на cp1251/cp866.
             candidates: list[tuple[int, str]] = []

@@ -13,7 +13,7 @@ INTEGRATION_CATALOG = [
     {"code":"kaspi","name":"Kaspi","description":"Каталог, точные предложения одной карточки и история цен.","availability":"available"},
     {"code":"ozon","name":"Ozon","description":"Каталог клиента, рыночные карточки и строгое сопоставление.","availability":"available"},
     {"code":"forte_market","name":"Forte Market","description":"Подключение запланировано после стабилизации общего API интеграций.","availability":"coming_soon"},
-    {"code":"halyk_market","name":"Halyk Market","description":"Подключение запланировано как отдельный модуль маркетплейса.","availability":"coming_soon"},
+    {"code":"halyk_market","name":"Halyk Market","description":"Каталог продавца, точные предложения одной карточки и история цен.","availability":"available"},
 ]
 
 SCHEDULE_ACTIONS = {
@@ -28,6 +28,9 @@ SCHEDULE_ACTIONS = {
     "ozon_refresh_stale": ("Ozon","Обновление характеристик"),
     "ozon_retry": ("Ozon","Повтор ошибок"),
     "ozon_full_sync": ("Ozon","Полная синхронизация"),
+    "halyk_sync_catalog": ("Halyk Market","Синхронизация каталога"),
+    "halyk_refresh_offers": ("Halyk Market","Точные предложения продавцов"),
+    "halyk_full_sync": ("Halyk Market","Полная синхронизация"),
     "export_report": ("Система","Формирование отчёта"),
     "backup_database": ("Система","Резервное копирование"),
 }
@@ -212,6 +215,48 @@ class SaaSService:
                 self._audit(conn,actor_user_id,"tenant_updated",tenant_id,"tenant",str(tenant_id),payload); conn.commit()
             return dict(conn.execute("SELECT * FROM tenants WHERE id=?",(int(tenant_id),)).fetchone())
         finally: conn.close()
+
+    def update_tenant_profile(self, tenant_id: int, payload: dict[str, Any], actor_user_id: int) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        registration_number = str(payload.get("registration_number") or "").strip()
+        contact_email = str(payload.get("contact_email") or "").strip().casefold()
+        contact_phone = str(payload.get("contact_phone") or "").strip()
+        if len(name) < 2:
+            raise ValueError("Укажите название компании.")
+        if contact_email and ("@" not in contact_email or "." not in contact_email.rsplit("@", 1)[-1]):
+            raise ValueError("Укажите корректный email компании.")
+        stamp = now_iso()
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
+            if not row:
+                raise ValueError("Компания не найдена.")
+            conn.execute(
+                """
+                UPDATE tenants
+                SET name=?, registration_number=?, contact_email=?, contact_phone=?, updated_at=?
+                WHERE id=?
+                """,
+                (name, registration_number, contact_email, contact_phone, stamp, int(tenant_id)),
+            )
+            self._audit(
+                conn,
+                actor_user_id,
+                "tenant_profile_updated",
+                int(tenant_id),
+                "tenant",
+                str(tenant_id),
+                {
+                    "name": name,
+                    "registration_number": registration_number,
+                    "contact_email": contact_email,
+                    "contact_phone": contact_phone,
+                },
+            )
+            conn.commit()
+            return dict(conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone())
+        finally:
+            conn.close()
 
     @staticmethod
     def next_run_for(
@@ -437,7 +482,16 @@ class SaaSService:
 
     def due_schedules(self)->list[dict[str,Any]]:
         conn=self._connect()
-        try:return [dict(r) for r in conn.execute("SELECT * FROM operation_schedules WHERE is_enabled=1 AND next_run_at IS NOT NULL AND datetime(next_run_at)<=datetime('now','localtime') ORDER BY next_run_at LIMIT 10").fetchall()]
+        try:return [dict(r) for r in conn.execute("""
+            SELECT os.*
+            FROM operation_schedules os
+            LEFT JOIN app_users u ON u.id=os.created_by
+            WHERE os.is_enabled=1
+              AND os.next_run_at IS NOT NULL
+              AND datetime(os.next_run_at)<=datetime('now','localtime')
+              AND (os.action<>'backup_database' OR COALESCE(u.platform_role,'')='superadmin')
+            ORDER BY os.next_run_at LIMIT 10
+            """).fetchall()]
         finally:conn.close()
 
     def begin_schedule_run(self, schedule: dict[str, Any]) -> int:

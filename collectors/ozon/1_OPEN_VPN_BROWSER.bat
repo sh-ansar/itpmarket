@@ -13,9 +13,9 @@ if not defined CHROME (
 set "START_URL=https://www.ozon.ru/seller/alfa-tires-3381444/"
 if exist "START_URLS.txt" set /p START_URL=<"START_URLS.txt"
 if not exist "START_URLS.txt" if exist "START_URL.txt" set /p START_URL=<"START_URL.txt"
-start "" "%CHROME%" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%~dp0chrome_vpn_profile" --profile-directory=Default --lang=ru-RU --start-maximized "%START_URL%"
+start "" "%CHROME%" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%~dp0chrome_vpn_profile" --profile-directory=Default --lang=ru-RU --start-maximized --no-first-run --disable-popup-blocking "%START_URL%"
 echo.
-echo Seller catalogue is opened first.
-echo Enable Urban VPN with Russia and wait until cards and prices are visible.
+echo Ozon browser profile is opened on port 9222.
+echo Choose a Russian city or pickup point if Ozon asks for it.
 echo Keep this browser open while the collector is running.
 pause

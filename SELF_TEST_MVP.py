@@ -255,7 +255,7 @@ def main() -> int:
         finally:
             db.conn.close()
 
-    print("ITP MARKET INTELLIGENCE MVP SELF TEST: OK")
+    print("SPYON MVP SELF TEST: OK")
     print("Kaspi: 890 products and 890 detail cards")
     print("Matching: deterministic across independent Python hash seeds")
     print("Continental 105775186: exact-only by Kaspi product_code; cross-brand analogs excluded")

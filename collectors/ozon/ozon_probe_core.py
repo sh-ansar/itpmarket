@@ -116,15 +116,27 @@ def _extract_tile_price(item: dict[str, Any]) -> tuple[int, list[int], str]:
 
 
 def _extract_tile_image(item: dict[str, Any]) -> str:
-    tile = item.get("tileImage")
-    if not isinstance(tile, dict):
+    def find_image(value: Any) -> str:
+        if isinstance(value, dict):
+            for key in ("link", "url", "src", "imageUrl", "image_url"):
+                raw = value.get(key)
+                if isinstance(raw, str) and raw.startswith(("http://", "https://", "//")):
+                    return "https:" + raw if raw.startswith("//") else raw
+            for child in value.values():
+                found = find_image(child)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = find_image(child)
+                if found:
+                    return found
         return ""
-    for entry in tile.get("items") or []:
-        if not isinstance(entry, dict):
-            continue
-        image = entry.get("image")
-        if isinstance(image, dict) and image.get("link"):
-            return str(image.get("link"))
+
+    for key in ("tileImage", "image", "images", "gallery"):
+        found = find_image(item.get(key))
+        if found:
+            return found
     return ""
 
 

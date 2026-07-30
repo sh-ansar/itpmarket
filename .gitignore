@@ -28,6 +28,17 @@ data/tasks_state.json
 collectors/ozon/data/*.db
 collectors/ozon/data/*.db-*
 collectors/ozon/chrome_vpn_profile/
+collectors/ozon/latest_run.txt
+collectors/ozon/exports/*
+!collectors/ozon/exports/.gitkeep
+collectors/ozon/reports/*
+!collectors/ozon/reports/.gitkeep
+collectors/ozon/raw/**
+!collectors/ozon/raw/
+!collectors/ozon/raw/.gitkeep
+collectors/ozon/runs/**
+!collectors/ozon/runs/
+!collectors/ozon/runs/.gitkeep
 logs/*
 !logs/.gitkeep
 output/*

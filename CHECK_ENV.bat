@@ -8,7 +8,7 @@ if not exist ".runtime\venv_3_2_0\Scripts\python.exe" (
   call "%~dp0INSTALL.bat"
   if errorlevel 1 exit /b 1
 )
-".runtime\venv_3_2_0\Scripts\python.exe" -c "import flask,waitress,playwright,psutil,selenium;print('ITP runtime: OK')"
+".runtime\venv_3_2_0\Scripts\python.exe" -c "import flask,waitress,playwright,psutil,selenium;print('Spyon runtime: OK')"
 if errorlevel 1 (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install_runtime.ps1" -ForceRecreate
   if errorlevel 1 exit /b 1

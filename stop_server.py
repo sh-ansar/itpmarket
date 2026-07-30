@@ -37,7 +37,7 @@ def main() -> int:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     PID_PATH.unlink(missing_ok=True)
-    print("ITP Market Intelligence остановлен.")
+    print("Spyon остановлен.")
     return 0
 
 

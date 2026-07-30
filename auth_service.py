@@ -16,6 +16,8 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ROLES = {"admin", "operator", "viewer"}
 PLATFORM_ROLES = {"", "superadmin", "support", "technical"}
 MARKETPLACE_CODES = {"kaspi", "ozon", "forte_market", "halyk_market"}
+PASSWORD_HASH_METHOD = "scrypt"
+PASSWORD_MIN_LENGTH = 12
 
 
 def now_iso() -> str:
@@ -26,18 +28,39 @@ def normalize_email(value: str) -> str:
     return (value or "").strip().casefold()
 
 
-def validate_password(password: str) -> None:
+def validate_password(password: str, email: str = "", display_name: str = "") -> None:
     value = password or ""
-    if len(value) < 10:
-        raise ValueError("Пароль должен содержать не менее 10 символов.")
-    if not any(char.isalpha() for char in value) or not any(char.isdigit() for char in value):
-        raise ValueError("Пароль должен содержать буквы и цифры.")
+    if len(value) < PASSWORD_MIN_LENGTH:
+        raise ValueError("Пароль должен содержать не менее 12 символов.")
+    checks = (
+        any(char.islower() for char in value),
+        any(char.isupper() for char in value),
+        any(char.isdigit() for char in value),
+        any(not char.isalnum() for char in value),
+    )
+    if sum(1 for passed in checks if passed) < 3:
+        raise ValueError("Пароль должен содержать минимум три типа символов: строчные, заглавные, цифры или спецсимволы.")
+    lowered = value.casefold()
+    local_part = normalize_email(email).split("@", 1)[0]
+    if local_part and len(local_part) >= 4 and local_part in lowered:
+        raise ValueError("Пароль не должен содержать email.")
+    for token in re.findall(r"[\wА-Яа-яЁё]{4,}", display_name or ""):
+        if token.casefold() in lowered:
+            raise ValueError("Пароль не должен содержать имя пользователя.")
+
+
+def hash_secret(value: str) -> str:
+    return generate_password_hash(value, method=PASSWORD_HASH_METHOD)
+
+
+def hash_needs_upgrade(value: str) -> bool:
+    return not str(value or "").startswith(f"{PASSWORD_HASH_METHOD}:")
 
 
 def generate_recovery_code() -> str:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     groups = ["".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4)]
-    return "UNITYRE-" + "-".join(groups)
+    return "SPYON-" + "-".join(groups)
 
 
 class AuthService:
@@ -165,7 +188,7 @@ class AuthService:
         platform_role_value = str(platform_role or "").casefold()
         if platform_role_value not in PLATFORM_ROLES:
             raise ValueError("Неизвестная платформенная роль.")
-        validate_password(password)
+        validate_password(password, email_value, name_value)
         recovery_code = generate_recovery_code()
         stamp = now_iso()
         conn = self._connect()
@@ -180,8 +203,8 @@ class AuthService:
                 (
                     email_value,
                     name_value,
-                    generate_password_hash(password),
-                    generate_password_hash(recovery_code),
+                    hash_secret(password),
+                    hash_secret(recovery_code),
                     role_value,
                     platform_role_value,
                     stamp,
@@ -249,7 +272,13 @@ class AuthService:
         stamp = now_iso()
         conn = self._connect()
         try:
-            conn.execute("UPDATE app_users SET last_login_at=?,updated_at=? WHERE id=?", (stamp, stamp, value["id"]))
+            if hash_needs_upgrade(str(value["password_hash"])):
+                conn.execute(
+                    "UPDATE app_users SET password_hash=?,last_login_at=?,updated_at=? WHERE id=?",
+                    (hash_secret(password or ""), stamp, stamp, value["id"]),
+                )
+            else:
+                conn.execute("UPDATE app_users SET last_login_at=?,updated_at=? WHERE id=?", (stamp, stamp, value["id"]))
             self._event(conn, int(value["id"]), "login", "user", str(value["id"]), {})
             conn.commit()
         finally:
@@ -324,18 +353,18 @@ class AuthService:
         conn = self._connect()
         try:
             stamp = now_iso()
+            tenant_id = target.get("tenant_id")
             if fields:
                 fields.append("updated_at=?")
                 params.append(stamp)
                 params.append(int(user_id))
                 conn.execute(f"UPDATE app_users SET {', '.join(fields)} WHERE id=?", params)
-            if "role" in changes:
+            if "role" in changes and tenant_id is not None:
                 conn.execute(
-                    "UPDATE tenant_users SET tenant_role=? WHERE user_id=?",
-                    (str(changes["role"] or "viewer").casefold(), int(user_id)),
+                    "UPDATE tenant_users SET tenant_role=? WHERE user_id=? AND tenant_id=?",
+                    (str(changes["role"] or "viewer").casefold(), int(user_id), int(tenant_id)),
                 )
             if access_changes is not None:
-                tenant_id = target.get("tenant_id")
                 if tenant_id is None:
                     raise ValueError("Пользователь не связан с компанией.")
                 for code, enabled in access_changes.items():
@@ -367,9 +396,21 @@ class AuthService:
         conn = self._connect()
         try:
             if target.get("role") == "admin" and bool(target.get("is_active")):
-                active_admins = int(conn.execute(
-                    "SELECT COUNT(*) FROM app_users WHERE role='admin' AND is_active=1"
-                ).fetchone()[0])
+                tenant_id = target.get("tenant_id")
+                if tenant_id is not None:
+                    active_admins = int(conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM app_users u
+                        JOIN tenant_users tu ON tu.user_id=u.id AND tu.is_active=1
+                        WHERE tu.tenant_id=? AND u.role='admin' AND u.is_active=1
+                        """,
+                        (int(tenant_id),),
+                    ).fetchone()[0])
+                else:
+                    active_admins = int(conn.execute(
+                        "SELECT COUNT(*) FROM app_users WHERE role='admin' AND is_active=1"
+                    ).fetchone()[0])
                 if active_admins <= 1:
                     raise ValueError("Нельзя удалить последнего активного администратора.")
             conn.execute("UPDATE app_product_state SET updated_by=NULL WHERE updated_by=?", (int(user_id),))
@@ -386,16 +427,16 @@ class AuthService:
             conn.close()
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> None:
-        validate_password(new_password)
         conn = self._connect()
         try:
-            row = conn.execute("SELECT password_hash FROM app_users WHERE id=? AND is_active=1", (int(user_id),)).fetchone()
+            row = conn.execute("SELECT email,display_name,password_hash FROM app_users WHERE id=? AND is_active=1", (int(user_id),)).fetchone()
             if row is None or not check_password_hash(row["password_hash"], current_password or ""):
                 raise ValueError("Текущий пароль указан неверно.")
+            validate_password(new_password, str(row["email"] or ""), str(row["display_name"] or ""))
             stamp = now_iso()
             conn.execute(
                 "UPDATE app_users SET password_hash=?,password_changed_at=?,updated_at=? WHERE id=?",
-                (generate_password_hash(new_password), stamp, stamp, int(user_id)),
+                (hash_secret(new_password), stamp, stamp, int(user_id)),
             )
             self._event(conn, int(user_id), "password_changed", "user", str(user_id), {})
             conn.commit()
@@ -403,18 +444,18 @@ class AuthService:
             conn.close()
 
     def reset_password_with_recovery(self, email: str, recovery_code: str, new_password: str) -> None:
-        validate_password(new_password)
         value = self.get_user_by_email(email, include_secret=True)
         if not value or not bool(value.get("is_active")):
             raise ValueError("Не удалось подтвердить данные восстановления.")
         if not check_password_hash(str(value["recovery_hash"]), (recovery_code or "").strip().upper()):
             raise ValueError("Не удалось подтвердить данные восстановления.")
+        validate_password(new_password, str(value.get("email") or ""), str(value.get("display_name") or ""))
         stamp = now_iso()
         conn = self._connect()
         try:
             conn.execute(
                 "UPDATE app_users SET password_hash=?,password_changed_at=?,updated_at=? WHERE id=?",
-                (generate_password_hash(new_password), stamp, stamp, int(value["id"])),
+                (hash_secret(new_password), stamp, stamp, int(value["id"])),
             )
             self._event(conn, int(value["id"]), "password_recovered", "user", str(value["id"]), {})
             conn.commit()
@@ -431,7 +472,7 @@ class AuthService:
                 raise ValueError("Пользователь не найден.")
             conn.execute(
                 "UPDATE app_users SET recovery_hash=?,updated_at=? WHERE id=?",
-                (generate_password_hash(code), stamp, int(user_id)),
+                (hash_secret(code), stamp, int(user_id)),
             )
             self._event(conn, actor_user_id, "recovery_regenerated", "user", str(user_id), {})
             conn.commit()
