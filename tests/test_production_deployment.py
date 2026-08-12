@@ -59,6 +59,7 @@ class ProductionDeploymentTests(unittest.TestCase):
             ROOT / "deploy" / "windows" / "stop-production.ps1"
         ).read_text(encoding="utf-8")
         self.assertIn("ParentProcessId", stopper)
+        self.assertIn("verifiedVenvParent", stopper)
         self.assertIn("start-production.ps1", stopper)
         self.assertIn("Refusing to stop", stopper)
 

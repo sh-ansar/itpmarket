@@ -36,8 +36,18 @@ $verifiedLauncher = [bool](
     $parent -and [string]$parent.CommandLine -match $launcherPath
 )
 $verifiedPython = $allowedExecutables -contains $actualExecutable
+$verifiedVenvParent = $false
+if ($parent -and $parent.ExecutablePath) {
+    $parentExecutable = [IO.Path]::GetFullPath(
+        [string]$parent.ExecutablePath
+    ).TrimEnd('\').ToLowerInvariant()
+    $verifiedVenvParent = [bool](
+        $allowedExecutables -contains $parentExecutable -and
+        [string]$parent.CommandLine -match '(^|\s|["''])app\.py(["'']|\s|$)'
+    )
+}
 if (
-    (-not $verifiedPython -and -not $verifiedLauncher) -or
+    (-not $verifiedPython -and -not $verifiedVenvParent -and -not $verifiedLauncher) -or
     $process.CommandLine -notmatch '(^|\s|["''])app\.py(["'']|\s|$)'
 ) {
     throw 'Refusing to stop a process that does not belong to this Spyon deployment.'
