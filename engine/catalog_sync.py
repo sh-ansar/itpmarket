@@ -643,12 +643,33 @@ async def run(args: argparse.Namespace) -> int:
             reported_total = int(root_data.get("total") or 0)
             limit = int(root_data.get("limit") or 12)
             available_brand_segments = brand_rows(root_payload)
-            available_brand_names = [str(item["name"]) for item in available_brand_segments]
-            # The seller storefront already exposes a complete, validated
-            # pagination chain. A single root pass avoids fragile per-brand
-            # filter clicks and duplicate crawling while still collecting the
-            # exact seller scope.
-            segments = [{"name": "all", "expected": reported_total}]
+            available_brand_names = [
+                str(item["name"]) for item in available_brand_segments
+            ]
+
+            brand_reported_total = sum(
+                int(item.get("expected") or 0)
+                for item in available_brand_segments
+            )
+
+            # Корневая витрина Kaspi может обрывать DOM-пагинацию примерно
+            # после первой тысячи позиций, хотя reported_total больше.
+            # Поэтому при наличии брендовых фильтров собираем каталог
+            # сегментами, а общий root-проход используем как fallback.
+            if available_brand_segments:
+                segments = available_brand_segments
+                print(
+                    f"[Каталог] Используем брендовый сбор: "
+                    f"сегментов={len(segments)}; "
+                    f"сумма по фильтрам={brand_reported_total}; "
+                    f"заявлено Kaspi={reported_total}"
+                )
+            else:
+                segments = [{"name": "all", "expected": reported_total}]
+                print(
+                    "[Каталог] Брендовые сегменты недоступны; "
+                    "используется общий DOM-проход."
+                )
             # Persist the reported total immediately. If the user safely stops the
             # long crawl, the dashboard still knows that the local catalogue is incomplete.
             conn.execute(
@@ -703,17 +724,36 @@ async def run(args: argparse.Namespace) -> int:
                     print(f"[Каталог] ОШИБКА сегмента {name}: {message}")
 
             # Если брендовый сбор частично сломался, используем старый рабочий V6-проход.
-            if len(seen) < min(reported_total, 1000):
+            minimum_complete = (
+                int(reported_total * 0.97)
+                if reported_total > 0
+                else 0
+            )
+
+            if reported_total > 0 and len(seen) < minimum_complete:
                 try:
-                    _, global_index = await crawl_root_fallback(
-                        conn, page, seller_url, args.timeout, args.min_delay, args.max_delay,
-                        global_index, seen, available_brand_names,
+                    added, global_index = await crawl_root_fallback(
+                        conn,
+                        page,
+                        seller_url,
+                        args.timeout,
+                        args.min_delay,
+                        args.max_delay,
+                        global_index,
+                        seen,
+                        available_brand_names,
+                    )
+                    print(
+                        f"[Каталог] Резервный общий проход завершён: "
+                        f"добавлено={added}; всего уникальных={len(seen)}"
                     )
                 except Exception as exc:
                     warnings.append(f"резервный проход: {clean(exc)}")
-                    print(f"[Каталог] ОШИБКА резервного прохода: {clean(exc)}")
+                    print(
+                        f"[Каталог] ОШИБКА резервного прохода: {clean(exc)}"
+                    )
 
-            full_enough = reported_total > 0 and len(seen) >= int(reported_total * 0.97)
+            full_enough = reported_total > 0 and len(seen) >= minimum_complete
             if full_enough:
                 placeholders = ",".join("?" for _ in seen)
                 # Shared legacy staging contains products collected for many

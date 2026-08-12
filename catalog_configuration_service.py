@@ -239,18 +239,54 @@ class CatalogConfigurationService:
         catalog_id: int | None = None,
         tenant_seller_id: int | None = None,
     ) -> int:
+        platform = str(marketplace_code)
+        if platform not in MARKETPLACE_CODES:
+            raise ValueError("Неизвестная площадка.")
+
+        product_rows = list(products)
+        incoming_codes = {
+            str(
+                product.get("source_product_code")
+                or product.get("product_id")
+                or product.get("sku")
+                or product.get("offer_id")
+                or ""
+            ).strip()
+            for product in product_rows
+        }
+        incoming_codes.discard("")
+
+        current_codes = {
+            code
+            for marketplace, code in self.catalog_memberships(
+                int(tenant_id), [platform]
+            )
+            if marketplace == platform
+        }
+        projected_count = len(current_codes | incoming_codes)
+
+        SubscriptionService(self.db_path).assert_position_capacity(
+            int(tenant_id), platform, projected_count
+        )
+
         conn = self._connect()
         count = 0
         try:
-            for product in products:
+            for product in product_rows:
                 self.upsert_catalog_product(
-                    tenant_id, marketplace_code, product,
-                    catalog_id=catalog_id, tenant_seller_id=tenant_seller_id,
+                    tenant_id,
+                    platform,
+                    product,
+                    catalog_id=catalog_id,
+                    tenant_seller_id=tenant_seller_id,
                     _conn=conn,
                 )
                 count += 1
             conn.commit()
             return count
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
