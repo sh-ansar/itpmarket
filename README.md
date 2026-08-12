@@ -11,6 +11,9 @@
 
 `cryptography` входит в `requirements.txt` и требуется для защищённого хранилища реквизитов интеграций.
 
+Production-развёртывание на Windows с PostgreSQL, Caddy и HTTPS описано в
+[`docs/PRODUCTION_WINDOWS_RU.md`](docs/PRODUCTION_WINDOWS_RU.md).
+
 ## Проверки
 
 ```powershell

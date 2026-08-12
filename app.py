@@ -30,6 +30,7 @@ from flask import (
     url_for,
 )
 from waitress import serve
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth_service import AuthService, validate_password
 from config import (
@@ -69,6 +70,22 @@ from storage.postgres_compat import connect_database
 VERSION = "3.6.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
+
+
+def environment_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+IS_PRODUCTION = str(os.environ.get("ITP_ENV") or "").strip().casefold() == "production"
+if environment_flag("ITP_TRUST_PROXY"):
+    # The production launcher binds Waitress to loopback, so exactly one
+    # trusted reverse proxy (Caddy) can supply the external host and scheme.
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=0
+    )
 
 CFG = ensure_directories(load_config())
 DB_PATH = resolve_path(CFG, "database")
@@ -133,10 +150,18 @@ threading.Thread(target=warm_data_cache, daemon=True).start()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
-    SESSION_COOKIE_SECURE=str(os.environ.get("ITP_COOKIE_SECURE", "0")).strip() == "1",
+    SESSION_COOKIE_SECURE=environment_flag("ITP_COOKIE_SECURE", IS_PRODUCTION),
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(CFG["app"].get("session_hours", 12))),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
+    PREFERRED_URL_SCHEME="https" if IS_PRODUCTION else "http",
 )
+trusted_hosts = [
+    item.strip()
+    for item in str(os.environ.get("ITP_TRUSTED_HOSTS") or "").split(",")
+    if item.strip()
+]
+if trusted_hosts:
+    app.config["TRUSTED_HOSTS"] = trusted_hosts
 
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 FORM_ATTEMPTS: dict[str, list[float]] = {}
@@ -1375,7 +1400,7 @@ def before_request() -> Any:
             session.clear()
 
     if not AUTH.has_users() and request.endpoint not in {
-        "setup", "setup_complete", "static", "health", "landing",
+        "setup", "setup_complete", "static", "health", "ready", "landing",
         "registration", "registration_complete", "legal_document"
     }:
         if is_api_request():
@@ -1469,6 +1494,22 @@ def template_context() -> dict[str, Any]:
 @app.get("/health")
 def health() -> Any:
     return jsonify({"ok": True, "version": VERSION})
+
+
+@app.get("/ready")
+def ready() -> Any:
+    """Readiness probe that verifies the configured primary database."""
+    conn = None
+    try:
+        conn = connect_database(DB_PATH, timeout=5)
+        conn.execute("SELECT 1").fetchone()
+        return jsonify({"ok": True, "version": VERSION})
+    except Exception:
+        app.logger.exception("Database readiness probe failed")
+        return jsonify({"ok": False, "version": VERSION}), 503
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route("/setup", methods=["GET", "POST"])

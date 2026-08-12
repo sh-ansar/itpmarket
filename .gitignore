@@ -20,6 +20,9 @@ backups/*.db
 .runtime/
 .venv/
 config.local.json
+.env
+*.local.env
+deploy/windows/production.env
 data/*.db
 data/*.db-*
 data/server.pid
