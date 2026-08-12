@@ -55,6 +55,13 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("requirements.txt", installer)
         self.assertIn("requirements-postgres.txt", installer)
 
+        stopper = (
+            ROOT / "deploy" / "windows" / "stop-production.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ParentProcessId", stopper)
+        self.assertIn("start-production.ps1", stopper)
+        self.assertIn("Refusing to stop", stopper)
+
     def test_postgres_manifest_covers_every_runtime_schema(self) -> None:
         manifest = json.loads(
             (ROOT / "engine" / "postgres_schema_manifest.json").read_text(

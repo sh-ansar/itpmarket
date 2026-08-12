@@ -28,10 +28,24 @@ $allowedExecutables = @(
     [IO.Path]::GetFullPath($_).TrimEnd('\').ToLowerInvariant()
 }
 $actualExecutable = [IO.Path]::GetFullPath([string]$process.ExecutablePath).TrimEnd('\').ToLowerInvariant()
-if ($allowedExecutables -notcontains $actualExecutable -or $process.CommandLine -notmatch '(^|\s|["''])app\.py(["'']|\s|$)') {
+$parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)"
+$launcherPath = [regex]::Escape(
+    [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'start-production.ps1'))
+)
+$verifiedLauncher = [bool](
+    $parent -and [string]$parent.CommandLine -match $launcherPath
+)
+$verifiedPython = $allowedExecutables -contains $actualExecutable
+if (
+    (-not $verifiedPython -and -not $verifiedLauncher) -or
+    $process.CommandLine -notmatch '(^|\s|["''])app\.py(["'']|\s|$)'
+) {
     throw 'Refusing to stop a process that does not belong to this Spyon deployment.'
 }
 
 Stop-Process -Id $serverPid
 Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $pidPath) {
+    Remove-Item -LiteralPath $pidPath -Force
+}
 Write-Output "Spyon PID $serverPid stopped."
