@@ -48,6 +48,12 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("postgres_initialize.py", launcher)
         self.assertNotIn("Start-Process", launcher)
 
+        installer = (
+            ROOT / "deploy" / "windows" / "install-production.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("requirements.txt", installer)
+        self.assertIn("requirements-postgres.txt", installer)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,7 +42,9 @@ if (-not (Test-Path -LiteralPath $python)) {
     }
 }
 
-& $python -m pip install --disable-pip-version-check --requirement (Join-Path $root 'requirements.txt')
+& $python -m pip install --disable-pip-version-check `
+    --requirement (Join-Path $root 'requirements.txt') `
+    --requirement (Join-Path $root 'requirements-postgres.txt')
 if ($LASTEXITCODE -ne 0) {
     throw 'Python dependency installation failed.'
 }
