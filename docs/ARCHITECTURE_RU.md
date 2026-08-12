@@ -2,14 +2,14 @@
 
 ## Назначение
 
-MVP объединяет данные Kaspi и Ozon в одном интерфейсе, не смешивая код сборщиков. Каждый источник сохраняет собственные сессии, правила доступа и сырой формат, а веб-приложение формирует единое аналитическое представление.
+MVP объединяет данные Kaspi и Ozon.ru в одном интерфейсе, не смешивая код сборщиков. Каждый источник сохраняет собственные сессии, правила доступа и сырой формат, а веб-приложение формирует единое аналитическое представление.
 
 ## Контуры системы
 
 ```text
 Kaspi Collector ──> unityre_kaspi.db ─┐
                                       ├─> DataService ─> Matching & Pricing ─> Flask API ─> Web UI
-Ozon Collector ───> ozon_registry.db ─┘
+Ozon.ru Collector ───> ozon_registry.db ─┘
 ```
 
 ### Kaspi Collector
@@ -25,7 +25,7 @@ Ozon Collector ───> ozon_registry.db ─┘
 
 Профиль Playwright не входит в поставку и создаётся локально.
 
-### Ozon Collector
+### Ozon.ru Collector
 
 Сборщик 3.0 работает через одну Chrome-сессию на порту 9222:
 
@@ -70,7 +70,7 @@ Ozon Collector ───> ozon_registry.db ─┘
 
 ### `collectors/ozon/data/ozon_registry.db`
 
-Изолированный реестр Ozon:
+Изолированный реестр Ozon.ru:
 
 - `products`;
 - `offers`;
@@ -84,14 +84,14 @@ Ozon Collector ───> ozon_registry.db ─┘
 ```text
 ITP_Market_Intelligence_MVP_3.0.0/
 ├── app.py                     Flask API и запуск панели
-├── data_service.py            объединённое представление Kaspi/Ozon
+├── data_service.py            объединённое представление Kaspi/Ozon.ru
 ├── market_intelligence.py     сопоставление и ценовая аналитика
 ├── schema.py                  безопасные миграции прикладной БД
 ├── task_manager.py            фоновые процессы и журналы
 ├── auth_service.py            локальные пользователи
 ├── engine/                    рабочий Kaspi-контур и отчёты
 ├── collectors/
-│   └── ozon/                  независимый Ozon Collector
+│   └── ozon/                  независимый Ozon.ru Collector
 ├── static/                    стили, JavaScript, логотип
 ├── templates/                 интерфейс и авторизация
 ├── data/                      основная SQLite

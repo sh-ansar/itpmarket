@@ -9,13 +9,22 @@ from pathlib import Path
 from typing import Any
 
 from werkzeug.security import check_password_hash, generate_password_hash
+from storage.postgres_compat import connect_database, integrity_error_types
 
 from schema import ensure_database
+from marketplace_registry import MARKETPLACE_CODES
+from security_hygiene import redact_sensitive
+from tenant_security import (
+    PERMISSION_DEFINITIONS,
+    canonical_company_status,
+    company_is_approved,
+    company_status_label,
+    permission_map,
+)
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ROLES = {"admin", "operator", "viewer"}
 PLATFORM_ROLES = {"", "superadmin", "support", "technical"}
-MARKETPLACE_CODES = {"kaspi", "ozon", "forte_market", "halyk_market"}
 PASSWORD_HASH_METHOD = "scrypt"
 PASSWORD_MIN_LENGTH = 12
 
@@ -67,9 +76,20 @@ class AuthService:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         ensure_database(db_path)
+        conn = self._connect()
+        try:
+            # PostgreSQL's plain UNIQUE(email) is case-sensitive, while every
+            # login and registration treats email case-insensitively.
+            conn.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email_normalized
+                   ON app_users(lower(email))"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = connect_database(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")
@@ -98,8 +118,20 @@ class AuthService:
             "tenant_id": int(value["tenant_id"]) if value.get("tenant_id") is not None else None,
             "tenant_name": value.get("tenant_name") or "",
             "tenant_slug": value.get("tenant_slug") or "",
+            "tenant_status": canonical_company_status(value.get("tenant_status")),
+            "tenant_status_label": company_status_label(value.get("tenant_status")),
+            "tenant_profile_complete": all(
+                str(value.get(key) or "").strip()
+                for key in (
+                    "tenant_name", "tenant_registration_number",
+                    "tenant_contact_email", "tenant_contact_phone",
+                )
+            ),
             "tenant_role": value.get("tenant_role") or value.get("role") or "viewer",
             "marketplaces": value.get("marketplaces") if isinstance(value.get("marketplaces"), dict) else {},
+            "available_marketplaces": value.get("available_marketplaces") if isinstance(value.get("available_marketplaces"), dict) else {},
+            "marketplace_permissions": value.get("marketplace_permissions") if isinstance(value.get("marketplace_permissions"), dict) else {},
+            "permissions": value.get("permissions") if isinstance(value.get("permissions"), dict) else {},
             "created_at": value.get("created_at"),
             "updated_at": value.get("updated_at"),
             "last_login_at": value.get("last_login_at"),
@@ -108,7 +140,11 @@ class AuthService:
     @staticmethod
     def _user_select() -> str:
         return """
-            SELECT u.*,tu.tenant_id,tu.tenant_role,t.name AS tenant_name,t.slug AS tenant_slug
+            SELECT u.*,tu.tenant_id,tu.tenant_role,t.name AS tenant_name,
+                   t.slug AS tenant_slug,t.status AS tenant_status,
+                   t.registration_number AS tenant_registration_number,
+                   t.contact_email AS tenant_contact_email,
+                   t.contact_phone AS tenant_contact_phone
             FROM app_users u
             LEFT JOIN tenant_users tu ON tu.user_id=u.id AND tu.is_active=1 AND tu.is_primary=1
             LEFT JOIN tenants t ON t.id=tu.tenant_id
@@ -121,22 +157,81 @@ class AuthService:
         if row is None:
             return None
         value = dict(row)
-        access = {code: False for code in MARKETPLACE_CODES}
+        # Tenant-facing user payloads are intentionally sparse: a marketplace
+        # that was not granted must not be advertised by the backend at all.
+        company_access: dict[str, bool] = {}
+        access: dict[str, bool] = {}
+        available: dict[str, bool] = {}
+        marketplace_permissions: dict[str, bool] = {}
         tenant_id = value.get("tenant_id")
-        if tenant_id is not None:
+        status = canonical_company_status(value.get("tenant_status"))
+        if tenant_id is not None and company_is_approved(status):
             rows = conn.execute(
                 """
-                SELECT marketplace_code,is_enabled
-                FROM user_marketplace_access
-                WHERE tenant_id=? AND user_id=?
+                SELECT tma.marketplace_code,tma.is_allowed,
+                       ti.status AS integration_status
+                FROM tenant_marketplace_access tma
+                JOIN tenant_integrations ti
+                  ON ti.tenant_id=tma.tenant_id
+                 AND ti.integration_code=tma.marketplace_code
+                WHERE tma.tenant_id=?
                 """,
-                (int(tenant_id), int(value["id"])),
+                (int(tenant_id),),
             ).fetchall()
             for item in rows:
                 code = str(item["marketplace_code"])
-                if code in access:
-                    access[code] = bool(item["is_enabled"])
+                if code in MARKETPLACE_CODES and bool(item["is_allowed"]):
+                    available[code] = True
+                    if str(item["integration_status"]) == "active":
+                        company_access[code] = True
+            overrides = {
+                str(item["marketplace_code"]): bool(item["is_allowed"])
+                for item in conn.execute(
+                    """SELECT marketplace_code,is_allowed
+                       FROM tenant_user_marketplace_access
+                       WHERE tenant_id=? AND user_id=?""",
+                    (int(tenant_id), int(value["id"])),
+                ).fetchall()
+                if str(item["marketplace_code"]) in MARKETPLACE_CODES
+            }
+            marketplace_permissions = {
+                code: overrides.get(code, True) for code in available
+            }
+            access = {
+                code: True for code in company_access
+                if marketplace_permissions.get(code, False)
+            }
+        permissions: set[str] = set()
+        if str(value.get("platform_role") or "") == "superadmin":
+            permissions = set(PERMISSION_DEFINITIONS)
+        elif tenant_id is not None:
+            role_code = str(value.get("tenant_role") or value.get("role") or "viewer")
+            permissions = {
+                str(item["permission_code"])
+                for item in conn.execute(
+                    """SELECT permission_code FROM tenant_role_permissions
+                       WHERE tenant_id=? AND role_code=? AND is_enabled=1""",
+                    (int(tenant_id), role_code),
+                ).fetchall()
+                if str(item["permission_code"]) in PERMISSION_DEFINITIONS
+            }
+            for item in conn.execute(
+                """SELECT permission_code,is_enabled FROM tenant_user_permissions
+                   WHERE tenant_id=? AND user_id=?""",
+                (int(tenant_id), int(value["id"])),
+            ).fetchall():
+                code = str(item["permission_code"])
+                if code not in PERMISSION_DEFINITIONS:
+                    continue
+                if bool(item["is_enabled"]):
+                    permissions.add(code)
+                else:
+                    permissions.discard(code)
         value["marketplaces"] = access
+        value["available_marketplaces"] = available
+        value["marketplace_permissions"] = marketplace_permissions
+        value["tenant_status"] = status
+        value["permissions"] = permission_map(permissions)
         return value
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
@@ -232,25 +327,6 @@ class AuthService:
                     """,
                     (resolved_tenant_id,user_id,role_value,1,stamp),
                 )
-                integrations = conn.execute(
-                    "SELECT integration_code,status FROM tenant_integrations WHERE tenant_id=?",
-                    (resolved_tenant_id,),
-                ).fetchall()
-                for integration in integrations:
-                    enabled = 1 if str(integration["status"]) in {"active", "setup"} else 0
-                    conn.execute(
-                        """
-                        INSERT INTO user_marketplace_access(
-                            tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
-                        ) VALUES(?,?,?,?,?,?)
-                        ON CONFLICT(tenant_id,user_id,marketplace_code) DO UPDATE SET
-                            is_enabled=excluded.is_enabled,updated_at=excluded.updated_at
-                        """,
-                        (
-                            resolved_tenant_id,user_id,str(integration["integration_code"]),
-                            enabled,stamp,stamp,
-                        ),
-                    )
             self._event(conn, actor_user_id or user_id, "user_created", "user", str(user_id), {
                 "email": email_value,
                 "role": role_value,
@@ -258,7 +334,7 @@ class AuthService:
             conn.commit()
             row = conn.execute(self._user_select()+" WHERE u.id=? LIMIT 1", (user_id,)).fetchone()
             return self.public_user(self._attach_marketplaces(conn, row)) or {}, recovery_code
-        except sqlite3.IntegrityError as exc:
+        except integrity_error_types() as exc:
             raise ValueError("Пользователь с такой почтой уже существует.") from exc
         finally:
             conn.close()
@@ -335,20 +411,56 @@ class AuthService:
                 raise ValueError("Нельзя отключить собственную учётную запись.")
             fields.append("is_active=?")
             params.append(active)
-        access_changes: dict[str, bool] | None = None
+        marketplace_changes: dict[str, bool] | None = None
         if "marketplaces" in changes:
-            raw = changes.get("marketplaces")
-            if isinstance(raw, dict):
-                access_changes = {
-                    code: bool(raw.get(code, False)) for code in MARKETPLACE_CODES
+            raw_marketplaces = changes.get("marketplaces")
+            if isinstance(raw_marketplaces, dict):
+                requested_marketplaces = {
+                    code: bool(raw_marketplaces.get(code, False))
+                    for code in MARKETPLACE_CODES
                 }
             else:
-                enabled = {
-                    str(value).strip() for value in (raw or [])
+                enabled_marketplaces = {
+                    str(value).strip() for value in (raw_marketplaces or [])
                     if str(value).strip() in MARKETPLACE_CODES
                 }
-                access_changes = {code: code in enabled for code in MARKETPLACE_CODES}
-        if not fields and access_changes is None:
+                requested_marketplaces = {
+                    code: code in enabled_marketplaces for code in MARKETPLACE_CODES
+                }
+            available_marketplaces = {
+                code for code, enabled in (target.get("available_marketplaces") or {}).items()
+                if code in MARKETPLACE_CODES and bool(enabled)
+            }
+            forbidden = {
+                code for code, enabled in requested_marketplaces.items()
+                if enabled and code not in available_marketplaces
+            }
+            if forbidden:
+                raise ValueError(
+                    "Нельзя выдать сотруднику недоступные компании площадки: "
+                    + ", ".join(sorted(forbidden)) + "."
+                )
+            marketplace_changes = {
+                code: requested_marketplaces.get(code, False)
+                for code in available_marketplaces
+            }
+        permission_changes: dict[str, bool] | None = None
+        if "permissions" in changes:
+            raw_permissions = changes.get("permissions")
+            if isinstance(raw_permissions, dict):
+                permission_changes = {
+                    code: bool(raw_permissions.get(code, False))
+                    for code in PERMISSION_DEFINITIONS
+                }
+            else:
+                enabled_permissions = {
+                    str(value).strip() for value in (raw_permissions or [])
+                    if str(value).strip() in PERMISSION_DEFINITIONS
+                }
+                permission_changes = {
+                    code: code in enabled_permissions for code in PERMISSION_DEFINITIONS
+                }
+        if not fields and permission_changes is None and marketplace_changes is None:
             return target
         conn = self._connect()
         try:
@@ -364,19 +476,46 @@ class AuthService:
                     "UPDATE tenant_users SET tenant_role=? WHERE user_id=? AND tenant_id=?",
                     (str(changes["role"] or "viewer").casefold(), int(user_id), int(tenant_id)),
                 )
-            if access_changes is not None:
+                if (
+                    permission_changes is None
+                    and str(changes.get("role") or "viewer").casefold()
+                    != str(target.get("role") or "viewer").casefold()
+                ):
+                    conn.execute(
+                        "DELETE FROM tenant_user_permissions WHERE tenant_id=? AND user_id=?",
+                        (int(tenant_id), int(user_id)),
+                    )
+            if permission_changes is not None:
                 if tenant_id is None:
                     raise ValueError("Пользователь не связан с компанией.")
-                for code, enabled in access_changes.items():
+                for code, enabled in permission_changes.items():
                     conn.execute(
                         """
-                        INSERT INTO user_marketplace_access(
-                            tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
+                        INSERT INTO tenant_user_permissions(
+                            tenant_id,user_id,permission_code,is_enabled,created_at,updated_at
                         ) VALUES(?,?,?,?,?,?)
-                        ON CONFLICT(tenant_id,user_id,marketplace_code) DO UPDATE SET
+                        ON CONFLICT(tenant_id,user_id,permission_code) DO UPDATE SET
                             is_enabled=excluded.is_enabled,updated_at=excluded.updated_at
                         """,
                         (int(tenant_id),int(user_id),code,1 if enabled else 0,stamp,stamp),
+                    )
+            if marketplace_changes is not None:
+                if tenant_id is None:
+                    raise ValueError("Пользователь не связан с компанией.")
+                conn.execute(
+                    "DELETE FROM tenant_user_marketplace_access WHERE tenant_id=? AND user_id=?",
+                    (int(tenant_id), int(user_id)),
+                )
+                for code, enabled in marketplace_changes.items():
+                    conn.execute(
+                        """INSERT INTO tenant_user_marketplace_access(
+                               tenant_id,user_id,marketplace_code,is_allowed,updated_by,
+                               created_at,updated_at
+                           ) VALUES(?,?,?,?,?,?,?)""",
+                        (
+                            int(tenant_id), int(user_id), code, 1 if enabled else 0,
+                            int(actor_user_id), stamp, stamp,
+                        ),
                     )
             self._event(conn, actor_user_id, "user_updated", "user", str(user_id), changes)
             conn.commit()
@@ -489,17 +628,28 @@ class AuthService:
         entity_id: str | None,
         details: dict[str, Any],
     ) -> None:
+        tenant_id = None
+        if user_id is not None:
+            membership = conn.execute(
+                """SELECT tenant_id FROM tenant_users
+                   WHERE user_id=? AND is_active=1
+                   ORDER BY is_primary DESC,tenant_id LIMIT 1""",
+                (int(user_id),),
+            ).fetchone()
+            tenant_id = int(membership["tenant_id"]) if membership else None
         conn.execute(
             """
-            INSERT INTO app_events(user_id,event_type,entity_type,entity_id,details_json,created_at)
-            VALUES(?,?,?,?,?,?)
+            INSERT INTO app_events(
+                user_id,tenant_id,event_type,entity_type,entity_id,details_json,created_at
+            ) VALUES(?,?,?,?,?,?,?)
             """,
             (
                 user_id,
+                tenant_id,
                 event_type,
                 entity_type,
                 entity_id,
-                json.dumps(details, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(redact_sensitive(details), ensure_ascii=False, separators=(",", ":")),
                 now_iso(),
             ),
         )

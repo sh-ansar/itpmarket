@@ -7,6 +7,7 @@ data/*.db*
 data/.session_secret
 data/server.pid
 data/tasks_state.json
+data/*.log
 logs/*.log
 output/*
 backups/*.db
@@ -27,7 +28,16 @@ data/tasks_state.json
 .playwright/
 collectors/ozon/data/*.db
 collectors/ozon/data/*.db-*
+collectors/ozon_kz/data/*.db
+collectors/ozon_kz/data/*.db-*
+collectors/ozon_kz/exports/
+collectors/ozon_kz/reports/
+collectors/ozon_kz/raw/
+collectors/ozon_kz/runs/
+collectors/forte/data/*.db
+collectors/forte/data/*.db-*
 collectors/ozon/chrome_vpn_profile/
+collectors/ozon/chrome_kz_profile/
 collectors/ozon/latest_run.txt
 collectors/ozon/exports/*
 !collectors/ozon/exports/.gitkeep

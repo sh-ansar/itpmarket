@@ -24,9 +24,13 @@ def normalize_product_url(value: str, base_url: str = "https://www.ozon.ru/") ->
     absolute = urljoin(base_url, value)
     parsed = urlparse(absolute)
     host = parsed.netloc.lower().split(":")[0]
-    if host not in {"ozon.ru", "www.ozon.ru"} or "/product/" not in parsed.path:
+    base_host = str(urlparse(base_url).hostname or "www.ozon.ru").casefold()
+    bare_host = base_host.removeprefix("www.")
+    allowed_hosts = {bare_host, f"www.{bare_host}"}
+    if host not in allowed_hosts or "/product/" not in parsed.path:
         return ""
-    return urlunparse(("https", "www.ozon.ru", parsed.path, "", "", ""))
+    canonical_host = "www.ozon.ru" if bare_host == "ozon.ru" else bare_host
+    return urlunparse(("https", canonical_host, parsed.path, "", "", ""))
 
 
 def article_from_url(url: str) -> str:
@@ -99,7 +103,8 @@ def _extract_tile_price(item: dict[str, Any]) -> tuple[int, list[int], str]:
         return 0, [], ""
 
     prices: list[int] = []
-    style = ""
+    selected_price = 0
+    selected_style = ""
     for block in states:
         if not isinstance(block, dict) or block.get("type") != "priceV2":
             continue
@@ -109,10 +114,20 @@ def _extract_tile_price(item: dict[str, Any]) -> tuple[int, list[int], str]:
         style = str((payload.get("priceStyle") or {}).get("styleType") or "")
         for price_obj in payload.get("price") or []:
             if isinstance(price_obj, dict):
-                value = parse_price(price_obj.get("text"))
+                text = str(price_obj.get("text") or "")
+                # Ozon.kz often renders the instalment first: "263 ₸ × 12 мес".
+                # Stripping non-digits turns that into the false price 26312.
+                # Keep only full current/original prices in catalogue analytics.
+                if re.search(r"(?:×|x)\s*\d+\s*(?:мес|month)", text, re.IGNORECASE):
+                    continue
+                value = parse_price(text)
                 if value:
                     prices.append(value)
-    return (prices[0] if prices else 0), prices, style
+                    text_style = str(price_obj.get("textStyle") or "").upper()
+                    if not selected_price and text_style != "ORIGINAL_PRICE":
+                        selected_price = value
+                        selected_style = style
+    return (selected_price or (prices[0] if prices else 0)), prices, selected_style
 
 
 def _extract_tile_image(item: dict[str, Any]) -> str:

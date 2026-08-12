@@ -1,5 +1,0 @@
-Installer revision R2.
-
-The installer now verifies and installs only files listed in FILES_SHA256.txt.
-Extra files inside hotfix_files (for example leftovers from an older package,
-__pycache__, desktop.ini, or antivirus metadata) are shown as warnings and ignored.

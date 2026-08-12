@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
+from storage.postgres_compat import connect_database
 try:
     from .kaspi_market_v9_1 import Database, enriched_comparison_rows
 except ImportError:
@@ -64,6 +65,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seller-name", default="Unityre")
     parser.add_argument("--codes", default="")
     parser.add_argument("--user-id", type=int, default=0)
+    parser.add_argument("--tenant-id", type=int, default=0)
     return parser.parse_args()
 
 
@@ -86,12 +88,25 @@ def main(args: argparse.Namespace) -> int:
     else:
         scope = "all"
 
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = connect_database(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
+        tenant_id = int(args.tenant_id or 0)
+        if not tenant_id and int(args.user_id or 0):
+            membership = conn.execute(
+                """SELECT tenant_id FROM tenant_users
+                   WHERE user_id=? AND is_active=1
+                   ORDER BY is_primary DESC,tenant_id LIMIT 1""",
+                (int(args.user_id),),
+            ).fetchone()
+            tenant_id = int(membership["tenant_id"]) if membership else 0
         states = {
             row["product_code"]: dict(row)
-            for row in conn.execute("SELECT product_code,watched,priority,note FROM app_product_state")
+            for row in conn.execute(
+                """SELECT product_code,watched,priority,note
+                   FROM tenant_product_state WHERE tenant_id=?""",
+                (tenant_id,),
+            )
         }
         for row in rows:
             state = states.get(str(row.get("product_code")), {})
@@ -117,8 +132,10 @@ def main(args: argparse.Namespace) -> int:
         for file_path, report_type in ((csv_path, "csv"), (json_path, "json")):
             conn.execute(
                 """
-                INSERT INTO app_reports(report_type,scope,file_name,file_path,rows_count,created_by,created_at)
-                VALUES(?,?,?,?,?,?,?)
+                INSERT INTO app_reports(
+                    report_type,scope,file_name,file_path,rows_count,created_by,
+                    tenant_id,platforms_json,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     report_type,
@@ -127,16 +144,20 @@ def main(args: argparse.Namespace) -> int:
                     str(file_path.resolve()),
                     len(rows),
                     int(args.user_id) or None,
+                    tenant_id or None,
+                    '["kaspi"]',
                     created_at,
                 ),
             )
         conn.execute(
             """
-            INSERT INTO app_events(user_id,event_type,entity_type,entity_id,details_json,created_at)
-            VALUES(?,?,?,?,?,?)
+            INSERT INTO app_events(
+                user_id,tenant_id,event_type,entity_type,entity_id,details_json,created_at
+            ) VALUES(?,?,?,?,?,?,?)
             """,
             (
                 int(args.user_id) or None,
+                tenant_id or None,
                 "report_exported",
                 "report",
                 base,

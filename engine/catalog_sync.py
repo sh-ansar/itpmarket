@@ -19,6 +19,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
+from catalog_configuration_service import CatalogConfigurationService
+from storage.postgres_compat import connect_database
 try:
     from . import kaspi_search_compare_v8_2 as core
 except ImportError:
@@ -129,6 +131,16 @@ def brand_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     rows.append({"name": title, "expected": count})
             return rows
     return []
+
+
+def infer_card_brand(title: Any, available_brands: list[str]) -> str:
+    """Infer a card brand only from brands advertised by this exact seller page."""
+    normalized_title = re.sub(r"\s+", " ", clean(title)).casefold()
+    matches = [
+        clean(brand) for brand in available_brands
+        if clean(brand) and clean(brand).casefold() in normalized_title
+    ]
+    return max(matches, key=len) if matches else ""
 
 
 async def wait_catalog(page: Any, timeout_seconds: int) -> None:
@@ -321,26 +333,18 @@ async def click_next_page(
     if "_disabled" in classes:
         return None, previous, True
 
-    captured = None
-    clicked = False
     try:
-        async with page.expect_response(
-            lambda response: FILTER_PATH in response.url and int(response.status) == 200,
-            timeout=timeout_seconds * 1000,
-        ) as response_info:
-            await next_item.scroll_into_view_if_needed(timeout=3000)
-            await next_item.click(force=True, timeout=5000)
-            clicked = True
-        captured = await response_info.value
+        await next_item.scroll_into_view_if_needed(timeout=3000)
+        await next_item.click(force=True, timeout=5000)
     except Exception:
-        if not clicked:
-            try:
-                await next_item.click(force=True, timeout=5000)
-            except Exception:
-                await next_item.dispatch_event("click")
+        await next_item.dispatch_event("click")
 
     signature = await wait_signature_change(page, previous, timeout_seconds, expected_page)
-    return await response_payload(captured), signature, False
+    # Pagination does not consistently use /pl/filters. Waiting for that exact
+    # endpoint made every successful page click consume the full request
+    # timeout. The changed card signature and active page are the authoritative
+    # completion checks; cards are then read from the updated DOM.
+    return None, signature, False
 
 
 async def dom_cards(page: Any, brand: str) -> list[dict[str, Any]]:
@@ -349,7 +353,8 @@ async def dom_cards(page: Any, brand: str) -> list[dict[str, Any]]:
     for item in raw:
         if isinstance(item, dict):
             item = dict(item)
-            item.setdefault("brand", brand)
+            if brand.casefold() != "all":
+                item.setdefault("brand", brand)
             result.append(item)
     return result
 
@@ -417,7 +422,11 @@ def upsert_cards(
                 first_seen_at,last_seen_at,raw_json
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(product_code) DO UPDATE SET
-                brand=CASE WHEN excluded.brand<>'' THEN excluded.brand ELSE catalog_product_meta.brand END,
+                brand=CASE
+                    WHEN excluded.brand<>'' THEN excluded.brand
+                    WHEN lower(trim(COALESCE(catalog_product_meta.brand,'')))='all' THEN ''
+                    ELSE catalog_product_meta.brand
+                END,
                 category_id=CASE WHEN excluded.category_id<>'' THEN excluded.category_id ELSE catalog_product_meta.category_id END,
                 category_codes_json=CASE WHEN excluded.category_codes_json<>'[]' THEN excluded.category_codes_json ELSE catalog_product_meta.category_codes_json END,
                 base_product_codes_json=CASE WHEN excluded.base_product_codes_json<>'[]' THEN excluded.base_product_codes_json ELSE catalog_product_meta.base_product_codes_json END,
@@ -433,7 +442,10 @@ def upsert_cards(
             """,
             (
                 code,
-                clean(card.get("brand") or source_segment),
+                clean(
+                    card.get("brand")
+                    or (source_segment if source_segment.casefold() != "all" else "")
+                ),
                 clean(card.get("categoryId")),
                 json_text(card.get("categoryCodes") or []),
                 json_text(card.get("baseProductCodes") or []),
@@ -553,6 +565,7 @@ async def crawl_root_fallback(
     max_delay: float,
     global_index: int,
     seen: set[str],
+    available_brands: list[str] | None = None,
 ) -> tuple[int, int]:
     """Проверенный V6 fallback: обычный каталог и реальная кнопка «Следующая».
 
@@ -571,6 +584,11 @@ async def crawl_root_fallback(
     no_progress = 0
     while True:
         cards = await dom_cards(page, "all")
+        brand_names = available_brands or []
+        for card in cards:
+            inferred = infer_card_brand(card.get("title"), brand_names)
+            if inferred:
+                card["brand"] = inferred
         new_count, db_new = upsert_cards(conn, cards, "all", global_index, page.url, seen)
         global_index += len(cards)
         no_progress = no_progress + 1 if new_count == 0 else 0
@@ -592,7 +610,7 @@ async def crawl_root_fallback(
 async def run(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     ensure_database(db_path)
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = connect_database(db_path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=60000")
@@ -624,9 +642,13 @@ async def run(args: argparse.Namespace) -> int:
             root_data = root_payload["data"]
             reported_total = int(root_data.get("total") or 0)
             limit = int(root_data.get("limit") or 12)
-            segments = brand_rows(root_payload)
-            if not segments:
-                segments = [{"name": "all", "expected": reported_total}]
+            available_brand_segments = brand_rows(root_payload)
+            available_brand_names = [str(item["name"]) for item in available_brand_segments]
+            # The seller storefront already exposes a complete, validated
+            # pagination chain. A single root pass avoids fragile per-brand
+            # filter clicks and duplicate crawling while still collecting the
+            # exact seller scope.
+            segments = [{"name": "all", "expected": reported_total}]
             # Persist the reported total immediately. If the user safely stops the
             # long crawl, the dashboard still knows that the local catalogue is incomplete.
             conn.execute(
@@ -639,7 +661,8 @@ async def run(args: argparse.Namespace) -> int:
             )
             conn.commit()
             print(
-                f"[Каталог] Kaspi сообщает {reported_total} товаров; сегментов: {len(segments)}; "
+                f"[Каталог] Kaspi сообщает {reported_total} товаров; "
+                f"брендовых фильтров доступно: {len(available_brand_segments)}; "
                 f"размер страницы: {limit}; режим=реальные клики DOM"
             )
 
@@ -651,7 +674,7 @@ async def run(args: argparse.Namespace) -> int:
                     if name == "all":
                         collected, global_index = await crawl_root_fallback(
                             conn, page, seller_url, args.timeout, args.min_delay, args.max_delay,
-                            global_index, seen,
+                            global_index, seen, available_brand_names,
                         )
                         pages = max(1, math.ceil(collected / 12))
                         strategy = "dom-pagination-v6"
@@ -684,23 +707,28 @@ async def run(args: argparse.Namespace) -> int:
                 try:
                     _, global_index = await crawl_root_fallback(
                         conn, page, seller_url, args.timeout, args.min_delay, args.max_delay,
-                        global_index, seen,
+                        global_index, seen, available_brand_names,
                     )
                 except Exception as exc:
                     warnings.append(f"резервный проход: {clean(exc)}")
                     print(f"[Каталог] ОШИБКА резервного прохода: {clean(exc)}")
 
             full_enough = reported_total > 0 and len(seen) >= int(reported_total * 0.97)
-            all_ok = segment_success == len(segments)
-            if full_enough and all_ok:
+            if full_enough:
                 placeholders = ",".join("?" for _ in seen)
-                if seen:
+                # Shared legacy staging contains products collected for many
+                # companies. A tenant sync must never deactivate another
+                # seller's rows; its own active set lives in
+                # tenant_catalog_products and is replaced below.
+                if seen and int(args.tenant_id or 0) <= 0:
                     conn.execute(
                         f"UPDATE catalog_product_meta SET active=0 WHERE product_code NOT IN ({placeholders})",
                         tuple(seen),
                     )
                 status = "ok"
-                warning = None
+                warning = " | ".join(warnings[:5]) if warnings else None
+                if warning and len(warnings) > 5:
+                    warning += f" | ещё предупреждений: {len(warnings) - 5}"
             else:
                 status = "partial"
                 warning = " | ".join(warnings[:5]) if warnings else (
@@ -708,6 +736,19 @@ async def run(args: argparse.Namespace) -> int:
                 )
                 if len(warnings) > 5:
                     warning += f" | ещё ошибок: {len(warnings) - 5}"
+
+            # Release the staging connection's write lock before the tenant
+            # materializer opens its own atomic transaction.
+            conn.commit()
+            if int(args.tenant_id or 0) > 0:
+                saved = CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
+                    int(args.tenant_id), seen, replace=bool(full_enough)
+                )
+                print(
+                    f"[Каталог] Каталог компании обновлён: {saved} товаров; "
+                    f"режим={'replace' if full_enough else 'merge'}",
+                    flush=True,
+                )
 
             conn.execute(
                 """
@@ -746,6 +787,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", default="data/kaspi_market.db")
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
+    parser.add_argument("--tenant-id", type=int, default=0)
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--timeout", type=int, default=45)
     parser.add_argument("--retries", type=int, default=3)

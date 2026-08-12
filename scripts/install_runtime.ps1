@@ -127,6 +127,8 @@ if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed" }
 Write-Step "Installing application dependencies"
 & $Python -m pip install --disable-pip-version-check -r (Join-Path $Root "requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "requirements installation failed" }
+& $Python -m pip install --disable-pip-version-check -r (Join-Path $Root "requirements-postgres.txt")
+if ($LASTEXITCODE -ne 0) { throw "PostgreSQL requirements installation failed" }
 
 Write-Step "Checking Playwright Chromium"
 $env:PLAYWRIGHT_BROWSERS_PATH = $PlaywrightPath

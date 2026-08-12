@@ -39,7 +39,7 @@
           <img src="{{ url_for('static', filename='icons/navigation/reports.svg') }}" alt="">
           <span class="sr-only nav-label" data-i18n="nav_reports">Отчёты</span>
         </button>
-        {% if current_user.role == 'admin' %}
+        {% if current_user.permissions.manage_users %}
         <button class="nav" data-page="users" aria-label="Сотрудники" data-i18n-aria="nav_users">
           <img src="{{ url_for('static', filename='icons/navigation/users.svg') }}" alt="">
           <span class="sr-only nav-label" data-i18n="nav_users">Сотрудники</span>
@@ -54,6 +54,7 @@
       </nav>
 
       <div class="top-actions">
+        <button class="notification-button" id="notificationButton" type="button" aria-controls="notificationDrawer" aria-expanded="false" aria-label="Уведомления"><img src="{{ url_for('static', filename='icons/notifications.svg') }}" alt=""><em id="notificationBadge" hidden>0</em></button>
         <button class="theme-switch" id="themeToggle" data-theme-toggle data-i18n-aria="theme_toggle" aria-label="Переключить тему"><span class="theme-icon sun"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""></span><i></i><span class="theme-icon moon"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></span></button>
         <button class="header-help" id="helpButton" aria-controls="helpDrawer" aria-expanded="false" data-i18n-aria="help_open" data-i18n-tooltip="help_open" aria-label="Открыть помощь по текущему разделу"><img src="{{ url_for('static', filename='icons/help.svg') }}" alt=""><span data-i18n="help">Помощь</span></button>
         <label class="language-select" id="languageSwitch"><span class="sr-only" data-i18n="language">Язык</span><select id="languageSelect" data-i18n-aria="language" aria-label="Язык"><option value="ru">RU</option><option value="kk">KZ</option><option value="en">EN</option></select></label>
@@ -63,7 +64,7 @@
           {% if current_user.platform_role == 'superadmin' %}<a class="profile-menu-link" href="{{ url_for('platform_index') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Админ панель</span></a>{% endif %}
           <button data-page-link="settings"><img class="button-icon" src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""><span data-i18n="nav_settings">Настройки</span></button>
           <button id="openPassword"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="change_password">Изменить пароль</span></button>
-          <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit"><img class="button-icon" src="{{ url_for('static', filename='icons/close.svg') }}" alt=""><span data-i18n="logout">Выйти</span></button></form>
+          <a class="profile-menu-link profile-menu-logout" href="{{ url_for('logout') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/close.svg') }}" alt=""><span data-i18n="logout">Выйти</span></a>
         </div>
       </div>
     </div>
@@ -77,6 +78,12 @@
 
   <section class="workspace">
     <main>
+      {% if current_user.tenant_status != 'approved' and current_user.platform_role != 'superadmin' %}
+      <div class="company-status-banner {{ current_user.tenant_status }}" role="status">
+        <b>{{ current_user.tenant_status_label }}</b>
+        <span>{% if current_user.tenant_status == 'pending' %}Можно войти, заполнить профиль и настроить подключения. Сбор данных, отчёты и расписания станут доступны после подтверждения компании.{% elif current_user.tenant_status == 'rejected' %}Заявка компании отклонена. Настройки доступны для уточнения данных, реальные операции отключены.{% else %}Компания заблокирована. Реальные операции отключены; обратитесь к администратору платформы.{% endif %}</span>
+      </div>
+      {% endif %}
       <section class="page active" id="page-dashboard">
         <div class="hero" id="dashboardHero">
           <button class="hero-collapse" id="heroCollapse" type="button" aria-expanded="true" data-i18n-aria="collapse_dashboard" data-i18n-tooltip="collapse_dashboard"><img src="{{ url_for('static', filename='icons/collapse.svg') }}" alt=""></button>
@@ -85,7 +92,7 @@
             <h2 data-i18n="hero_title">Единая аналитика цен и рыночных сигналов без ложных сравнений.</h2>
             <p data-i18n="hero_text">Система сравнивает цены только по подтверждённым совпадениям: та же карточка, точный артикул или строгий набор характеристик. Похожие товары из другого сегмента не смешиваются с реальным рынком.</p>
             <div class="hero-buttons"><button class="primary" data-page-link="products"><img class="button-icon" src="{{ url_for('static', filename='icons/products.svg') }}" alt=""><span data-i18n="open_catalog_button">Открыть каталог</span></button><button class="ghost" data-page-link="reports"><img class="button-icon" src="{{ url_for('static', filename='icons/reports.svg') }}" alt=""><span data-i18n="open_analytics">Открыть аналитику</span></button></div>
-            <div class="hero-quick-actions"><button data-quick-action="kaspi_price_actualize"><b>Kaspi</b><span data-i18n="refresh_own_prices">Обновить цены Unityre</span></button><button data-quick-action="kaspi_full_sync"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button><button data-quick-action="ozon_price_actualize"><b>Ozon</b><span data-i18n="refresh_market_prices">Обновить цены Ozon</span></button><button data-quick-action="export_report"><b>Spyon</b><span data-i18n="build_report">Сформировать отчёт</span></button></div>
+            <div class="hero-quick-actions">{% if 'kaspi' in visible_marketplace_codes %}<button data-quick-action="kaspi_price_actualize"><b>Kaspi</b><span data-company-price-label>Обновить цены {{ current_tenant.name if current_tenant else 'компании' }}</span></button><button data-quick-action="kaspi_full_sync"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button>{% endif %}{% if 'ozon' in visible_marketplace_codes %}<button data-quick-action="ozon_price_actualize"><b>Ozon.ru</b><span data-i18n="refresh_market_prices">Обновить цены Ozon.ru</span></button>{% endif %}{% if visible_marketplace_codes|length > 1 %}<button class="hero-full-sync" data-quick-action="full_sync_all"><b>Все площадки</b><span>Полная синхронизация</span></button>{% endif %}<button data-quick-action="export_report"><b>Spyon</b><span data-i18n="build_report">Сформировать отчёт</span></button></div>
           </div>
           <div class="hero-orbit">
             <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
@@ -117,24 +124,21 @@
           </div>
         </div>
         <section class="operation-launcher compact" id="productsOperationBar">
-          <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="halyk_market">Halyk Market</option><option value="system" data-i18n="system">Система</option></select></div>
+          <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}<option value="system" data-i18n="system">Система</option></select></div>
           <div><label data-i18n="operation">Операция</label><select id="operationAction"></select></div>
           <div><label data-i18n="scope">Область</label><select id="operationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option><option value="filtered">По текущему фильтру</option></select></div>
           <button class="primary launch" id="launchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
         </section>
         <div class="filters" id="productFilters">
           <label class="search"><img src="{{ url_for('static', filename='icons/search.svg') }}" alt=""><input id="productSearch" data-i18n-placeholder="search_placeholder" placeholder="Название, код, бренд, размер или продавец"></label>
-          <select id="platformFilter" multiple data-multi-select data-placeholder="Все площадки"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="halyk_market">Halyk Market</option></select>
+          <select id="platformFilter" multiple data-multi-select data-placeholder="Все площадки">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}</select>
           <select id="brandFilter" multiple data-multi-select data-placeholder="Все бренды"></select>
           <select id="statusFilter" multiple data-multi-select data-placeholder="Все статусы"></select>
           <select id="freshnessFilter" multiple data-multi-select data-placeholder="Любая актуальность"><option value="fresh" data-i18n="freshness_fresh">Актуальные</option><option value="due" data-i18n="freshness_due">Требуют обновления</option><option value="stale" data-i18n="freshness_stale">Устаревшие</option><option value="never" data-i18n="freshness_never">Не обновлялись</option></select>
           <button class="icon-command danger-soft filter-clear-command" id="resetFilters" data-i18n-aria="reset_filters" data-i18n-tooltip="reset_filters" aria-label="Сбросить фильтры" hidden><img class="button-icon" src="{{ url_for('static', filename='icons/trash.svg') }}" alt=""></button>
         </div>
         <div class="characteristic-filters">
-          <select id="productTypeFilter" multiple data-multi-select data-placeholder="Все типы товаров"></select>
-          <select id="sizeFilter" multiple data-multi-select data-placeholder="Все размеры"></select>
-          <select id="seasonFilter" multiple data-multi-select data-placeholder="Любая сезонность"></select>
-          <select id="characteristicGroupFilter" multiple data-multi-select data-placeholder="Общие группы характеристик"></select>
+          <div id="dynamicAttributeFilters" class="dynamic-attribute-filters"></div>
         </div>
         <div class="products-command-row">
           <div class="scope-tabs" id="scopeTabs"><button class="active" data-scope="all" data-i18n="scope_all">Все</button><button data-scope="risks" data-i18n="scope_risks">Риски</button><button data-scope="opportunities" data-i18n="scope_opportunities">Потенциал</button><button data-scope="unscanned" data-i18n="scope_review">Требуют проверки</button><button data-scope="watched" data-i18n="scope_watched">Наблюдение</button></div>
@@ -159,7 +163,7 @@
           </div>
         </div>
         <section class="operation-launcher compact operations-launcher" id="operationsOperationBar">
-          <div><label data-i18n="marketplace">Площадка</label><select id="opsOperationPlatform"><option value="kaspi">Kaspi</option><option value="ozon">Ozon</option><option value="halyk_market">Halyk Market</option><option value="system" data-i18n="system">Система</option></select></div>
+          <div><label data-i18n="marketplace">Площадка</label><select id="opsOperationPlatform">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}<option value="system" data-i18n="system">Система</option></select></div>
           <div><label data-i18n="operation">Операция</label><select id="opsOperationAction"></select></div>
           <div><label data-i18n="scope">Область</label><select id="opsOperationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option><option value="filtered">По текущему фильтру</option></select></div>
           <button class="primary launch" id="opsLaunchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
@@ -175,11 +179,7 @@
           </div>
         </div>
         <section class="report-filter-panel" id="reportFilterPanel">
-          <select id="reportPlatforms" multiple data-multi-select data-placeholder="Все площадки">
-            <option value="kaspi" selected>Kaspi</option>
-            <option value="ozon" selected>Ozon</option>
-            <option value="halyk_market" selected>Halyk Market</option>
-          </select>
+          <select id="reportPlatforms" multiple data-multi-select data-placeholder="Все площадки">{% for integration in integration_catalog %}<option value="{{ integration.code }}" selected>{{ integration.name }}</option>{% endfor %}</select>
           <select id="reportScope"><option value="all">Все позиции</option><option value="risks">Риски</option><option value="opportunities">Потенциал</option><option value="unscanned">Требуют проверки</option><option value="watched">Наблюдение</option></select>
           <select id="reportBrand" multiple data-multi-select data-placeholder="Все бренды"></select>
           <select id="reportProductType" multiple data-multi-select data-placeholder="Все типы товаров"></select>
@@ -215,7 +215,7 @@
 
       <section class="page" id="page-schedules"><div class="products-page-head schedule-page-head"><div><h2 data-i18n="schedule_title">Расписание операций</h2><p data-i18n="schedule_subtitle">Плановые запуски сборщиков и отчётов.</p></div><button class="primary" id="addSchedule"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""> <span data-i18n="schedule_add">Добавить расписание</span></button></div><div class="schedule-summary compact" id="scheduleSummary"><article><small data-i18n="schedule_active">Активных заданий</small><b>0</b></article><article><small data-i18n="schedule_next">Следующий запуск</small><b>—</b></article><article><small data-i18n="schedule_last">Последний результат</small><b>—</b></article></div><div class="schedule-list" id="scheduleList"><div class="empty" data-i18n="schedule_empty">Расписания ещё не созданы</div></div><section class="panel schedule-runs-panel"><div class="panel-head"><div><small>RUN HISTORY</small><h3 data-i18n="schedule_history">Последние плановые запуски</h3></div></div><div class="schedule-runs" id="scheduleRuns"></div></section></section>
 
-      {% if current_user.role == 'admin' %}
+      {% if current_user.permissions.manage_users %}
       <section class="page" id="page-users">
         <div class="products-page-head users-page-head">
           <div>
@@ -231,13 +231,19 @@
       <section class="page" id="page-settings">
         <div class="page-command-bar"><button class="primary" id="saveSettings"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="save">Сохранить</span></button></div>
         <div class="settings-grid">
-          {% if current_user.role == 'admin' %}<article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/users.svg') }}" alt=""></span><div><h3 data-i18n="company_profile">Компания</h3><p data-i18n="company_profile_text">Данные рабочего пространства, которые были указаны при регистрации.</p></div></div><div class="form-grid"><label><span data-i18n="company_name">Название компании</span><input id="tenantName"></label><label><span data-i18n="company_registration_number">Регистрационный номер / БИН</span><input id="tenantRegistrationNumber"></label><label><span data-i18n="company_email">Email компании</span><input id="tenantContactEmail" type="email"></label><label><span data-i18n="company_phone">Телефон компании</span><input id="tenantContactPhone"></label></div></article>{% endif %}
-          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
-          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article><article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/network.svg') }}" alt=""></span><div><h3>Доступ внутри сети</h3><p>Пользователи в той же Wi-Fi/LAN сети открывают панель по локальному IP. Вход по учётной записи остаётся обязательным.</p></div></div><div class="form-grid"><label>На этом компьютере<input id="cfgLocalUrl" readonly></label><label>Адрес в Wi-Fi/LAN<input id="cfgLanUrl" readonly></label><label>Порт<input id="cfgLanPort" readonly></label><label>Состояние<input id="cfgLanState" readonly></label></div></article>
-          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/matching.svg') }}" alt=""></span><div><h3 data-i18n="matching_rules">Правила сопоставления</h3><p data-i18n="matching_text">В MVP применяются консервативные ограничения.</p></div></div><ul class="rules"><li data-i18n="rule_exact">Kaspi и Halyk Market: точное сравнение только внутри той же карточки товара.</li><li data-i18n="rule_segment">Ozon и межплатформенные связи: только артикул производителя либо полный строгий набор характеристик.</li><li data-i18n="rule_review">Похожие товары, другие бренды и модели сохраняются только как архив и не участвуют в аналитике.</li></ul></article>
-          {% if current_user.role == 'admin' %}
+          <article class="settings-card subscription-settings-card" id="subscriptionSettingsCard">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/check.svg') }}" alt=""></span><div><h3>Пакет и лимиты</h3><p>Срок, доступные функции, дневные запуски и позиции по каждой площадке.</p></div></div>
+            <div id="subscriptionSettings"><div class="loader">Загрузка пакета…</div></div>
+          </article>
+          {% if current_user.permissions.manage_marketplaces %}
+          <div class="marketplace-settings-section">
+            <div class="settings-section-head"><div><h3>Площадки компании</h3><p>Вставьте ссылку на магазин, проверьте найденного продавца и подтвердите подключение.</p></div></div>
+            <div id="tenantMarketplaceCards" class="tenant-marketplace-cards"><div class="loader">Загрузка площадок…</div></div>
+          </div>
+          {% endif %}
+          {% if current_user.platform_role == 'superadmin' %}
           <article class="settings-card admin-card">
-            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon Collector</h3><p>Каталог клиента и рыночные категории хранятся раздельно. В основной таблице показываются только товары Alfa Tires.</p></div></div>
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Ozon.ru Collector</h3><p>Прежний публичный сборщик: seller-категории клиента и рыночные категории хранятся раздельно.</p></div></div>
             <div class="form-grid">
               <label class="form-span-2">Категории каталога клиента — seller URL, по одной ссылке в строке<textarea id="cfgOzonClientUrls" rows="5" placeholder="https://www.ozon.ru/seller/alfa-tires-3381444/shiny-8502/"></textarea></label>
               <label class="form-span-2">Рыночные категории — по одной ссылке в строке<textarea id="cfgOzonMarketUrls" rows="4" placeholder="https://www.ozon.ru/category/shiny-zimnie-8803/"></textarea></label>
@@ -247,35 +253,25 @@
               <label>Товаров клиента<input id="cfgOzonCurrentProducts" readonly></label>
               <label>Рыночных карточек<input id="cfgOzonMarketProducts" readonly></label>
               <label>Предложений в реестре<input id="cfgOzonCurrentOffers" readonly></label>
-              <div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала все seller-категории Alfa Tires, затем рыночные категории. Чужие товары сохраняются только как рынок и не выводятся отдельными позициями клиента.</span></div>
-            </div>
-          </article>
-          <article class="settings-card admin-card">
-            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/marketplace.svg') }}" alt=""></span><div><h3>Halyk Market Collector</h3><p>Каталог продавца Unityre и точные предложения одной карточки на площадке Halyk Market.</p></div></div>
-            <div class="form-grid">
-              <label>Seller name<input id="cfgHalykSellerName" placeholder="Unityre"></label>
-              <label>Location ID<input id="cfgHalykLocationId" placeholder="-2"></label>
-              <label>Catalog query<input id="cfgHalykCatalogQuery" placeholder="shini-i-diski"></label>
-              <label>Category ID<input id="cfgHalykCategoryId" placeholder="10038"></label>
-              <label>Page size<input id="cfgHalykPageSize" type="number" min="10" max="200"></label>
-              <label>Timeout, sec<input id="cfgHalykTimeout" type="number" min="10" max="120"></label>
-              <label>Pause, sec<input id="cfgHalykSleep" type="number" min="0" max="10" step="0.05"></label>
-              <label>Test limit<input id="cfgHalykMaxProducts" type="number" min="0"></label>
-              <div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала синхронизируется каталог продавца, затем по Halyk product id собираются продавцы и цены той же карточки. Межплатформенный мэтчинг будет отдельной функцией.</span></div>
-            </div>
-          </article>
-          <article class="settings-card admin-card">
-            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Kaspi Collector</h3><p>Системные параметры локального сборщика.</p></div></div>
-            <div class="form-grid">
-              <label>Seller ID<input id="cfgSellerId"></label>
-              <label>Seller name<input id="cfgSellerName"></label>
-              <label>City ID<input id="cfgCityId"></label>
-              <label>Expected products<input id="cfgExpected" type="number"></label>
-              <label>Discover workers<input id="cfgDiscover" type="number" min="1" max="4"></label>
-              <label>Price workers<input id="cfgPrice" type="number" min="1" max="4"></label>
+              <div class="form-span-2 settings-note"><b>Порядок обработки</b><span>Сначала seller-категории клиента, затем рыночные категории. Чужие товары сохраняются как рынок и не выводятся отдельными позициями клиента.</span></div>
             </div>
           </article>
           {% endif %}
+          {% if current_user.permissions.manage_filters %}
+          <article class="settings-card">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Фильтры каталога</h3><p>Характеристики обнаруживаются автоматически. Выберите, какие из них показывать сотрудникам.</p></div></div>
+            <div class="catalog-filter-toolbar">
+              <label><span>Поиск</span><input id="catalogAttributeSearch" type="search" placeholder="Название характеристики"></label>
+              <label><span>Площадка</span><select id="catalogAttributeMarketplace"><option value="all">Все площадки</option><option value="common">Общие характеристики</option>{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}</select></label>
+              <div class="catalog-filter-bulk"><button class="secondary" id="enableVisibleCatalogFilters" type="button">Выбрать видимые</button><button class="secondary" id="disableVisibleCatalogFilters" type="button">Снять видимые</button></div>
+            </div>
+            <div id="catalogFilterSettings" class="catalog-filter-settings"><div class="loader">Анализируем характеристики…</div></div>
+            <div class="settings-inline-actions"><button class="secondary" id="refreshCatalogAttributes" type="button">Повторить анализ</button><small id="catalogFilterSaveStatus" aria-live="polite">Изменения сохраняются автоматически</small></div>
+          </article>
+          {% endif %}
+          {% if current_user.permissions.manage_company %}<article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/users.svg') }}" alt=""></span><div><h3 data-i18n="company_profile">Компания</h3><p>Все поля обязательны. Без заполненного профиля подключение площадок и запуск операций недоступны.</p></div></div><div class="form-grid"><label><span data-i18n="company_name">Название компании</span><input id="tenantName" required></label><label><span data-i18n="company_registration_number">Регистрационный номер / БИН</span><input id="tenantRegistrationNumber" required></label><label><span data-i18n="company_email">Email компании</span><input id="tenantContactEmail" type="email" required></label><label><span data-i18n="company_phone">Телефон компании</span><input id="tenantContactPhone" required></label></div></article>{% endif %}
+          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
+          <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article>
         </div>
       </section>
     </main>
@@ -284,6 +280,7 @@
 
 <div class="help-backdrop" id="helpBackdrop" hidden></div>
 <aside class="help-drawer" id="helpDrawer" role="dialog" aria-modal="true" aria-labelledby="helpTitle" aria-hidden="true" tabindex="-1"><div class="help-head"><div><small data-i18n="help_page_label">СПРАВКА ПО РАЗДЕЛУ</small><h2 id="helpTitle">Помощь</h2></div><button class="icon" id="closeHelp" data-i18n-aria="help_close" aria-label="Закрыть помощь">×</button></div><div class="help-body" id="helpBody"></div><div class="help-footer"><img src="{{ url_for('static', filename='icons/help.svg') }}" alt=""><span data-i18n="help_contact">Не нашли ответ? Обратитесь к администратору рабочего пространства.</span></div></aside>
+<aside class="notification-drawer" id="notificationDrawer" hidden aria-labelledby="notificationTitle"><div class="notification-head"><div><small>ЦЕНТР СОБЫТИЙ</small><h2 id="notificationTitle">Уведомления</h2></div><button class="icon" id="closeNotifications" aria-label="Закрыть">×</button></div><div class="notification-toolbar"><span id="notificationSummary">Нет новых уведомлений</span><button type="button" id="readAllNotifications">Прочитать все</button></div><div class="notification-list" id="notificationList"><div class="loader">Загрузка…</div></div></aside>
 <div class="backdrop" id="backdrop" hidden></div>
 <aside class="drawer" id="productDrawer" aria-hidden="true"><div class="drawer-head"><div><small>PRODUCT</small><h2 id="drawerTitle">Товар</h2></div><button class="icon" id="closeDrawer">×</button></div><div class="drawer-body" id="drawerBody"><div class="loader">Загрузка…</div></div></aside>
 
@@ -351,7 +348,7 @@
   </div>
 </div>
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="12" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
-{% if current_user.role == 'admin' %}
+{% if current_user.permissions.manage_users %}
 <div class="modal" id="userModal" hidden>
   <div class="modal-card">
     <div class="modal-head"><h3 data-i18n="add_user">Добавить пользователя</h3><button class="icon modal-close">×</button></div>
@@ -359,15 +356,6 @@
       <label>Имя<input name="display_name" required></label>
       <label>Email<input name="email" type="email" required></label>
       <label>Роль<select name="role"><option value="operator">Оператор</option><option value="viewer">Наблюдатель</option><option value="admin">Администратор</option></select></label>
-      <fieldset class="marketplace-access-field">
-        <legend>Доступ к площадкам</legend>
-        <div class="marketplace-access-grid">
-          <label><input type="checkbox" name="marketplaces" value="kaspi" checked><span>Kaspi</span></label>
-          <label><input type="checkbox" name="marketplaces" value="ozon" checked><span>Ozon</span></label>
-          <label><input type="checkbox" name="marketplaces" value="halyk_market" checked><span>Halyk Market</span></label>
-          <label class="coming"><input type="checkbox" name="marketplaces" value="forte_market" disabled><span>Forte Market · скоро</span></label>
-        </div>
-      </fieldset>
       <label>Временный пароль<input name="password" type="password" minlength="12" required></label>
       <div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Создать</button></div>
     </form>
@@ -377,8 +365,8 @@
 <div class="toast-stack" id="toasts"></div>
 <script>window.ITP_USER={{ current_user|tojson }};window.ITP_VERSION={{ version|tojson }};</script>
 <script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>
-<script src="{{ url_for('static', filename='js/help_content.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ version }}"></script>
+<script src="{{ url_for('static', filename='js/marketplace_settings.js') }}?v={{ version }}"></script>
 </body>
 </html>

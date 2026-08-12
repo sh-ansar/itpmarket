@@ -1974,20 +1974,39 @@ def status_snapshot(db: Database, assumed_workers: int = 2) -> dict[str, Any]:
     }
 
 
-def enriched_comparison_rows(db: Database, seller_name: str) -> list[dict[str, Any]]:
-    rows = core.report_rows(db, seller_name)
+def enriched_comparison_rows(
+    db: Database,
+    seller_name: str,
+    product_codes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    rows = core.report_rows(db, seller_name, product_codes)
+    requested_codes = [core.clean_text(value) for value in (product_codes or []) if core.clean_text(value)]
+    code_filter = ""
+    params: list[Any] = []
+    if product_codes is not None:
+        if not requested_codes:
+            return []
+        placeholders = ",".join("?" for _ in requested_codes)
+        code_filter = f" WHERE source_product_code IN ({placeholders})"
+        params = requested_codes
     state_rows = {
         row["source_product_code"]: dict(row)
-        for row in db.conn.execute("SELECT * FROM v9_discovery_state").fetchall()
+        for row in db.conn.execute(f"SELECT * FROM v9_discovery_state{code_filter}", params).fetchall()
     }
+    product_filter = code_filter.replace("source_product_code", "candidate_product_code")
     price_times = {
         row["candidate_product_code"]: row["updated_at"]
-        for row in db.conn.execute("SELECT candidate_product_code, updated_at FROM v9_price_state").fetchall()
+        for row in db.conn.execute(
+            f"SELECT candidate_product_code, updated_at FROM v9_price_state{product_filter}",
+            params,
+        ).fetchall()
     }
+    detail_filter = code_filter.replace("source_product_code", "product_code")
     details = {
         row["product_code"]: dict(row)
         for row in db.conn.execute(
-            "SELECT product_code, specifications_json FROM product_details"
+            f"SELECT product_code, specifications_json FROM product_details{detail_filter}",
+            params,
         ).fetchall()
     }
 

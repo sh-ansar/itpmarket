@@ -1,1 +1,37 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spyon</title><link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}"></head><body class="complete-page"><main class="complete-card"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span class="eyebrow" data-pi18n="registration_done_kicker">ЗАЯВКА ПРИНЯТА</span><h1 data-pi18n="registration_done_title">Мы получили информацию о компании.</h1><p data-pi18n="registration_done_text">После проверки задач администратор подготовит рабочее пространство и согласует параметры подключения.</p>{% if request_id %}<small><span data-pi18n="registration_request_number">Номер заявки</span>: {{ request_id }}</small>{% endif %}<a class="site-button primary" href="{{ url_for('landing') }}" data-pi18n="registration_back">Вернуться на сайт</a></main><script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spyon — Компания создана</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/public_onboarding.css') }}?v={{ version }}">
+</head>
+<body class="completion-page">
+<main class="completion-layout">
+  <section class="completion-hero">
+    <div class="completion-card">
+      <span class="eyebrow">ЗАЯВКА ОТПРАВЛЕНА</span>
+      <h1>Компания {{ result.company_name }} ожидает подтверждения.</h1>
+      <p>Вы уже вошли в рабочее пространство. До решения супер-администратора операции и подключения площадок будут недоступны.</p>
+      <div class="completion-details">
+        <div class="completion-detail"><span>Компания</span><strong>{{ result.tenant.name }}</strong></div>
+        <div class="completion-detail"><span>Заявка</span><strong>#{{ result.request_id }}</strong></div>
+        <div class="completion-detail"><span>Статус</span><strong>На рассмотрении</strong></div>
+        <div class="completion-detail"><span>Email</span><strong>{{ result.user.email }}</strong></div>
+      </div>
+      <div class="credential-box">
+        <span>Код восстановления — сохраните в безопасном месте</span>
+        <code>{{ result.recovery_code }}</code>
+      </div>
+      <div class="completion-actions">
+        <a class="site-button primary" href="{{ url_for('app_index') }}">Открыть систему</a>
+        <a class="site-button secondary" href="{{ url_for('landing') }}">На главную</a>
+      </div>
+    </div>
+  </section>
+  <aside class="completion-side">
+    <div class="side-card"><h3>Что дальше</h3><ul><li>Супер-администратор проверит компанию.</li><li>После подтверждения он выдаст доступные площадки.</li><li>Администратор компании подключит каждую площадку обычной ссылкой на магазин.</li></ul></div>
+  </aside>
+</main>
+</body>
+</html>

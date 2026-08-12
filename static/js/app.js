@@ -4,8 +4,10 @@
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
   const csrf = $('meta[name="csrf-token"]')?.content || '';
   const user = window.ITP_USER || {};
+  const can = code => Boolean(user.platform_role==='superadmin'||user.permissions?.[code]);
 
   const I18N = window.ITP_LOCALES || {ru:{}};
+  const PERMISSION_LABELS={view_dashboard:'Обзор',view_products:'Просмотр товаров',manage_products:'Изменение товаров',view_operations:'Просмотр операций',run_operations:'Запуск операций',manage_operations:'Остановка и удаление операций',view_reports:'Просмотр отчётов',create_reports:'Создание отчётов',view_settings:'Просмотр настроек',manage_company:'Профиль компании',manage_marketplaces:'Подключения marketplace',manage_filters:'Фильтры каталога',manage_users:'Сотрудники и права',view_help:'Справка'};
 
   const STATUS_LABELS = {
     ru:{NOT_ANALYZED:'Точные предложения не проверены',NO_OTHER_SELLERS:'Других продавцов не найдено',INSUFFICIENT_DATA:'Недостаточно точных предложений',REVIEW_REQUIRED:'Требует ручной проверки',EXACT_LOWEST:'Самая низкая цена среди продавцов',EXACT_BELOW:'Ниже медианы продавцов',EXACT_IN_MARKET:'В рыночном диапазоне',EXACT_ABOVE:'Выше медианы продавцов',EXACT_HIGHEST:'Самая высокая цена среди продавцов',EXACT_COMPETITIVE:'В рыночном диапазоне',DATA_COLLECTED:'Данные собраны',DATA_ERROR:'Ошибка получения точных предложений',COMPARABLE_LOWEST:'Ниже сопоставимого рынка',COMPARABLE_BELOW:'Ниже медианы бренда и размера',COMPARABLE_IN_MARKET:'В диапазоне бренда и размера',COMPARABLE_ABOVE:'Выше медианы бренда и размера',COMPARABLE_HIGHEST:'Выше сопоставимого рынка'},
@@ -15,15 +17,19 @@
 
 
   const ACTIONS = {
-    kaspi:[['kaspi_catalog_collect','Сбор каталога'],['kaspi_price_actualize','Актуализация цен'],['kaspi_full_sync','Полная синхронизация']],
+    kaspi:[['kaspi_catalog_collect','Сбор каталога'],['kaspi_price_actualize','Актуализация цен'],['kaspi_full_sync','Полная синхронизация'],['audit_catalog','Аудит каталога']],
     ozon:[['ozon_catalog_collect','Сбор каталога'],['ozon_price_actualize','Актуализация цен'],['ozon_full_sync','Полная синхронизация']],
+    ozon_kz:[['ozon_kz_catalog_collect','Сбор каталога'],['ozon_kz_price_actualize','Актуализация цен'],['ozon_kz_full_sync','Полная синхронизация']],
     halyk_market:[['halyk_catalog_collect','Сбор каталога'],['halyk_price_actualize','Актуализация цен'],['halyk_full_sync','Полная синхронизация']],
-    system:[['export_report','Сводный отчёт'],['audit_catalog','Аудит Kaspi'],['backup_database','Резервная копия']]
+    forte_market:[['forte_catalog_collect','Сбор каталога'],['forte_price_actualize','Актуализация цен'],['forte_full_sync','Полная синхронизация']],
+    wildberries:[['wb_catalog_collect','Сбор каталога'],['wb_price_actualize','Актуализация цен'],['wb_full_sync','Полная синхронизация']],
+    system:[['full_sync_all','Полная синхронизация доступных площадок'],['export_report','Сводный отчёт'],['backup_database','Резервная копия']]
   };
   const LEGACY_ACTIONS = {
-    sync_catalog:['Синхронизация каталога','kaspi'],update_own_prices:['Обновление цен Unityre','kaspi'],scan_market:['Точные предложения всех продавцов','kaspi'],refresh_market:['Обновить устаревшие точные цены','kaspi'],retry_errors:['Повтор ошибок точных карточек','kaspi'],
-    ozon_open_browser:['Ozon: открыть браузер','ozon'],ozon_discover:['Ozon: обнаружение товаров','ozon'],ozon_enrich:['Ozon: характеристики новых товаров','ozon'],ozon_market_search:['Ozon: поиск рыночных предложений','ozon'],ozon_refresh_prices:['Ozon: обновление цен','ozon'],ozon_refresh_stale:['Ozon: обновление характеристик','ozon'],ozon_retry:['Ozon: повтор ошибок','ozon'],ozon_export:['Ozon: экспорт реестра','ozon'],
-    halyk_sync_catalog:['Halyk Market: синхронизация каталога','halyk_market'],halyk_refresh_offers:['Halyk Market: точные предложения продавцов','halyk_market']
+    sync_catalog:['Синхронизация каталога','kaspi'],update_own_prices:['Обновление цен компании','kaspi'],scan_market:['Точные предложения всех продавцов','kaspi'],refresh_market:['Обновить устаревшие точные цены','kaspi'],retry_errors:['Повтор ошибок точных карточек','kaspi'],
+    ozon_open_browser:['Ozon.ru: открыть браузер','ozon'],ozon_discover:['Ozon.ru: обнаружение товаров','ozon'],ozon_enrich:['Ozon.ru: характеристики новых товаров','ozon'],ozon_market_search:['Ozon.ru: поиск рыночных предложений','ozon'],ozon_refresh_prices:['Ozon.ru: обновление цен','ozon'],ozon_refresh_stale:['Ozon.ru: обновление характеристик','ozon'],ozon_retry:['Ozon.ru: повтор ошибок','ozon'],ozon_export:['Ozon.ru: экспорт реестра','ozon'],
+    halyk_sync_catalog:['Halyk Market: синхронизация каталога','halyk_market'],halyk_refresh_offers:['Halyk Market: точные предложения продавцов','halyk_market'],
+    forte_sync_catalog:['Forte Market: синхронизация каталога','forte_market'],forte_refresh_offers:['Forte Market: точные предложения продавцов','forte_market']
   };
   const RELATED_ACTIONS = {
     kaspi_catalog_collect:['kaspi_catalog_collect','sync_catalog'],
@@ -32,15 +38,24 @@
     ozon_catalog_collect:['ozon_catalog_collect','ozon_discover','ozon_enrich'],
     ozon_price_actualize:['ozon_price_actualize','ozon_market_search','ozon_refresh_prices','ozon_refresh_stale','ozon_retry'],
     ozon_full_sync:['ozon_full_sync'],
+    ozon_kz_catalog_collect:['ozon_kz_catalog_collect'],
+    ozon_kz_price_actualize:['ozon_kz_price_actualize','ozon_kz_refresh_prices'],
+    ozon_kz_full_sync:['ozon_kz_full_sync'],
     halyk_catalog_collect:['halyk_catalog_collect','halyk_sync_catalog'],
     halyk_price_actualize:['halyk_price_actualize','halyk_refresh_offers'],
     halyk_full_sync:['halyk_full_sync'],
-    export_report:['export_report'],audit_catalog:['audit_catalog'],backup_database:['backup_database']
+    forte_catalog_collect:['forte_catalog_collect','forte_sync_catalog'],
+    forte_price_actualize:['forte_price_actualize','forte_refresh_offers'],
+    forte_full_sync:['forte_full_sync'],
+    wb_catalog_collect:['wb_catalog_collect'],
+    wb_price_actualize:['wb_price_actualize'],
+    wb_full_sync:['wb_full_sync'],
+    full_sync_all:['full_sync_all'],export_report:['export_report'],audit_catalog:['audit_catalog'],backup_database:['backup_database']
   };
-  const FILTERABLE_ACTIONS = new Set(['kaspi_price_actualize','ozon_price_actualize','halyk_price_actualize','export_report']);
+  const FILTERABLE_ACTIONS = new Set(['kaspi_price_actualize','ozon_price_actualize','ozon_kz_price_actualize','halyk_price_actualize','forte_price_actualize','export_report']);
 
 
-  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,settings:null,reportRequest:0};
+  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0};
   const multiSelectRegistry = new Map();
   let helpReturnFocus = null;
 
@@ -106,13 +121,19 @@
   function initMultiSelects(){$$('select[data-multi-select]').forEach(initMultiSelect);}
 
   async function api(path, options={}) {
-    const opts = {...options, headers:{...(options.headers||{})}};
+    const timeoutMs=Number(options.timeoutMs||25000);
+    const controller=options.signal?null:new AbortController();
+    const opts = {...options, headers:{...(options.headers||{})},signal:options.signal||(controller&&controller.signal)};
+    delete opts.timeoutMs;
     if (opts.body && typeof opts.body !== 'string') { opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body); }
     if (opts.method && opts.method !== 'GET') opts.headers['X-CSRF-Token']=csrf;
-    const res = await fetch(path, opts);
-    const data = await res.json().catch(()=>({ok:false,error:`HTTP ${res.status}`}));
-    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
+    const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):0;
+    try{
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(()=>({ok:false,error:`HTTP ${res.status}`}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }catch(error){if(error?.name==='AbortError')throw new Error('Сервер отвечает слишком долго. Повторите действие.');throw error}finally{if(timer)clearTimeout(timer)}
   }
   const esc = v => String(v ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const externalHref = v => {
@@ -129,10 +150,27 @@
   const dateText = v => { if(!v)return '—'; const d=new Date(v); return isNaN(d)?String(v):d.toLocaleString(state.lang==='en'?'en-GB':state.lang==='kk'?'kk-KZ':'ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
   const statusLabel = code => STATUS_LABELS[state.lang]?.[code] || STATUS_LABELS.ru[code] || code || '—';
   const toast = (text,error=false) => { const e=document.createElement('div');e.className=`toast${error?' error':''}`;e.textContent=text;$('#toasts').append(e);setTimeout(()=>e.remove(),4200); };
+  function renderNotifications(){
+    const list=$('#notificationList'),badge=$('#notificationBadge'),summary=$('#notificationSummary');if(!list)return;
+    const unread=state.notifications.filter(item=>!item.read_at).length;
+    if(badge){badge.textContent=String(Math.min(unread,99));badge.hidden=!unread;}
+    if(summary)summary.textContent=unread?`${unread} непрочитанных`:'Нет новых уведомлений';
+    list.innerHTML=state.notifications.length?state.notifications.map(item=>`<article class="notification-item ${esc(item.level)}${item.read_at?' read':''}" data-notification-id="${Number(item.id)}"><div><span>${esc(item.category==='billing'?'Оплата':item.category==='operations'?'Операции':'Система')}</span><time>${esc(dateText(item.created_at))}</time></div><b>${esc(item.title)}</b><p>${esc(item.message||'')}</p></article>`).join(''):`<div class="empty">Уведомлений пока нет.</div>`;
+  }
+  async function loadNotifications({announce=true}={}){
+    try{
+      const data=await api('/api/notifications?limit=60');const items=data.items||[];
+      const newest=items.reduce((value,item)=>Math.max(value,Number(item.id||0)),0);
+      if(state.notificationsInitialized&&announce)items.filter(item=>!item.read_at&&Number(item.id)>state.lastNotificationId).reverse().forEach(item=>toast(`${item.title}${item.message?`: ${item.message}`:''}`,item.level==='danger'));
+      state.notifications=items;state.lastNotificationId=Math.max(state.lastNotificationId,newest);state.notificationsInitialized=true;renderNotifications();
+    }catch(error){console.error(error)}
+  }
+  function closeNotifications(){const drawer=$('#notificationDrawer');if(drawer)drawer.hidden=true;$('#notificationButton')?.setAttribute('aria-expanded','false');}
   const taskStatus = v=>t(`task_${v}`,({running:'Выполняется',completed:'Окончено',failed:'Ошибка',stopped:'Остановлено',interrupted:'Прервано'}[v]||v));
-  const marketplaceLabel = v => ({kaspi:'Kaspi',ozon:'Ozon',halyk_market:'Halyk Market',system:'Spyon'}[v]||v||'Spyon');
-  const platformCounts = o => `Kaspi ${number(o.kaspi_count||o.kaspi_products)} · Ozon ${number(o.ozon_count||o.ozon_products)} · Halyk ${number(o.halyk_count||o.halyk_products)}`;
-  const platformReady = o => `Kaspi ${number(o.kaspi_market_analyzed_count)}/${number(o.kaspi_count||o.kaspi_products)} · Ozon ${number(o.ozon_data_ready_count)}/${number(o.ozon_count||o.ozon_products)} · Halyk ${number(o.halyk_market_analyzed_count)}/${number(o.halyk_count||o.halyk_products)}`;
+  const marketplaceLabel = v => ({kaspi:'Kaspi',ozon:'Ozon.ru',ozon_kz:'Ozon.kz',halyk_market:'Halyk Market',forte_market:'Forte Market',wildberries:'Wildberries',system:'Spyon'}[v]||v||'Spyon');
+  const visibleMarketplaceCodes = () => ['kaspi','ozon','ozon_kz','halyk_market','forte_market','wildberries'].filter(code=>Boolean(user.marketplaces?.[code]));
+  const platformCounts = o => visibleMarketplaceCodes().map(code=>`${marketplaceLabel(code)} ${number(({kaspi:o.kaspi_count||o.kaspi_products,ozon:o.ozon_count||o.ozon_products,ozon_kz:o.ozon_kz_count||o.ozon_kz_products,halyk_market:o.halyk_count||o.halyk_products,forte_market:o.forte_count||o.forte_products,wildberries:o.wildberries_count||o.wildberries_products})[code])}`).join(' · ') || '—';
+  const platformReady = o => visibleMarketplaceCodes().map(code=>`${marketplaceLabel(code)} ${number(({kaspi:o.kaspi_market_analyzed_count,ozon:o.ozon_data_ready_count,ozon_kz:o.ozon_kz_data_ready_count,halyk_market:o.halyk_market_analyzed_count,forte_market:o.forte_market_analyzed_count,wildberries:o.wildberries_data_ready_count})[code])}/${number(({kaspi:o.kaspi_count||o.kaspi_products,ozon:o.ozon_count||o.ozon_products,ozon_kz:o.ozon_kz_count||o.ozon_kz_products,halyk_market:o.halyk_count||o.halyk_products,forte_market:o.forte_count||o.forte_products,wildberries:o.wildberries_count||o.wildberries_products})[code])}`).join(' · ') || '—';
   const taskStatusTone = v=>({running:'info',completed:'success',failed:'danger',stopped:'warning',interrupted:'warning'}[v]||'neutral');
   const durationText = seconds => { const total=Math.max(0, Math.round(Number(seconds||0))); if(total<60) return `${total} сек`; const mins=Math.floor(total/60); const secs=total%60; if(mins<60) return secs?`${mins} мин ${secs} сек`:`${mins} мин`; const hours=Math.floor(mins/60); const rest=mins%60; return rest?`${hours} ч ${rest} мин`:`${hours} ч`; };
   const operationLaunchers = [
@@ -142,7 +180,10 @@
   const flatActions = () => Object.entries(ACTIONS).flatMap(([platform,items])=>items.map(([id,label])=>({id,label,platform})));
   const actionInfo = id => flatActions().find(item=>item.id===id) || (LEGACY_ACTIONS[id]?{id,label:LEGACY_ACTIONS[id][0],platform:LEGACY_ACTIONS[id][1]}:{id,label:id,platform:'system'});
   const taskPlatform = task => flatActions().find(item=>item.id===task?.name)?.platform || LEGACY_ACTIONS[task?.name]?.[1] || task?.metadata?.platform || task?.platform || 'system';
-  const actionLabel = (id,fallback='') => t(`action_${id}`, actionInfo(id).label || fallback || id);
+  const tenantLabel = () => String(user.tenant_name || user.company_name || '').trim() || t('company_name','компании');
+  const actionLabel = (id,fallback='') => id === 'update_own_prices'
+    ? `${t('updated','Обновление')} ${tenantLabel()}`
+    : t(`action_${id}`, actionInfo(id).label || fallback || id);
   const formatEta = task => { const percent=Number(task?.progress?.percent||0); if(!(percent>0 && percent<100) || !task?.started_at) return ''; const elapsed=Math.max(1, (Date.now()-new Date(task.started_at).getTime())/1000); const total=elapsed/(percent/100); const remaining=Math.max(0,total-elapsed); return remaining>0 ? `Осталось ~${durationText(remaining)}` : ''; };
   const looksGarbled = text => {
     const value=String(text||'');
@@ -210,6 +251,7 @@
     $$('[data-lang]').forEach(b=>b.classList.toggle('active',b.dataset.lang===state.lang));
     if($('#languageSelect')) $('#languageSelect').value=state.lang;
     window.ITPUI?.translateTree(document.body);
+    $$('[data-company-price-label]').forEach(node=>{node.textContent=`Обновить цены ${tenantLabel()}`;});
     const roleNode=$('#profileRole');if(roleNode)roleNode.textContent=roleLabel(user.role);
     renderPageHeading();updateHelpButton();
     if(state.page==='dashboard'&&state.overview){renderStatusChart(state.overview.status_distribution||[]);renderHealth(state.overview.health||{},state.overview);}
@@ -223,11 +265,20 @@
     if(state.page==='users')loadUsers();
   }
   function renderPageHeading(){ const node=$('#pageTitle'),wrap=node?.closest('.page-section-header'); if(!node||!wrap)return; wrap.hidden=['dashboard','products','operations','reports','schedules','users'].includes(state.page); const key=`${state.page}_page_title`; node.textContent=t(key,t(`nav_${state.page}`,'Spyon')); }
-  function navigate(page){ state.page=page; $$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`)); $$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page)); renderPageHeading(); if(page==='products')loadProducts(); if(page==='operations')loadTasks(); if(page==='reports')loadReports(); if(page==='schedules')loadSchedules(); if(page==='settings')loadSettings(); if(page==='users')loadUsers(); $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton(); }
+  const PAGE_PERMISSIONS={dashboard:'view_dashboard',products:'view_products',operations:'view_operations',schedules:'view_operations',reports:'view_reports',users:'manage_users',settings:'view_settings'};
+  function navigate(page){ if(PAGE_PERMISSIONS[page]&&!can(PAGE_PERMISSIONS[page]))return toast('Недостаточно прав.',true);state.page=page; $$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`)); $$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page)); renderPageHeading(); if(page==='products')loadProducts(); if(page==='operations')loadTasks(); if(page==='reports')loadReports(); if(page==='schedules')loadSchedules(); if(page==='settings')loadSettings(); if(page==='users')loadUsers(); $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton(); }
+  function applyPermissions(){
+    Object.entries(PAGE_PERMISSIONS).forEach(([page,permission])=>{
+      $$(`[data-page="${page}"],[data-page-link="${page}"]`).forEach(node=>node.hidden=!can(permission));
+    });
+    const operationsAllowed=can('run_operations')&&(user.tenant_status==='approved'||user.platform_role==='superadmin')&&(user.tenant_profile_complete||user.platform_role==='superadmin');
+    ['#productsOperationBar','#opsOperationBar','#addSchedule','#generateReport','#selectedReport','#analyzeSelected','#exportSelected'].forEach(selector=>{const node=$(selector);if(node)node.hidden=!operationsAllowed;});
+    $$('.hero-quick-actions,[data-quick-action]').forEach(node=>node.hidden=!operationsAllowed);
+  }
 
   async function loadOverview(){
     try{
-      const data=await api('/api/overview'); const o=data.overview; state.overview=o; state.tasks=data.tasks||[];
+      const data=await api('/api/overview',{timeoutMs:60000}); const o=data.overview; state.overview=o; state.tasks=data.tasks||[];
       const dataCoverage=Number(o.data_coverage_pct ?? o.scan_coverage_pct ?? 0);
       const readyCount=Number(o.data_ready_count ?? o.scanned_count ?? 0);
       $('#navProductCount').textContent=number(o.catalog_count); $('#heroProducts').textContent=number(o.catalog_count);$('#heroAnalyzed').textContent=`${dataCoverage.toFixed(0)}%`;$('#heroRisks').textContent=number(o.risk_count);
@@ -244,7 +295,7 @@
 
   async function loadOptions(){
     try{
-      const d=await api('/api/products/options');
+      const d=await api('/api/products/options',{timeoutMs:60000});
       const fill=(selector,placeholder,items,labelFn=v=>v,valueFn=v=>v)=>{
         const node=$(selector);if(!node)return;
         const current=new Set(node.multiple?multiValues(node):[node.value].filter(Boolean));
@@ -267,9 +318,65 @@
       refreshAllMultiSelects();
     }catch(e){toast(e.message,true)}
   }
-  function productFiltersPayload(){return {query:$('#productSearch')?.value||'',platforms:multiValues('#platformFilter'),brand:multiValues('#brandFilter'),status:multiValues('#statusFilter'),freshness:multiValues('#freshnessFilter'),product_type:multiValues('#productTypeFilter'),size:multiValues('#sizeFilter'),season:multiValues('#seasonFilter'),characteristic_group:multiValues('#characteristicGroupFilter'),scope:state.products.scope,sort:$('#sortProducts')?.value||'updated',direction:'desc'};}
+  async function loadCatalogConfiguration({settings=false}={}){
+    if(!can('view_products'))return;
+    const platforms=settings?[]:multiValues('#platformFilter');
+    const suffix=platforms.length?`?platforms=${encodeURIComponent(platforms.join(','))}`:'';
+    try{
+      const d=await api(`/api/catalog/filters${suffix}`);
+      state.catalogConfig=d;
+      const byKey=new Map((d.attributes||[]).map(item=>[item.attribute_key,item]));
+      const enabled=(d.filters||[]).filter(item=>item.is_enabled&&!['title','marketplace'].includes(item.attribute_key)&&byKey.has(item.attribute_key));
+      const host=$('#dynamicAttributeFilters');
+      if(host){
+        host.innerHTML=enabled.map(item=>{
+          const definition=byKey.get(item.attribute_key)||{};
+          return `<select class="dynamic-filter-select" multiple data-multi-select data-attribute-key="${esc(item.attribute_key)}" data-placeholder="${esc(item.display_name)}">${(definition.values||[]).map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('')}</select>`;
+        }).join('');
+        initMultiSelects();
+        $$('[data-attribute-key]',host).forEach(node=>node.onchange=()=>{state.products.page=1;updateFilterResetVisibility();loadProducts()});
+      }
+      if(settings&&$('#catalogFilterSettings')){
+        $('#catalogFilterSettings').innerHTML=(d.filters||[]).filter(item=>!['title','marketplace'].includes(item.attribute_key)).map(item=>{
+          const definition=byKey.get(item.attribute_key)||{};
+          const sourceCodes=[...new Set((definition.sources||[]).map(source=>String(source.marketplace_code||'')).filter(Boolean))];
+          const sourceNames=(definition.sources||[]).map(source=>String(source.source_attribute||'')).join(' ');
+          const searchText=[item.display_name,sourceNames,...(definition.values||[]).slice(0,20)].join(' ').toLocaleLowerCase('ru');
+          return `<label class="catalog-filter-option" data-filter-platforms="${esc(sourceCodes.join(','))}" data-filter-common="${sourceCodes.length>1?'1':'0'}" data-filter-search="${esc(searchText)}"><input type="checkbox" data-catalog-filter-key="${esc(item.attribute_key)}" ${item.is_enabled?'checked':''}><span><b>${esc(item.display_name)}</b><small>${number(definition.product_count||0)} товаров · ${sourceCodes.map(marketplaceLabel).map(esc).join(', ')||'—'}</small></span></label>`;
+        }).join('')||'<div class="empty">Характеристики появятся после первого импорта каталога.</div>';
+        $$('[data-catalog-filter-key]').forEach(node=>node.onchange=queueCatalogFilterSave);
+        applyCatalogSettingsSearch();
+      }
+    }catch(e){toast(e.message,true)}
+  }
+  let catalogFilterSaveTimer=0;
+  function applyCatalogSettingsSearch(){
+    const query=String($('#catalogAttributeSearch')?.value||'').trim().toLocaleLowerCase('ru');
+    const platform=String($('#catalogAttributeMarketplace')?.value||'all');
+    $$('.catalog-filter-option').forEach(node=>{
+      const sources=String(node.dataset.filterPlatforms||'').split(',').filter(Boolean);
+      const platformMatches=platform==='all'||(platform==='common'&&node.dataset.filterCommon==='1')||sources.includes(platform);
+      node.hidden=!(platformMatches&&(!query||String(node.dataset.filterSearch||'').includes(query)));
+    });
+  }
+  function queueCatalogFilterSave(){
+    const status=$('#catalogFilterSaveStatus');if(status)status.textContent='Сохраняем…';
+    clearTimeout(catalogFilterSaveTimer);catalogFilterSaveTimer=setTimeout(()=>saveCatalogFilters({silent:true}),350);
+  }
+  async function saveCatalogFilters({silent=false}={}){
+    const filters=(state.catalogConfig?.filters||[]).map(item=>({attribute_key:item.attribute_key,is_enabled:['title','marketplace'].includes(item.attribute_key)||Boolean($(`[data-catalog-filter-key="${CSS.escape(item.attribute_key)}"]`)?.checked)}));
+    try{
+      const saved=await api('/api/catalog/filters',{method:'PUT',body:{filters}});
+      state.catalogConfig=saved;
+      const status=$('#catalogFilterSaveStatus');if(status)status.textContent='Сохранено автоматически';
+      await loadCatalogConfiguration({settings:false});
+      if(!silent)toast('Фильтры каталога сохранены');
+    }catch(e){const status=$('#catalogFilterSaveStatus');if(status)status.textContent='Ошибка сохранения';toast(e.message,true)}
+  }
+  function attributeFilterValues(){const result={};$$('[data-attribute-key]').forEach(node=>{const values=multiValues(node);if(values.length)result[node.dataset.attributeKey]=values;});return result;}
+  function productFiltersPayload(){return {query:$('#productSearch')?.value||'',platforms:multiValues('#platformFilter'),brand:multiValues('#brandFilter'),status:multiValues('#statusFilter'),freshness:multiValues('#freshnessFilter'),product_type:multiValues('#productTypeFilter'),size:multiValues('#sizeFilter'),season:multiValues('#seasonFilter'),characteristic_group:multiValues('#characteristicGroupFilter'),attributes:attributeFilterValues(),scope:state.products.scope,sort:$('#sortProducts')?.value||'updated',direction:'desc'};}
   function productQuery(){const q=filtersQuery(productFiltersPayload());q.set('page',String(state.products.page));q.set('page_size',$('#pageSize').value);return q;}
-  function hasProductFilters(){const f=productFiltersPayload();return Boolean(f.query.trim()||f.platforms.length||f.brand.length||f.status.length||f.freshness.length||f.product_type.length||f.size.length||f.season.length||f.characteristic_group.length||f.scope!=='all');}
+  function hasProductFilters(){const f=productFiltersPayload();return Boolean(f.query.trim()||f.platforms.length||f.brand.length||f.status.length||f.freshness.length||f.product_type.length||f.size.length||f.season.length||f.characteristic_group.length||Object.keys(f.attributes).length||f.scope!=='all');}
   function updateFilterResetVisibility(){const button=$('#resetFilters'),filters=$('#productFilters');const active=hasProductFilters();if(button)button.hidden=!active;if(filters)filters.classList.toggle('has-reset',active);}
 
   async function loadProducts(){
@@ -282,11 +389,11 @@
   function renderProducts(items){
     $('#productsBody').innerHTML=items.length?items.map(p=>{
       const isOzon = p.platform==='ozon';
-      // Only Ozon uses RUB. Kaspi and Halyk Market are always displayed in KZT.
+      // Only Ozon.ru uses RUB. Kaspi and Halyk Market are always displayed in KZT.
       const pricePrimary = isOzon && p.price_original ? `${number(p.price_original)} ₽` : money(p.own_price_kzt??p.price_kzt);
       const priceSecondary = isOzon && p.price_original && p.price_kzt ? `<small class="cell-meta">${money(p.price_kzt)}</small>` : '';
       const sellerMeta=p.seller_name?`<small class="cell-meta">${esc(p.seller_name)}</small>`:'';
-      // Market range: show in RUB for Ozon, in KZT for others
+      // Market range: show in RUB for Ozon.ru, in KZT for others
       const range = !isOzon && p.market_median_price_kzt ?
         `<div class="range price-range"><span class="range-min"><small>${esc(t('min_short','мин'))}</small><b>${money(p.market_min_price_kzt)}</b></span><span class="range-mid"><small>${esc(t('avg_short','ср'))}</small><b>${money(p.market_median_price_kzt)}</b></span><span class="range-max"><small>${esc(t('max_short','макс'))}</small><b>${money(p.market_max_price_kzt)}</b></span></div>` :
         (p.platform==='ozon' && p.market_median_price_original ? `<div class="range price-range"><span class="range-min"><small>${esc(t('min_short','мин'))}</small><b>${number(p.market_min_price_original)} ₽</b></span><span class="range-mid"><small>${esc(t('avg_short','ср'))}</small><b>${number(p.market_median_price_original)} ₽</b></span><span class="range-max"><small>${esc(t('max_short','макс'))}</small><b>${number(p.market_max_price_original)} ₽</b></span></div>` : '<span class="muted">—</span>');
@@ -383,21 +490,21 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   function closeDrawer(){ $('#productDrawer').classList.remove('open');$('#backdrop').hidden=true;$('#productDrawer').setAttribute('aria-hidden','true'); }
   function renderDrawer(p){
     $('#drawerTitle').textContent=p.title||t('product','Товар');
-    // Only Ozon uses RUB. Kaspi and Halyk Market are always displayed in KZT.
+    // Only Ozon.ru uses RUB. Kaspi and Halyk Market are always displayed in KZT.
     const isOzon = p.platform==='ozon';
     const currentPrimary = isOzon && p.price_original ? `${number(p.price_original)} ₽` : money(p.own_price_kzt??p.price_kzt);
     const currentSecondary = isOzon && p.price_original && p.price_kzt ? `<span>${money(p.price_kzt)}</span>` : '';
     const productLink=externalHref(p.product_url)?`<a class="drawer-product-link" href="${esc(externalHref(p.product_url))}" target="_blank" rel="noopener noreferrer">${esc(t('open_catalog_button','Открыть карточку'))}</a>`:'';
     const lowLink=externalHref(p.lowest_product_url)?`<a href="${esc(externalHref(p.lowest_product_url))}" target="_blank" rel="noopener noreferrer">${esc(p.lowest_product_title||t('open_catalog_button','Открыть карточку'))}</a>`:''; const highLink=externalHref(p.highest_product_url)?`<a href="${esc(externalHref(p.highest_product_url))}" target="_blank" rel="noopener noreferrer">${esc(p.highest_product_title||t('open_catalog_button','Открыть карточку'))}</a>`:'';
     const specs=(p.specifications||[]).map(s=>`<div class="spec"><small>${esc(s.name)}</small><b>${esc(s.value)}</b></div>`).join('')||`<div class="empty">${esc(t('specs_empty','Характеристики не получены'))}</div>`;
-    const offers=(p.offers||[]).map(o=>{const relation=p.platform==='ozon'?(o.match_method_label||t('exact_product','Точный товар')):(o.is_own?t('own_offer','Свой продавец'):t('same_card','Та же карточка'));const linkText=p.platform==='ozon'?t('open_ozon_card','Открыть карточку Ozon ↗'):p.platform==='halyk_market'?t('open_halyk_card','Открыть карточку Halyk ↗'):t('open_kaspi_card','Открыть карточку Kaspi ↗');const offerUrl=externalHref(o.product_url);return `<div class="candidate"><div><b>${esc(o.merchant_name||t('seller','Продавец'))}</b><small>${money(o.price_kzt)}${o.merchant_rating?` · ${esc(t('rating','рейтинг'))} ${Number(o.merchant_rating).toFixed(1)}`:''}</small>${offerUrl?`<a href="${esc(offerUrl)}" target="_blank" rel="noopener noreferrer">${esc(linkText)}</a>`:''}</div><span class="relation">${esc(relation)}</span></div>`}).join('')||`<div class="empty">${esc(t('offers_empty','Точные предложения конкурентов ещё не найдены'))}</div>`;
+    const offers=(p.offers||[]).map(o=>{const relation=p.platform==='ozon'?(o.match_method_label||t('exact_product','Точный товар')):(o.is_own?t('own_offer','Свой продавец'):t('same_card','Та же карточка'));const linkText=p.platform==='ozon'?t('open_ozon_card','Открыть карточку Ozon.ru ↗'):p.platform==='halyk_market'?t('open_halyk_card','Открыть карточку Halyk Market ↗'):p.platform==='forte_market'?t('open_forte_card','Открыть карточку Forte Market ↗'):t('open_kaspi_card','Открыть карточку Kaspi ↗');const offerUrl=externalHref(o.product_url);return `<div class="candidate"><div><b>${esc(o.merchant_name||t('seller','Продавец'))}</b><small>${money(o.price_kzt)}${o.merchant_rating?` · ${esc(t('rating','рейтинг'))} ${Number(o.merchant_rating).toFixed(1)}`:''}</small>${offerUrl?`<a href="${esc(offerUrl)}" target="_blank" rel="noopener noreferrer">${esc(linkText)}</a>`:''}</div><span class="relation">${esc(relation)}</span></div>`}).join('')||`<div class="empty">${esc(t('offers_empty','Точные предложения конкурентов ещё не найдены'))}</div>`;
     const method=p.match_method_label?`<p><small>${esc(t('match_method','Метод сопоставления'))}</small><b>${esc(p.match_method_label)}</b></p>`:'';
     $('#drawerBody').innerHTML=`<div class="drawer-product"><img src="${esc(p.image_url||'')}" onerror="this.remove()"><div><h3>${esc(p.title)}</h3><p><span class="badge ${esc(p.platform)}">${esc(p.platform_label)}</span> ${esc([productCodeText(p.source_product_code),p.brand,p.size].filter(Boolean).join(' · '))}</p><p><span class="${statusClass(p.status_tone)}">${esc(statusLabel(p.price_status))}</span></p>${method}${productLink}</div></div>
       <div class="position-grid"><div class="position-card"><small>${esc(t('current_price_label','Текущая цена'))}</small><b>${currentPrimary}</b>${currentSecondary}</div><div class="position-card"><small>${esc(t('seller_min','Минимальная цена'))}</small><b>${p.platform==='ozon' ? (p.market_min_price_original ? `${number(p.market_min_price_original)} ₽` : '<span class="muted">—</span>') : money(p.market_min_price_kzt)}</b>${lowLink}</div><div class="position-card"><small>${esc(t('seller_median','Средняя цена'))}</small><b>${p.platform==='ozon' ? (p.market_median_price_original ? `${number(p.market_median_price_original)} ₽` : '<span class="muted">—</span>') : money(p.market_median_price_kzt)}</b><span>${esc(t('offers_count','Предложений'))}: ${number(p.reference_count||0)}</span></div><div class="position-card"><small>${esc(t('seller_max','Максимальная цена'))}</small><b>${p.platform==='ozon' ? (p.market_max_price_original ? `${number(p.market_max_price_original)} ₽` : '<span class="muted">—</span>') : money(p.market_max_price_kzt)}</b>${highLink}</div></div>
       ${p.platform==='kaspi'?`<div class="opportunity-card"><div><small>${esc(t('opportunity_monthly','Потенциал за месяц'))}</small><b>${money(p.potential_margin_monthly_kzt)}</b></div><div><small>${esc(t('per_unit','На единицу'))}</small><b>${money(p.potential_margin_per_unit_kzt)}</b></div></div>`:''}
       <section class="drawer-section"><h4>${esc(t('price_history','История цены'))}</h4><div class="history-chart">${historySvg(p.history||[])}</div></section>
       <section class="drawer-section"><h4>${esc(t('specifications','Характеристики'))}</h4><div class="spec-grid">${specs}</div></section>
-      <section class="drawer-section"><h4>${esc(p.platform==='ozon'?t('ozon_market_offers','Рыночные предложения Ozon'):t('same_card_sellers','Продавцы этой же карточки'))}</h4><div class="candidate-list">${offers}</div></section>`;
+      <section class="drawer-section"><h4>${esc(p.platform==='ozon'?t('ozon_market_offers','Рыночные предложения Ozon.ru'):t('same_card_sellers','Продавцы этой же карточки'))}</h4><div class="candidate-list">${offers}</div></section>`;
   }
 
   const relationLabel = v => ({KASPI_SAME_CARD:'Та же карточка Kaspi',EXACT_MODEL:'Точный товар',REVIEW:'Требует проверки',accepted:'Подтверждено',review:'Проверка',rejected:'Отклонено'}[v]||v||'Точный кандидат');
@@ -415,7 +522,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     if(!platformNode||!actionNode||!scopeNode)return;
     const platform=platformNode.value;
     const previous=actionNode.value;
-    actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>id!=='backup_database'||user.platform_role==='superadmin').map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
+    actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>(id!=='backup_database'||user.platform_role==='superadmin')&&(id!=='full_sync_all'||visibleMarketplaceCodes().length>1)).map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
     if([...actionNode.options].some(option=>option.value===previous))actionNode.value=previous;
     actionNode.onchange=()=>updateOperationScope(ids);
     updateOperationScope(ids);
@@ -448,8 +555,11 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     if(!node)return;
     const groups=[
       ['kaspi','Kaspi'],
-      ['ozon','Ozon'],
+      ['ozon','Ozon.ru'],
+      ['ozon_kz','Ozon.kz'],
       ['halyk_market','Halyk Market'],
+      ['forte_market','Forte Market'],
+      ['wildberries','Wildberries'],
       ['system',t('system','Система')]
     ];
     const actionCard = item => {
@@ -476,7 +586,8 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
           ${progressHtml}
         </section>`;
     };
-    node.innerHTML=groups.map(([platform,label])=>{
+    const access=user.marketplaces&&typeof user.marketplaces==='object'?user.marketplaces:{};
+    node.innerHTML=groups.filter(([platform])=>platform==='system'||Boolean(access[platform])).map(([platform,label])=>{
       const items=(ACTIONS[platform]||[]).map(([id,fallback])=>({id,label:fallback,platform})).filter(item=>item.id!=='backup_database'||user.platform_role==='superadmin');
       return `<section class="operation-platform-column"><div class="operation-platform-head"><small>${esc(label)}</small><b>${number(items.length)}</b></div><div>${items.map(actionCard).join('')}</div></section>`;
     }).join('');
@@ -498,7 +609,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   function renderPlatformChart(rows){const max=Math.max(1,...rows.map(r=>Number(r.total||0)));$('#reportPlatformChart').innerHTML=rows.map(r=>`<div class="platform-row"><div><b>${esc(r.platform)}</b><small>${number(r.priced)} из ${number(r.total)} с ценой</small></div><div class="platform-track"><i style="width:${Number(r.coverage_pct||0)}%"></i></div><strong>${Number(r.coverage_pct||0).toFixed(1)}%</strong></div>`).join('')||`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`;}
   function renderBrandRisks(rows){const max=Math.max(1,...rows.map(r=>Number(r.risks||0)+Number(r.review||0)));$('#reportBrandRisks').innerHTML=rows.slice(0,10).map(r=>{const risk=Number(r.risks||0),review=Number(r.review||0);return `<div class="brand-risk-row"><label>${esc(r.brand)}</label><div class="brand-risk-track"><i style="width:${risk/max*100}%"></i><em style="width:${review/max*100}%"></em></div><b>${number(risk)}</b><small>${number(review)} на проверке</small></div>`}).join('')||`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`;}
   function renderPriceBands(rows){const max=Math.max(1,...rows.map(r=>Number(r.count||0)));$('#reportPriceBands').innerHTML=rows.map(r=>`<div class="price-band-row"><label>${esc(r.label)}</label><div><i style="height:${Math.max(8,Number(r.count||0)/max*100)}%"></i></div><b>${number(r.count)}</b></div>`).join('')||`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`;}
-  function renderQuality(k){const total=Number(k.total_products||0);const rows=[['Данные обработаны',k.data_ready_count??k.analyzed_count,total],['Kaspi: точный рынок',k.kaspi_market_analyzed_count,k.kaspi_products],['Ozon: карточки готовы',k.ozon_data_ready_count,k.ozon_products],['Halyk: точный рынок',k.halyk_market_analyzed_count,k.halyk_products],['Требуют проверки',k.review_count,total]];$('#reportQuality').innerHTML=rows.map(([label,value,rowTotal])=>{const pct=rowTotal?Number(value||0)/Number(rowTotal)*100:0;return `<div class="quality-row"><div><span>${esc(label)}</span><b>${number(value||0)}</b></div><div class="quality-track"><i style="width:${Math.min(100,pct)}%"></i></div></div>`}).join('');}
+  function renderQuality(k){const total=Number(k.total_products||0);const rows=[['Данные обработаны',k.data_ready_count??k.analyzed_count,total],['Kaspi: точный рынок',k.kaspi_market_analyzed_count,k.kaspi_products],['Ozon.ru: карточки готовы',k.ozon_data_ready_count,k.ozon_products],['Halyk Market: точный рынок',k.halyk_market_analyzed_count,k.halyk_products],['Forte Market: точный рынок',k.forte_market_analyzed_count,k.forte_products],['Wildberries: цены готовы',k.wildberries_data_ready_count,k.wildberries_products],['Требуют проверки',k.review_count,total]];$('#reportQuality').innerHTML=rows.map(([label,value,rowTotal])=>{const pct=rowTotal?Number(value||0)/Number(rowTotal)*100:0;return `<div class="quality-row"><div><span>${esc(label)}</span><b>${number(value||0)}</b></div><div class="quality-track"><i style="width:${Math.min(100,pct)}%"></i></div></div>`}).join('');}
   function analyticsTable(rows,type){if(!rows.length)return '<tr><td colspan="4"><div class="empty">Нет данных</div></td></tr>';return rows.map(r=>type==='risk'?`<tr data-open-analytics="${esc(r.product_code)}"><td><b>${esc(r.title)}</b><small>${esc(r.brand||'')} · ${esc(r.size||'')}</small></td><td>${money(r.current_price_kzt)}</td><td>${money(r.market_median_price_kzt)}</td><td><strong class="negative">${r.difference_pct==null?'—':`${Number(r.difference_pct).toFixed(1)}%`}</strong></td></tr>`:`<tr data-open-analytics="${esc(r.product_code)}"><td><b>${esc(r.title)}</b><small>${esc(r.brand||'')} · ${esc(r.size||'')}</small></td><td>${money(r.current_price_kzt)}</td><td>${money(r.potential_margin_per_unit_kzt)}</td><td><strong class="positive">${money(r.potential_margin_monthly_kzt)}</strong></td></tr>`).join('');}
   function bindAnalyticsRows(){$$('[data-open-analytics]').forEach(row=>row.onclick=()=>openProduct(row.dataset.openAnalytics));}
   function reportFiltersPayload(){
@@ -514,7 +625,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       sort:'updated',direction:'desc'
     };
   }
-  function filtersQuery(filters){const q=new URLSearchParams();Object.entries(filters||{}).forEach(([key,value])=>{if(Array.isArray(value)){if(value.length)q.set(key,value.join(','));}else if(value!==''&&value!=null)q.set(key,String(value));});return q;}
+  function filtersQuery(filters){const q=new URLSearchParams();Object.entries(filters||{}).forEach(([key,value])=>{if(Array.isArray(value)){if(value.length)q.set(key,value.join(','));}else if(value&&typeof value==='object'){if(Object.keys(value).length)q.set(key,JSON.stringify(value));}else if(value!==''&&value!=null)q.set(key,String(value));});return q;}
   function renderReportPreview(result){
     const rows=result?.items||[];$('#reportPreviewCount').textContent=`${number(result?.total||0)} позиций`;
     $('#reportPreviewBody').innerHTML=rows.length?rows.map(p=>{
@@ -556,8 +667,52 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
 
 
 
-  async function loadSettings(){try{const d=await api('/api/settings');state.settings=d;const p=d.preferences||{};$('#prefLocale').value=p.locale||'ru';state.theme=p.theme||window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:true,emit:false});$('#prefCurrency').value=p.display_currency||'KZT';$('#prefUnits').value=p.default_monthly_units??1;$('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;const tenant=d.tenant||{};if($('#tenantName')){$('#tenantName').value=tenant.name||'';$('#tenantRegistrationNumber').value=tenant.registration_number||'';$('#tenantContactEmail').value=tenant.contact_email||'';$('#tenantContactPhone').value=tenant.contact_phone||'';}const n=d.network||{};if($('#cfgLocalUrl')){$('#cfgLocalUrl').value=n.local_url||'';$('#cfgLanUrl').value=(n.lan_urls||[]).join(', ');$('#cfgLanPort').value=n.port||'';$('#cfgLanState').value=n.lan_enabled?'Включён':'Выключен';}if(d.config){const c=d.config;$('#cfgSellerId').value=c.kaspi?.seller_id||'';$('#cfgSellerName').value=c.kaspi?.seller_name||'';$('#cfgCityId').value=c.kaspi?.city_id||'';$('#cfgExpected').value=c.kaspi?.expected_count||0;$('#cfgDiscover').value=c.analysis?.discover_workers||1;$('#cfgPrice').value=c.analysis?.price_workers||1;if($('#cfgOzonClientUrls')){$('#cfgOzonClientUrls').value=c.ozon?.client_catalog_urls||c.ozon?.seller_catalog_url||'';$('#cfgOzonMarketUrls').value=c.ozon?.market_category_urls||c.ozon?.category_urls||'';$('#cfgOzonExpectedSeller').value=c.ozon?.expected_seller||'';$('#cfgOzonCurrentSeller').value=c.ozon?.current_seller_name||'';$('#cfgOzonCurrentSellerUrl').value=c.ozon?.current_seller_url||'';$('#cfgOzonCurrentProducts').value=c.ozon?.current_products??0;$('#cfgOzonMarketProducts').value=c.ozon?.current_market_products??0;$('#cfgOzonCurrentOffers').value=c.ozon?.current_offers??0;}if($('#cfgHalykSellerName')){$('#cfgHalykSellerName').value=c.halyk?.seller_name||'';$('#cfgHalykLocationId').value=c.halyk?.location_id||'';$('#cfgHalykCatalogQuery').value=c.halyk?.catalog_query||'shini-i-diski';$('#cfgHalykCategoryId').value=c.halyk?.catalog_category_id||'10038';$('#cfgHalykPageSize').value=c.halyk?.page_size||200;$('#cfgHalykTimeout').value=c.halyk?.timeout_seconds||30;$('#cfgHalykSleep').value=c.halyk?.sleep_seconds??0.25;$('#cfgHalykMaxProducts').value=c.halyk?.max_products??0;}}}catch(e){toast(e.message,true)}}
-  async function saveSettings(){const preferences={locale:$('#prefLocale').value,theme:window.ITPUI?.getTheme()||'system',display_currency:$('#prefCurrency').value,default_monthly_units:Number($('#prefUnits').value),rub_to_kzt:Number($('#prefRub').value),usd_to_kzt:Number($('#prefUsd').value),eur_to_kzt:Number($('#prefEur').value)};const body={preferences};if(user.role==='admin'&&$('#tenantName'))body.tenant={name:$('#tenantName').value,registration_number:$('#tenantRegistrationNumber').value,contact_email:$('#tenantContactEmail').value,contact_phone:$('#tenantContactPhone').value};if(user.role==='admin'&&state.settings?.config)body.config={kaspi:{...state.settings.config.kaspi,seller_id:$('#cfgSellerId').value,seller_name:$('#cfgSellerName').value,city_id:$('#cfgCityId').value,expected_count:Number($('#cfgExpected').value)},analysis:{...state.settings.config.analysis,discover_workers:Number($('#cfgDiscover').value),price_workers:Number($('#cfgPrice').value)},app:state.settings.config.app,ozon:{...state.settings.config.ozon,client_catalog_urls:$('#cfgOzonClientUrls')?$('#cfgOzonClientUrls').value:'',market_category_urls:$('#cfgOzonMarketUrls')?$('#cfgOzonMarketUrls').value:'',expected_seller:$('#cfgOzonExpectedSeller')?$('#cfgOzonExpectedSeller').value:''},halyk:{...state.settings.config.halyk,seller_name:$('#cfgHalykSellerName')?$('#cfgHalykSellerName').value:'Unityre',location_id:$('#cfgHalykLocationId')?$('#cfgHalykLocationId').value:'-2',catalog_query:$('#cfgHalykCatalogQuery')?$('#cfgHalykCatalogQuery').value:'shini-i-diski',catalog_category_id:$('#cfgHalykCategoryId')?$('#cfgHalykCategoryId').value:'10038',page_size:Number($('#cfgHalykPageSize')?$('#cfgHalykPageSize').value:200),timeout_seconds:Number($('#cfgHalykTimeout')?$('#cfgHalykTimeout').value:30),sleep_seconds:Number($('#cfgHalykSleep')?$('#cfgHalykSleep').value:0.25),max_products:Number($('#cfgHalykMaxProducts')?$('#cfgHalykMaxProducts').value:0)}};try{const d=await api('/api/settings',{method:'PUT',body});if(d.tenant)state.settings.tenant=d.tenant;applyI18n(preferences.locale);toast(t('settings_saved','Настройки сохранены'));loadOverview();loadProducts();}catch(e){toast(e.message,true)}}
+  function renderSubscriptionSettings(snapshot){
+    const host=$('#subscriptionSettings');if(!host)return;
+    const data=snapshot||{},ent=data.entitlement||{},current=ent.subscription||{};
+    const active=Boolean(ent.active),pending=(data.requests||[]).find(item=>item.status==='pending');
+    const quotas=Object.entries(ent.marketplaces||{}).map(([code,q])=>`<article class="subscription-quota ${q.enabled?'':'disabled'}"><b>${esc(marketplaceLabel(code))}</b><small>${q.enabled?'Доступна':'Выключена в пакете'}</small><span>Позиции: ${number(q.positions_used||0)} / ${q.position_limit==null?'∞':number(q.position_limit)}</span><span>Запуски сегодня: ${number(q.daily_operations_used||0)} / ${q.daily_operation_limit==null?'∞':number(q.daily_operation_limit)}</span>${q.positions_remaining===0?'<em>Недостаточно позиций — увеличьте лимит</em>':''}</article>`).join('');
+    const plans=(data.plans||[]).map(plan=>`<option value="${esc(plan.code)}">${esc(plan.name)} · ${number(plan.price_amount)} ${esc(plan.currency)} / ${number(plan.term_days)} дн.</option>`).join('');
+    const addons=(data.addons||[]).map(addon=>`<option value="${esc(addon.code)}">${esc(addon.name)} · ${number(addon.price_amount)} ${esc(addon.currency)}</option>`).join('');
+    const marketplaceOptions=Object.keys(ent.marketplaces||{}).map(code=>`<option value="${esc(code)}">${esc(marketplaceLabel(code))}</option>`).join('');
+    host.innerHTML=`<div class="subscription-summary ${active?'active':'pending'}"><div><small>Текущий пакет</small><b>${esc(active?current.plan_name||current.plan_code:'Нет активного пакета')}</b><span>${active?`${number(current.price_amount)} ${esc(current.currency)} · до ${esc(String(current.ends_at||'—'))}`:esc(ent.message||'Ожидается подтверждение')}</span></div>${pending?`<strong>Заявка «${esc(pending.plan_name)}» ожидает подтверждения</strong>`:''}</div><div class="subscription-quota-grid">${quotas||'<div class="empty compact">Лимиты появятся после подтверждения пакета.</div>'}</div>${can('manage_company')?`<div class="subscription-actions"><label>Сменить пакет<select id="subscriptionPlanSelect">${plans}</select></label><button type="button" class="secondary" id="requestSubscriptionPlan" ${pending?'disabled':''}>Отправить на подтверждение</button>${active?`<label>Дополнительные позиции<select id="subscriptionAddonSelect">${addons}</select></label><label>Площадка<select id="subscriptionAddonMarketplace">${marketplaceOptions}</select></label><button type="button" class="secondary" id="requestSubscriptionAddon">Запросить</button>`:''}</div>`:''}`;
+    $('#requestSubscriptionPlan')?.addEventListener('click',async()=>{try{await api('/api/subscription/request',{method:'POST',body:{plan_code:$('#subscriptionPlanSelect').value}});toast('Заявка на пакет отправлена');loadSettings();}catch(e){toast(e.message,true)}});
+    $('#requestSubscriptionAddon')?.addEventListener('click',async()=>{try{await api('/api/subscription/addons/request',{method:'POST',body:{addon_code:$('#subscriptionAddonSelect').value,marketplace_code:$('#subscriptionAddonMarketplace').value,quantity:1}});toast('Заявка на дополнительные позиции отправлена');loadSettings();}catch(e){toast(e.message,true)}});
+  }
+
+  async function loadSettings(){
+    try{
+      const d=await api('/api/settings');state.settings=d;const p=d.preferences||{};
+      $('#prefLocale').value=p.locale||'ru';state.theme=p.theme||window.ITPUI?.getTheme()||'system';
+      window.ITPUI?.setTheme(state.theme,{store:true,emit:false});
+      $('#prefCurrency').value=p.display_currency||'KZT';$('#prefUnits').value=p.default_monthly_units??1;
+      $('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;
+      const tenant=d.tenant||{};
+      renderSubscriptionSettings(d.subscription);
+      if($('#tenantName')){
+        $('#tenantName').value=tenant.name||'';$('#tenantRegistrationNumber').value=tenant.registration_number||'';
+        $('#tenantContactEmail').value=tenant.contact_email||'';$('#tenantContactPhone').value=tenant.contact_phone||'';
+      }
+      const ozon=d.config?.ozon||{};
+      if($('#cfgOzonClientUrls')){
+        $('#cfgOzonClientUrls').value=ozon.client_catalog_urls||'';
+        $('#cfgOzonMarketUrls').value=ozon.market_category_urls||'';
+        $('#cfgOzonExpectedSeller').value=ozon.expected_seller||'';
+        $('#cfgOzonCurrentSeller').value=ozon.current_seller_name||'';
+        $('#cfgOzonCurrentSellerUrl').value=ozon.current_seller_url||'';
+        $('#cfgOzonCurrentProducts').value=ozon.current_products??0;
+        $('#cfgOzonMarketProducts').value=ozon.market_products??0;
+        $('#cfgOzonCurrentOffers').value=ozon.current_offers??0;
+      }
+    }catch(e){toast(e.message,true)}
+  }
+  async function saveSettings(){
+    const preferences={locale:$('#prefLocale').value,theme:window.ITPUI?.getTheme()||'system',display_currency:$('#prefCurrency').value,default_monthly_units:Number($('#prefUnits').value),rub_to_kzt:Number($('#prefRub').value),usd_to_kzt:Number($('#prefUsd').value),eur_to_kzt:Number($('#prefEur').value)};
+    const body={preferences};
+    if(can('manage_company')&&$('#tenantName'))body.tenant={name:$('#tenantName').value.trim(),registration_number:$('#tenantRegistrationNumber').value.trim(),contact_email:$('#tenantContactEmail').value.trim(),contact_phone:$('#tenantContactPhone').value.trim()};
+    if(user.platform_role==='superadmin'&&$('#cfgOzonClientUrls'))body.config={ozon:{client_catalog_urls:$('#cfgOzonClientUrls').value,market_category_urls:$('#cfgOzonMarketUrls').value,expected_seller:$('#cfgOzonExpectedSeller').value.trim()}};
+    try{const d=await api('/api/settings',{method:'PUT',body});if(d.tenant){state.settings.tenant=d.tenant;user.tenant_profile_complete=true;applyPermissions()}applyI18n(preferences.locale);toast(t('settings_saved','Настройки сохранены'));loadOverview();loadProducts();}catch(e){toast(e.message,true)}
+  }
 
   const scheduleStatus=v=>({
     completed:t('task_completed','Окончено'),
@@ -642,7 +797,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
           <div class="schedule-card-actions">
             <button class="secondary edit" data-edit-schedule="${x.id}">${esc(t('edit','Изменить'))}</button>
             <button class="toggle ${x.is_enabled?'active':''}" data-toggle-schedule="${x.id}" data-enabled="${x.is_enabled?1:0}">${x.is_enabled?esc(t('enabled','Включено')):esc(t('disabled','Выключено'))}</button>
-            ${user.role==='admin'?`<button class="delete" data-delete-schedule="${x.id}">${esc(t('delete','Удалить'))}</button>`:''}
+            ${can('manage_operations')?`<button class="delete" data-delete-schedule="${x.id}">${esc(t('delete','Удалить'))}</button>`:''}
           </div>
         </article>`).join(''):`<div class="empty">${esc(t('schedule_empty','Расписания ещё не созданы'))}</div>`;
 
@@ -736,9 +891,43 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   }
 
   const roleLabel=v=>({admin:t('role_admin','Администратор'),operator:t('role_operator','Оператор'),viewer:t('role_viewer','Наблюдатель')}[v]||v);
-  const marketplaceNames={kaspi:'Kaspi',ozon:'Ozon',forte_market:'Forte Market',halyk_market:'Halyk Market'};
-  async function loadUsers(){if(user.role!=='admin')return;try{const d=await api('/api/users');$('#usersGrid').innerHTML=(d.users||[]).map(u=>{const access=u.marketplaces||{};return `<article class="user-card" data-user-id="${u.id}"><div class="user-card-head"><span class="user-avatar">${esc((u.display_name||'?')[0].toUpperCase())}</span><div><h4>${esc(u.display_name)}</h4><small>${esc(u.email)}</small></div></div><div class="user-access-grid"><label><span>${esc(t('role','Роль'))}</span><select data-user-role="${u.id}"><option value="admin" ${u.role==='admin'?'selected':''}>Администратор</option><option value="operator" ${u.role==='operator'?'selected':''}>Оператор</option><option value="viewer" ${u.role==='viewer'?'selected':''}>Наблюдатель</option></select></label><div class="user-access-state"><span>${esc(t('access','Доступ'))}</span><label class="access-switch"><input type="checkbox" data-user-active="${u.id}" ${u.is_active?'checked':''} ${Number(u.id)===Number(user.id)?'disabled':''}><i></i><em>${u.is_active?t('active','Активен'):t('disabled','Отключён')}</em></label></div></div><div class="user-marketplaces"><span>${esc(t('platforms','Площадки'))}</span><div>${['kaspi','ozon','halyk_market','forte_market'].map(code=>`<label class="marketplace-check ${code==='forte_market'?'coming':''}"><input type="checkbox" data-user-marketplace="${u.id}" value="${code}" ${access[code]?'checked':''} ${code==='forte_market'?'disabled':''}><span>${marketplaceNames[code]}${code==='forte_market'?` · ${t('coming_soon','скоро')}`:''}</span></label>`).join('')}</div></div><div class="user-actions"><button class="secondary" data-save-user="${u.id}">${esc(t('save','Сохранить'))}</button><button class="secondary" data-recovery-user="${u.id}">${esc(t('new_code','Новый код'))}</button>${Number(u.id)!==Number(user.id)?`<button class="danger-soft" data-delete-user="${u.id}" data-user-name="${esc(u.display_name)}">${esc(t('delete','Удалить'))}</button>`:''}</div></article>`}).join('');$$('[data-save-user]').forEach(b=>b.onclick=()=>saveUserAccess(Number(b.dataset.saveUser)));$$('[data-recovery-user]').forEach(b=>b.onclick=()=>regenerateUserRecovery(Number(b.dataset.recoveryUser)));$$('[data-delete-user]').forEach(b=>b.onclick=()=>deleteUser(Number(b.dataset.deleteUser),b.dataset.userName));$$('[data-user-active]').forEach(input=>input.onchange=()=>{const em=input.closest('.access-switch').querySelector('em');em.textContent=input.checked?t('active','Активен'):t('disabled','Отключён')});}catch(e){toast(e.message,true)}}
-  async function saveUserAccess(id){try{const role=$(`[data-user-role="${id}"]`).value;const activeNode=$(`[data-user-active="${id}"]`);const is_active=activeNode?activeNode.checked:true;const marketplaces=$$(`[data-user-marketplace="${id}"]:checked`).map(x=>x.value);await api(`/api/users/${id}`,{method:'PUT',body:{role,is_active,marketplaces}});toast('Права пользователя сохранены');loadUsers();}catch(e){toast(e.message,true)}}
+  async function loadUsers(){
+    if(!can('manage_users'))return;
+    try{
+      const d=await api('/api/users');
+      $('#usersGrid').innerHTML=(d.users||[]).map(u=>{
+        const marketplaceCodes=Object.keys(u.available_marketplaces||{}).filter(code=>u.available_marketplaces?.[code]);
+        const marketplaces=marketplaceCodes.length
+          ? `<fieldset class="marketplace-access-field"><legend>Доступ к площадкам компании</legend><div class="marketplace-access-grid">${marketplaceCodes.map(code=>`<label><input type="checkbox" data-user-marketplace="${u.id}" value="${esc(code)}" ${u.marketplace_permissions?.[code]!==false?'checked':''}><span>${esc(marketplaceLabel(code))}</span></label>`).join('')}</div></fieldset>`
+          : '<div class="empty compact">У компании пока нет доступных площадок.</div>';
+        const permissions=Object.entries(PERMISSION_LABELS).map(([code,label])=>`<label><input type="checkbox" data-user-permission="${u.id}" value="${esc(code)}" ${u.permissions?.[code]?'checked':''}><span>${esc(label)}</span></label>`).join('');
+        return `<article class="user-card" data-user-id="${u.id}" data-permissions-ready="1">
+          <div class="user-card-head"><span class="user-avatar">${esc((u.display_name||'?')[0].toUpperCase())}</span><div><h4>${esc(u.display_name)}</h4><small>${esc(u.email)}</small></div></div>
+          <div class="user-access-grid"><label><span>${esc(t('role','Роль'))}</span><select data-user-role="${u.id}"><option value="admin" ${u.role==='admin'?'selected':''}>Администратор</option><option value="operator" ${u.role==='operator'?'selected':''}>Оператор</option><option value="viewer" ${u.role==='viewer'?'selected':''}>Наблюдатель</option></select></label><div class="user-access-state"><span>${esc(t('access','Доступ'))}</span><label class="access-switch"><input type="checkbox" data-user-active="${u.id}" ${u.is_active?'checked':''} ${Number(u.id)===Number(user.id)?'disabled':''}><i></i><em>${u.is_active?t('active','Активен'):t('disabled','Отключён')}</em></label></div></div>
+          <div class="user-marketplaces">${marketplaces}</div>
+          <details class="user-permissions"><summary><span>Точечные разрешения</span><small>Развернуть</small></summary><div>${permissions}</div></details>
+          <div class="user-actions"><button class="primary" data-save-user="${u.id}">${esc(t('save','Сохранить'))}</button><button class="secondary" data-recovery-user="${u.id}">${esc(t('new_code','Новый код'))}</button>${Number(u.id)!==Number(user.id)?`<button class="danger-soft" data-delete-user="${u.id}" data-user-name="${esc(u.display_name)}">${esc(t('delete','Удалить'))}</button>`:''}</div>
+        </article>`;
+      }).join('');
+      $$('[data-save-user]').forEach(b=>b.onclick=()=>saveUserAccess(Number(b.dataset.saveUser)));
+      $$('[data-recovery-user]').forEach(b=>b.onclick=()=>regenerateUserRecovery(Number(b.dataset.recoveryUser)));
+      $$('[data-delete-user]').forEach(b=>b.onclick=()=>deleteUser(Number(b.dataset.deleteUser),b.dataset.userName));
+      $$('[data-user-active]').forEach(input=>input.onchange=()=>{const em=input.closest('.access-switch').querySelector('em');em.textContent=input.checked?t('active','Активен'):t('disabled','Отключён')});
+    }catch(e){toast(e.message,true)}
+  }
+  async function saveUserAccess(id){
+    try{
+      const role=$(`[data-user-role="${id}"]`).value;
+      const activeNode=$(`[data-user-active="${id}"]`);
+      const permissions={};
+      Object.keys(PERMISSION_LABELS).forEach(code=>permissions[code]=Boolean($(`[data-user-permission="${id}"][value="${code}"]`)?.checked));
+      const marketplaces={};
+      $$(`[data-user-marketplace="${id}"]`).forEach(node=>marketplaces[node.value]=Boolean(node.checked));
+      await api(`/api/users/${id}`,{method:'PUT',body:{role,is_active:activeNode?activeNode.checked:true,permissions,marketplaces}});
+      toast('Данные и права пользователя сохранены');
+      await loadUsers();
+    }catch(e){toast(e.message,true)}
+  }
   async function regenerateUserRecovery(id){try{const d=await api(`/api/users/${id}/recovery`,{method:'POST'});alert(`Новый код восстановления:
 ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
   async function deleteUser(id,name){if(!confirm(`Удалить пользователя «${name}»? Действие нельзя отменить.`))return;try{await api(`/api/users/${id}`,{method:'DELETE'});toast('Пользователь удалён');loadUsers();}catch(e){toast(e.message,true)}}
@@ -746,18 +935,21 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
   function showModal(id){$('#'+id).hidden=false} function hideModals(){$$('.modal').forEach(m=>m.hidden=true)}
   async function analyzeSelectedProducts(){
     const groups={
-      kaspi:[...state.selected].filter(code=>!code.startsWith('ozon:')&&!code.startsWith('halyk:')),
+      kaspi:[...state.selected].filter(code=>!code.startsWith('ozon:')&&!code.startsWith('ozon_kz:')&&!code.startsWith('halyk:')&&!code.startsWith('forte:')&&!code.startsWith('wb:')),
       ozon:[...state.selected].filter(code=>code.startsWith('ozon:')),
-      halyk_market:[...state.selected].filter(code=>code.startsWith('halyk:'))
+      ozon_kz:[...state.selected].filter(code=>code.startsWith('ozon_kz:')),
+      halyk_market:[...state.selected].filter(code=>code.startsWith('halyk:')),
+      forte_market:[...state.selected].filter(code=>code.startsWith('forte:')),
+      wildberries:[...state.selected].filter(code=>code.startsWith('wb:'))
     };
-    const actions={kaspi:'kaspi_price_actualize',ozon:'ozon_price_actualize',halyk_market:'halyk_price_actualize'};
+    const actions={kaspi:'kaspi_price_actualize',ozon:'ozon_price_actualize',ozon_kz:'ozon_kz_price_actualize',halyk_market:'halyk_price_actualize',forte_market:'forte_price_actualize',wildberries:'wb_price_actualize'};
     const active=Object.entries(groups).filter(([,codes])=>codes.length);
     if(!active.length)return toast('Не выбраны товары.',true);
     for(const [platform,codes] of active)await startTask(actions[platform],'selected',codes,null,{navigate:false});
     navigate('operations');
   }
 
-  async function setWatch(){const codes=[...state.selected].filter(c=>!c.startsWith('ozon:'));if(!codes.length)return toast('Для наблюдения выберите позиции Kaspi или Halyk Market',true);try{await api('/api/products/state',{method:'PUT',body:{codes,watched:true}});toast('Позиции добавлены в наблюдение');state.selected.clear();loadProducts();}catch(e){toast(e.message,true)}}
+  async function setWatch(){const codes=[...state.selected];if(!codes.length)return toast('Выберите позиции для наблюдения',true);try{await api('/api/products/state',{method:'PUT',body:{codes,watched:true}});toast('Позиции добавлены в наблюдение');state.selected.clear();loadProducts();}catch(e){toast(e.message,true)}}
 
   function updateHelpButton(){const button=$('#helpButton');if(!button)return;button.dataset.page=state.page;button.title=t('help_open','Открыть помощь по текущему разделу');button.dataset.tooltip=button.title;}
   function fallbackHelp(){return{title:t('help','Помощь'),intro:t(`${state.page}_subtitle`,''),sections:[{title:t('help_quick_actions','Быстрые действия'),items:[t('help_contact','Обратитесь к администратору рабочего пространства.')] }]};}
@@ -786,6 +978,10 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     $$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));
     $('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))};
     $('#profileButton').onclick=e=>{e.stopPropagation();$('#profileMenu').hidden=!$('#profileMenu').hidden};
+    if($('#notificationButton'))$('#notificationButton').onclick=async e=>{e.stopPropagation();const drawer=$('#notificationDrawer');drawer.hidden=!drawer.hidden;$('#notificationButton').setAttribute('aria-expanded',String(!drawer.hidden));if(!drawer.hidden)await loadNotifications({announce:false})};
+    if($('#closeNotifications'))$('#closeNotifications').onclick=closeNotifications;
+    if($('#readAllNotifications'))$('#readAllNotifications').onclick=async()=>{try{await api('/api/notifications/read-all',{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
+    if($('#notificationList'))$('#notificationList').onclick=async event=>{const item=event.target.closest('[data-notification-id]');if(!item)return;try{await api(`/api/notifications/${item.dataset.notificationId}/read`,{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
     $('#profileMenu').onclick=e=>e.stopPropagation();$('#openPassword').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
     $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang});if(state.page==='dashboard')loadOverview()});
     if($('#languageSelect'))$('#languageSelect').onchange=e=>{applyI18n(e.target.value);persistUiPreference({locale:e.target.value});if(state.page==='dashboard')loadOverview()};
@@ -796,7 +992,8 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     $('#refreshProducts').onclick=loadProducts;
     $('#productSearch').oninput=debounce(()=>{state.products.page=1;updateFilterResetVisibility();loadProducts()},350);
     ['platformFilter','brandFilter','statusFilter','freshnessFilter','productTypeFilter','sizeFilter','seasonFilter','characteristicGroupFilter','pageSize','sortProducts'].forEach(id=>{const node=$('#'+id);if(node)node.onchange=()=>{state.products.page=1;updateFilterResetVisibility();loadProducts()}});
-    $('#resetFilters').onclick=()=>{$('#productSearch').value='';['platformFilter','brandFilter','statusFilter','freshnessFilter','productTypeFilter','sizeFilter','seasonFilter','characteristicGroupFilter'].forEach(id=>clearMultiSelect('#'+id));state.products.scope='all';$$('#scopeTabs button').forEach(b=>b.classList.toggle('active',b.dataset.scope==='all'));updateFilterResetVisibility();loadProducts()};
+    if($('#platformFilter'))$('#platformFilter').onchange=async()=>{state.products.page=1;await loadCatalogConfiguration();updateFilterResetVisibility();loadProducts()};
+    $('#resetFilters').onclick=()=>{$('#productSearch').value='';['platformFilter','brandFilter','statusFilter','freshnessFilter','productTypeFilter','sizeFilter','seasonFilter','characteristicGroupFilter'].forEach(id=>clearMultiSelect('#'+id));$$('[data-attribute-key]').forEach(node=>clearMultiSelect(node));state.products.scope='all';$$('#scopeTabs button').forEach(b=>b.classList.toggle('active',b.dataset.scope==='all'));loadCatalogConfiguration();updateFilterResetVisibility();loadProducts()};
     $$('#scopeTabs button').forEach(b=>b.onclick=()=>{state.products.scope=b.dataset.scope;state.products.page=1;$$('#scopeTabs button').forEach(x=>x.classList.toggle('active',x===b));updateFilterResetVisibility();loadProducts()});
     $('#prevPage').onclick=()=>{if(state.products.page>1){state.products.page--;loadProducts()}};$('#nextPage').onclick=()=>{if(state.products.page<state.products.pages){state.products.page++;loadProducts()}};
     $('#selectPage').onchange=e=>{state.products.items.forEach(p=>e.target.checked?state.selected.add(p.product_code):state.selected.delete(p.product_code));renderProducts(state.products.items)};$('#clearSelection').onclick=()=>{state.selected.clear();renderProducts(state.products.items)};$('#watchSelected').onclick=setWatch;$('#analyzeSelected').onclick=analyzeSelectedProducts;$('#exportSelected').onclick=()=>startTask('export_report','selected',[...state.selected]);$('#selectedReport').onclick=()=>exportVisibleProducts();
@@ -804,22 +1001,27 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#clearOperations'))$('#clearOperations').onclick=async()=>{if(!confirm('Удалить историю завершённых операций и журналы?'))return;try{await api('/api/tasks',{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}};$('#refreshLog').onclick=refreshLog;$('#stopTask').onclick=()=>stopTask(state.currentTask);
     $('#generateReport').onclick=generateFilteredReport;if($('#refreshReportPreview'))$('#refreshReportPreview').onclick=loadReports;
     ['reportPlatforms','reportScope','reportBrand','reportFreshness','reportProductType','reportSize','reportSeason','reportCharacteristicGroup'].forEach(id=>{if($('#'+id))$('#'+id).onchange=queueReportLoad});
+    if($('#catalogAttributeSearch'))$('#catalogAttributeSearch').oninput=applyCatalogSettingsSearch;
+    if($('#catalogAttributeMarketplace'))$('#catalogAttributeMarketplace').onchange=applyCatalogSettingsSearch;
+    if($('#enableVisibleCatalogFilters'))$('#enableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=true);queueCatalogFilterSave()};
+    if($('#disableVisibleCatalogFilters'))$('#disableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=false);queueCatalogFilterSave()};
+    if($('#refreshCatalogAttributes'))$('#refreshCatalogAttributes').onclick=async()=>{try{await api('/api/catalog/attributes/refresh',{method:'POST',timeoutMs:120000});await loadCatalogConfiguration({settings:true});toast('Характеристики обновлены');}catch(e){toast(e.message,true)}};
     $('#saveSettings').onclick=saveSettings;if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
     $('#passwordForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));try{await api('/api/account/password',{method:'POST',body:f});toast(t('password_changed','Пароль изменён'));hideModals();e.target.reset();}catch(err){toast(err.message,true)}};
-    if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);body.marketplaces=fd.getAll('marketplaces');const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};
+    if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};
     document.addEventListener('click',e=>{closeMultiSelects();const menu=$('#profileMenu'),button=$('#profileButton');if(menu&&!menu.hidden&&!menu.contains(e.target)&&!button.contains(e.target))menu.hidden=true;const nav=$('#sidebar'),mobile=$('#mobileMenu');if(nav?.classList.contains('open')&&!nav.contains(e.target)&&!mobile?.contains(e.target)){nav.classList.remove('open');mobile?.setAttribute('aria-expanded','false')};$$('.modal:not([hidden])').forEach(modal=>{if(e.target===modal)modal.hidden=true});});
     document.addEventListener('keydown',e=>{
       const helpOpen=$('#helpDrawer')?.classList.contains('open');
       if(e.key==='Tab'&&helpOpen){const nodes=helpFocusable();if(nodes.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}}
-      if(e.key==='Escape'){closeMultiSelects();closeDrawer();closeHelp();hideModals();if($('#profileMenu'))$('#profileMenu').hidden=true;$('#sidebar')?.classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false')}
+      if(e.key==='Escape'){closeMultiSelects();closeDrawer();closeHelp();closeNotifications();hideModals();if($('#profileMenu'))$('#profileMenu').hidden=true;$('#sidebar')?.classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false')}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();navigate('products');$('#productSearch').focus()}
     });
   }
   function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
 
   function applyMarketplaceAccess(){
-    const access=user.marketplaces&&Object.keys(user.marketplaces).length?user.marketplaces:{kaspi:true,ozon:true,halyk_market:true};
-    ['kaspi','ozon','halyk_market'].forEach(code=>{
+    const access=user.marketplaces&&typeof user.marketplaces==='object'?user.marketplaces:{};
+    ['kaspi','ozon','ozon_kz','halyk_market','forte_market','wildberries'].forEach(code=>{
       const allowed=Boolean(access[code]);
       const productOption=$(`#platformFilter option[value="${code}"]`);if(productOption){productOption.hidden=!allowed;productOption.disabled=!allowed;if(!allowed)productOption.selected=false;}
       const reportOption=$(`#reportPlatforms option[value="${code}"]`);if(reportOption){reportOption.hidden=!allowed;reportOption.disabled=!allowed;if(!allowed)reportOption.selected=false;}
@@ -832,7 +1034,17 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
 
 
   async function init(){
-    bind();applyMarketplaceAccess();state.lang=window.ITPUI?.getLocale()||localStorage.getItem('itp_lang')||'ru';state.theme=window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:false,emit:false});applyI18n(state.lang,{persist:false});updateHelpButton();updateOperationActions();await Promise.all([loadOptions(),loadOverview(),loadTasks()]);$('#app').hidden=false;setTimeout(()=>$('#boot').classList.add('hide'),150);setInterval(()=>{if(state.page==='operations' || state.tasks.some(task=>task.running))loadTasks()},3000);setInterval(loadOverview,15000);
+    bind();applyMarketplaceAccess();applyPermissions();state.lang=window.ITPUI?.getLocale()||localStorage.getItem('itp_lang')||'ru';state.theme=window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:false,emit:false});applyI18n(state.lang,{persist:false});updateHelpButton();updateOperationActions();
+    if(!can('view_dashboard'))navigate(Object.keys(PAGE_PERMISSIONS).find(page=>can(PAGE_PERMISSIONS[page]))||'settings');
+    $('#app').hidden=false;setTimeout(()=>$('#boot').classList.add('hide'),80);
+    const jobs=[];
+    if(can('view_products'))jobs.push(loadOptions(),loadCatalogConfiguration({settings:can('manage_filters')}));
+    if(can('view_dashboard'))jobs.push(loadOverview());
+    if(can('view_operations'))jobs.push(loadTasks());
+    jobs.push(loadNotifications({announce:false}));
+    Promise.allSettled(jobs).then(results=>results.filter(item=>item.status==='rejected').forEach(item=>console.error(item.reason)));
+    setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(loadOverview,15000);
+    setInterval(()=>loadNotifications(),10000);
   }
   init().catch(e=>{console.error(e);$('#boot').innerHTML=`<strong>Ошибка запуска</strong><span>${esc(e.message)}</span>`});
 })();

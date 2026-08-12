@@ -8,7 +8,7 @@ from importlib import metadata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-REQUIRED = ("flask", "waitress", "playwright", "psutil", "werkzeug")
+REQUIRED = ("flask", "waitress", "playwright", "psutil", "werkzeug", "cryptography")
 
 
 def main() -> int:

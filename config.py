@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from copy import deepcopy
 from pathlib import Path
@@ -40,6 +41,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "page_size": 200,
         "timeout_seconds": 30,
         "sleep_seconds": 0.25,
+        "max_products": 0,
+    },
+    "forte": {
+        "seller_name": "Unityre",
+        "merchant_id": "",
+        "city_id": "KZ",
+        "category_id": "171884c9-4db0-11e7-abc4-708bcda3b266",
+        "page_size": 100,
+        "timeout_seconds": 30,
+        "sleep_seconds": 0.25,
+        "max_products": 0,
+    },
+    "wildberries": {
+        "currency": "kzt",
+        "destination": "123585596",
+        "page_size": 100,
+        "timeout_seconds": 30,
+        "retries": 4,
+        "sleep_seconds": 0.35,
         "max_products": 0,
     },
     "analysis": {
@@ -108,6 +128,15 @@ def ensure_directories(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def get_secret_key() -> str:
+    environment_value = str(os.environ.get("ITP_SESSION_SECRET") or "").strip()
+    if environment_value:
+        if len(environment_value) < 32:
+            raise RuntimeError("ITP_SESSION_SECRET должен содержать не менее 32 символов.")
+        return environment_value
+    if str(os.environ.get("ITP_ENV") or "").strip().casefold() == "production":
+        raise RuntimeError(
+            "В production ключ сессии должен поступать из ITP_SESSION_SECRET."
+        )
     SECRET_PATH.parent.mkdir(parents=True, exist_ok=True)
     if SECRET_PATH.exists():
         value = SECRET_PATH.read_text(encoding="utf-8").strip()
@@ -119,4 +148,21 @@ def get_secret_key() -> str:
 
 
 def public_config(config: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(config)
+    blocked = {
+        "password", "password_hash", "secret", "client_secret", "api_key",
+        "access_token", "refresh_token", "authorization", "cookie",
+        "credential", "credentials", "ciphertext",
+    }
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: sanitize(item)
+                for key, item in value.items()
+                if str(key).casefold() not in blocked
+            }
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return deepcopy(value)
+
+    return sanitize(config)

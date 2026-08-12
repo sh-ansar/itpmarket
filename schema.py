@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from storage.database_backend import DatabaseBackend, DatabaseSettings
+
+from marketplace_registry import MARKETPLACES
+from tenant_security import ROLE_DEFAULT_PERMISSIONS, ROLE_LABELS
 
 
 BASE_SCHEMA = r"""
@@ -148,6 +152,7 @@ CREATE TABLE IF NOT EXISTS app_users (
     password_changed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active, role);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email_normalized ON app_users(lower(email));
 CREATE TABLE IF NOT EXISTS app_product_state (
     product_code TEXT PRIMARY KEY,
     watched INTEGER NOT NULL DEFAULT 0,
@@ -170,6 +175,24 @@ CREATE TABLE IF NOT EXISTS app_events (
     FOREIGN KEY(user_id) REFERENCES app_users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_app_events_time ON app_events(created_at DESC);
+CREATE TABLE IF NOT EXISTS app_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER,
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL DEFAULT 'system',
+    event_type TEXT NOT NULL,
+    level TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    action_url TEXT NOT NULL DEFAULT '',
+    dedupe_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    read_at TEXT,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_app_notifications_user_time ON app_notifications(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_notifications_unread ON app_notifications(user_id,read_at,created_at DESC);
 CREATE TABLE IF NOT EXISTS app_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_type TEXT NOT NULL,
@@ -178,8 +201,11 @@ CREATE TABLE IF NOT EXISTS app_reports (
     file_path TEXT NOT NULL,
     rows_count INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER,
+    tenant_id INTEGER,
+    platforms_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
-    FOREIGN KEY(created_by) REFERENCES app_users(id)
+    FOREIGN KEY(created_by) REFERENCES app_users(id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_app_reports_time ON app_reports(created_at DESC);
 
@@ -230,6 +256,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     registration_number TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     plan_code TEXT NOT NULL DEFAULT 'demo',
+    workspace_profile_json TEXT NOT NULL DEFAULT '{}',
     contact_email TEXT,
     contact_phone TEXT,
     created_at TEXT NOT NULL,
@@ -251,6 +278,58 @@ CREATE TABLE IF NOT EXISTS tenant_users (
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_users_user ON tenant_users(user_id, is_primary, is_active);
 
+CREATE TABLE IF NOT EXISTS tenant_roles (
+    tenant_id INTEGER NOT NULL,
+    role_code TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    is_system INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,role_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tenant_role_permissions (
+    tenant_id INTEGER NOT NULL,
+    role_code TEXT NOT NULL,
+    permission_code TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,role_code,permission_code),
+    FOREIGN KEY(tenant_id,role_code) REFERENCES tenant_roles(tenant_id,role_code) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_role_permissions_lookup
+ON tenant_role_permissions(tenant_id,role_code,is_enabled,permission_code);
+
+CREATE TABLE IF NOT EXISTS tenant_user_permissions (
+    tenant_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    permission_code TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,user_id,permission_code),
+    FOREIGN KEY(tenant_id,user_id) REFERENCES tenant_users(tenant_id,user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_user_permissions_lookup
+ON tenant_user_permissions(tenant_id,user_id,is_enabled,permission_code);
+
+CREATE TABLE IF NOT EXISTS tenant_user_marketplace_access (
+    tenant_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    is_allowed INTEGER NOT NULL DEFAULT 1,
+    updated_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,user_id,marketplace_code),
+    FOREIGN KEY(tenant_id,user_id) REFERENCES tenant_users(tenant_id,user_id) ON DELETE CASCADE,
+    FOREIGN KEY(updated_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_user_marketplace_access_lookup
+ON tenant_user_marketplace_access(tenant_id,user_id,is_allowed,marketplace_code);
+
 CREATE TABLE IF NOT EXISTS tenant_integrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,
@@ -262,27 +341,162 @@ CREATE TABLE IF NOT EXISTS tenant_integrations (
     last_sync_at TEXT,
     last_status TEXT,
     last_error TEXT,
+    seller_name TEXT NOT NULL DEFAULT '',
+    seller_identifier TEXT NOT NULL DEFAULT '',
+    seller_url TEXT NOT NULL DEFAULT '',
+    discovery_status TEXT NOT NULL DEFAULT 'idle',
+    approval_status TEXT NOT NULL DEFAULT 'draft',
+    discovery_json TEXT NOT NULL DEFAULT '{}',
+    submitted_by INTEGER,
+    submitted_at TEXT,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    review_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(tenant_id, integration_code),
-    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(submitted_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_integrations_status ON tenant_integrations(tenant_id, status, integration_code);
 
-
-CREATE TABLE IF NOT EXISTS user_marketplace_access (
+CREATE TABLE IF NOT EXISTS tenant_marketplace_sellers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
     marketplace_code TEXT NOT NULL,
-    is_enabled INTEGER NOT NULL DEFAULT 1,
+    external_seller_id TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    credential_ref TEXT,
+    status TEXT NOT NULL DEFAULT 'setup',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    PRIMARY KEY(tenant_id,user_id,marketplace_code),
-    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    UNIQUE(tenant_id,marketplace_code,external_seller_id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_user_marketplace_access_user
-ON user_marketplace_access(user_id,tenant_id,is_enabled,marketplace_code);
+CREATE INDEX IF NOT EXISTS idx_tenant_sellers_marketplace
+ON tenant_marketplace_sellers(tenant_id,marketplace_code,status);
+
+CREATE TABLE IF NOT EXISTS tenant_catalogs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER,
+    external_catalog_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    product_count INTEGER NOT NULL DEFAULT 0,
+    last_sync_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id,marketplace_code,external_catalog_id,tenant_seller_id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_catalogs_marketplace
+ON tenant_catalogs(tenant_id,marketplace_code,status);
+
+CREATE TABLE IF NOT EXISTS tenant_catalog_products (
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    source_product_code TEXT NOT NULL,
+    catalog_id INTEGER,
+    tenant_seller_id INTEGER,
+    seller_sku TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    brand TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
+    category_name TEXT NOT NULL DEFAULT '',
+    price_amount REAL,
+    currency TEXT NOT NULL DEFAULT '',
+    availability_status TEXT NOT NULL DEFAULT '',
+    attributes_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    source_updated_at TEXT,
+    PRIMARY KEY(tenant_id,marketplace_code,source_product_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(catalog_id) REFERENCES tenant_catalogs(id) ON DELETE SET NULL,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_catalog_products_visible
+ON tenant_catalog_products(tenant_id,marketplace_code,active,last_seen_at);
+
+CREATE TABLE IF NOT EXISTS tenant_catalog_import_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER,
+    catalog_id INTEGER,
+    status TEXT NOT NULL,
+    products_seen INTEGER NOT NULL DEFAULT 0,
+    products_saved INTEGER NOT NULL DEFAULT 0,
+    pages_loaded INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE SET NULL,
+    FOREIGN KEY(catalog_id) REFERENCES tenant_catalogs(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_catalog_import_runs_time
+ON tenant_catalog_import_runs(tenant_id,marketplace_code,started_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_marketplace_access (
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    is_allowed INTEGER NOT NULL DEFAULT 0,
+    granted_by INTEGER,
+    granted_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,marketplace_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(granted_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_marketplace_access_allowed
+ON tenant_marketplace_access(tenant_id,is_allowed,marketplace_code);
+
+
+CREATE TABLE IF NOT EXISTS tenant_product_state (
+    tenant_id INTEGER NOT NULL,
+    product_code TEXT NOT NULL,
+    watched INTEGER NOT NULL DEFAULT 0,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    note TEXT,
+    expected_monthly_units INTEGER,
+    updated_by INTEGER,
+    updated_at TEXT,
+    PRIMARY KEY(tenant_id,product_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(updated_by) REFERENCES app_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_product_state_watch
+ON tenant_product_state(tenant_id,watched,priority,updated_at);
+
+CREATE TABLE IF NOT EXISTS encrypted_credentials (
+    credential_ref TEXT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    credential_name TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id,marketplace_code,credential_name),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_encrypted_credentials_tenant
+ON encrypted_credentials(tenant_id,marketplace_code,credential_name);
 
 CREATE TABLE IF NOT EXISTS registration_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,6 +506,7 @@ CREATE TABLE IF NOT EXISTS registration_requests (
     email TEXT NOT NULL,
     phone TEXT,
     integrations_json TEXT NOT NULL DEFAULT '[]',
+    workspace_profile_json TEXT NOT NULL DEFAULT '{}',
     estimated_products INTEGER NOT NULL DEFAULT 0,
     comment TEXT,
     status TEXT NOT NULL DEFAULT 'new',
@@ -341,6 +556,38 @@ CREATE TABLE IF NOT EXISTS product_attribute_values (
     FOREIGN KEY(definition_id) REFERENCES product_attribute_definitions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_attribute_values_product ON product_attribute_values(tenant_id, platform, source_product_code);
+
+CREATE TABLE IF NOT EXISTS product_attribute_sources (
+    tenant_id INTEGER NOT NULL,
+    definition_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    source_attribute TEXT NOT NULL,
+    sample_values_json TEXT NOT NULL DEFAULT '[]',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,definition_id,marketplace_code,source_attribute),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(definition_id) REFERENCES product_attribute_definitions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_sources_marketplace
+ON product_attribute_sources(tenant_id,marketplace_code,source_attribute);
+
+CREATE TABLE IF NOT EXISTS tenant_catalog_filters (
+    tenant_id INTEGER NOT NULL,
+    attribute_key TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,attribute_key),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_catalog_filters_enabled
+ON tenant_catalog_filters(tenant_id,is_enabled,display_order,attribute_key);
 
 CREATE TABLE IF NOT EXISTS operation_schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -512,6 +759,248 @@ CREATE TABLE IF NOT EXISTS halyk_sync_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_halyk_sync_runs_time
 ON halyk_sync_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS forte_products (
+    product_id TEXT PRIMARY KEY,
+    short_id TEXT NOT NULL DEFAULT '',
+    slug TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    brand TEXT NOT NULL DEFAULT '',
+    product_url TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    price_full_kzt REAL,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    category_ids_json TEXT NOT NULL DEFAULT '[]',
+    categories_json TEXT NOT NULL DEFAULT '[]',
+    specs_json TEXT NOT NULL DEFAULT '[]',
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    seller_name TEXT NOT NULL DEFAULT '',
+    merchant_id TEXT NOT NULL DEFAULT '',
+    catalog_rating REAL,
+    catalog_reviews INTEGER,
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_catalog_at TEXT,
+    last_market_at TEXT,
+    last_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_forte_products_active_brand
+ON forte_products(active,brand,last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_forte_products_merchant
+ON forte_products(merchant_id,active,last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS forte_offers (
+    product_id TEXT NOT NULL,
+    merchant_key TEXT NOT NULL,
+    merchant_id TEXT NOT NULL DEFAULT '',
+    merchant_name TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    merchant_rating REAL,
+    merchant_reviews INTEGER,
+    offer_type TEXT NOT NULL DEFAULT '',
+    availability_status TEXT NOT NULL DEFAULT '',
+    is_own INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_checked_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY(product_id,merchant_key),
+    FOREIGN KEY(product_id) REFERENCES forte_products(product_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_forte_offers_product_active
+ON forte_offers(product_id,active,is_own,price_kzt);
+
+CREATE TABLE IF NOT EXISTS forte_price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    merchant_key TEXT NOT NULL,
+    merchant_name TEXT NOT NULL DEFAULT '',
+    price_kzt REAL,
+    is_own INTEGER NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL,
+    UNIQUE(run_id,product_id,merchant_key),
+    FOREIGN KEY(product_id) REFERENCES forte_products(product_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_forte_price_history_product_time
+ON forte_price_history(product_id,captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS forte_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    seller_name TEXT NOT NULL DEFAULT '',
+    merchant_id TEXT NOT NULL DEFAULT '',
+    city_id TEXT NOT NULL DEFAULT '',
+    total_reported INTEGER NOT NULL DEFAULT 0,
+    products_seen INTEGER NOT NULL DEFAULT 0,
+    offers_seen INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_forte_sync_runs_time
+ON forte_sync_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS subscription_features (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'general',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS subscription_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    price_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    term_days INTEGER NOT NULL DEFAULT 30,
+    daily_operation_limit INTEGER,
+    position_limit INTEGER,
+    is_public INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    display_order INTEGER NOT NULL DEFAULT 100,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS subscription_plan_features (
+    plan_id INTEGER NOT NULL,
+    feature_code TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    limit_value INTEGER,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY(plan_id,feature_code),
+    FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY(feature_code) REFERENCES subscription_features(code) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subscription_plan_marketplace_limits (
+    plan_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    position_limit INTEGER,
+    daily_operation_limit INTEGER,
+    PRIMARY KEY(plan_id,marketplace_code),
+    FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subscription_addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    extra_positions INTEGER NOT NULL,
+    price_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    term_days INTEGER,
+    is_public INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    display_order INTEGER NOT NULL DEFAULT 100,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS tenant_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    plan_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    requested_by INTEGER,
+    requested_at TEXT NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    starts_at TEXT,
+    ends_at TEXT,
+    price_amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    term_days INTEGER NOT NULL,
+    plan_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    review_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(plan_id) REFERENCES subscription_plans(id),
+    FOREIGN KEY(requested_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_subscriptions_current
+ON tenant_subscriptions(tenant_id,status,starts_at,ends_at);
+
+CREATE TABLE IF NOT EXISTS subscription_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    subscription_id INTEGER NOT NULL UNIQUE,
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    status TEXT NOT NULL DEFAULT 'confirmed',
+    paid_at TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    term_days INTEGER NOT NULL,
+    months_count REAL NOT NULL DEFAULT 1,
+    confirmed_by INTEGER,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(subscription_id) REFERENCES tenant_subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY(confirmed_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subscription_payments_time
+ON subscription_payments(paid_at DESC,tenant_id);
+
+CREATE TABLE IF NOT EXISTS tenant_subscription_addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    subscription_id INTEGER,
+    addon_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    quantity INTEGER NOT NULL DEFAULT 1,
+    requested_by INTEGER,
+    requested_at TEXT NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    starts_at TEXT,
+    ends_at TEXT,
+    price_amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    extra_positions INTEGER NOT NULL,
+    review_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(subscription_id) REFERENCES tenant_subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY(addon_id) REFERENCES subscription_addons(id),
+    FOREIGN KEY(requested_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_subscription_addons_current
+ON tenant_subscription_addons(tenant_id,status,marketplace_code,starts_at,ends_at);
+
+CREATE TABLE IF NOT EXISTS tenant_daily_usage (
+    tenant_id INTEGER NOT NULL,
+    usage_date TEXT NOT NULL,
+    marketplace_code TEXT NOT NULL DEFAULT '',
+    metric_code TEXT NOT NULL,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,usage_date,marketplace_code,metric_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
 """
 
 
@@ -520,6 +1009,10 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def ensure_database(path: Path) -> None:
+    settings = DatabaseSettings.from_environment()
+    if settings.backend is DatabaseBackend.POSTGRESQL:
+        settings.assert_runtime_ready()
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=60)
     try:
@@ -542,6 +1035,10 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE registration_requests ADD COLUMN locale TEXT NOT NULL DEFAULT 'ru'")
         if "source_page" not in _columns(conn, "registration_requests"):
             conn.execute("ALTER TABLE registration_requests ADD COLUMN source_page TEXT NOT NULL DEFAULT 'public_site'")
+        if "workspace_profile_json" not in _columns(conn, "tenants"):
+            conn.execute("ALTER TABLE tenants ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
+        if "workspace_profile_json" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
         if "run_date" not in _columns(conn, "operation_schedules"):
             conn.execute("ALTER TABLE operation_schedules ADD COLUMN run_date TEXT")
         if "platform_role" not in _columns(conn, "app_users"):
@@ -550,8 +1047,36 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE app_events ADD COLUMN tenant_id INTEGER")
         if "tenant_id" not in _columns(conn, "app_reports"):
             conn.execute("ALTER TABLE app_reports ADD COLUMN tenant_id INTEGER")
+        if "platforms_json" not in _columns(conn, "app_reports"):
+            conn.execute("ALTER TABLE app_reports ADD COLUMN platforms_json TEXT NOT NULL DEFAULT '[]'")
         if "tenant_id" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN tenant_id INTEGER")
+        if "last_seen_at" not in _columns(conn, "product_attribute_definitions"):
+            conn.execute("ALTER TABLE product_attribute_definitions ADD COLUMN last_seen_at TEXT")
+        integration_columns = _columns(conn, "tenant_integrations")
+        approval_column_added = "approval_status" not in integration_columns
+        integration_migrations = (
+            ("seller_name", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_identifier", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_url", "TEXT NOT NULL DEFAULT ''"),
+            ("discovery_status", "TEXT NOT NULL DEFAULT 'idle'"),
+            ("approval_status", "TEXT NOT NULL DEFAULT 'draft'"),
+            ("discovery_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("submitted_by", "INTEGER"),
+            ("submitted_at", "TEXT"),
+            ("reviewed_by", "INTEGER"),
+            ("reviewed_at", "TEXT"),
+            ("review_note", "TEXT NOT NULL DEFAULT ''"),
+        )
+        for column, declaration in integration_migrations:
+            if column not in integration_columns:
+                conn.execute(
+                    f"ALTER TABLE tenant_integrations ADD COLUMN {column} {declaration}"
+                )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_tenant_integrations_approval
+               ON tenant_integrations(approval_status,submitted_at,tenant_id,integration_code)"""
+        )
 
         stamp = conn.execute("SELECT datetime('now')").fetchone()[0]
         tenant = conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()
@@ -567,23 +1092,128 @@ def ensure_database(path: Path) -> None:
         else:
             default_tenant_id = int(tenant[0])
 
-        integrations = (
-            ('kaspi','Kaspi','active'),
-            ('ozon','Ozon','active'),
-            ('forte_market','Forte Market','coming_soon'),
-            ('halyk_market','Halyk Market','active'),
+        for tenant_id, in conn.execute("SELECT id FROM tenants").fetchall():
+            for role_code, label in ROLE_LABELS.items():
+                conn.execute(
+                    """
+                    INSERT INTO tenant_roles(
+                        tenant_id,role_code,display_name,is_system,created_at,updated_at
+                    ) VALUES(?,?,?,1,?,?)
+                    ON CONFLICT(tenant_id,role_code) DO NOTHING
+                    """,
+                    (int(tenant_id), role_code, label, stamp, stamp),
+                )
+                for permission_code in ROLE_DEFAULT_PERMISSIONS[role_code]:
+                    conn.execute(
+                        """
+                        INSERT INTO tenant_role_permissions(
+                            tenant_id,role_code,permission_code,is_enabled,created_at,updated_at
+                        ) VALUES(?,?,?,1,?,?)
+                        ON CONFLICT(tenant_id,role_code,permission_code) DO NOTHING
+                        """,
+                        (int(tenant_id), role_code, permission_code, stamp, stamp),
+                    )
+            for key, label, order in (
+                ("title", "Название", 10),
+                ("marketplace", "Marketplace", 20),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO tenant_catalog_filters(
+                        tenant_id,attribute_key,display_name,is_enabled,display_order,
+                        config_json,created_at,updated_at
+                    ) VALUES(?,?,?,1,?,'{}',?,?)
+                    ON CONFLICT(tenant_id,attribute_key) DO NOTHING
+                    """,
+                    (int(tenant_id), key, label, order, stamp, stamp),
+                )
+
+        legacy_default_states = {
+            "kaspi": ("active", "approved"),
+            "ozon": ("active", "approved"),
+            "ozon_kz": ("disabled", "draft"),
+            "forte_market": ("active", "approved"),
+            "halyk_market": ("active", "approved"),
+        }
+        integrations = tuple(
+            (
+                definition.code,
+                definition.label,
+                *legacy_default_states.get(definition.code, ("disabled", "draft")),
+            )
+            for definition in MARKETPLACES
         )
-        for code,title,status in integrations:
+        for code,title,status,approval_status in integrations:
             conn.execute(
                 """
-                INSERT INTO tenant_integrations(tenant_id,integration_code,display_name,status,created_at,updated_at)
-                VALUES(?,?,?,?,?,?)
+                INSERT INTO tenant_integrations(
+                    tenant_id,integration_code,display_name,status,approval_status,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?)
                 ON CONFLICT(tenant_id,integration_code) DO NOTHING
                 """,
-                (default_tenant_id,code,title,status,stamp,stamp),
+                (default_tenant_id,code,title,status,approval_status,stamp,stamp),
+            )
+        # Every company receives one configurable card per marketplace. Existing
+        # rows are preserved; newly discovered marketplaces start disabled.
+        for tenant_id, in conn.execute("SELECT id FROM tenants").fetchall():
+            for code,title,_,_ in integrations:
+                conn.execute(
+                    """
+                    INSERT INTO tenant_integrations(
+                        tenant_id,integration_code,display_name,status,approval_status,created_at,updated_at
+                    ) VALUES(?,?,?,'disabled','draft',?,?)
+                    ON CONFLICT(tenant_id,integration_code) DO NOTHING
+                    """,
+                    (int(tenant_id),code,title,stamp,stamp),
+                )
+        conn.execute(
+            """UPDATE tenant_integrations SET display_name='Ozon.ru'
+               WHERE integration_code='ozon' AND display_name<>'Ozon.ru'"""
+        )
+        conn.execute(
+            """UPDATE tenant_integrations SET display_name='Halyk Market'
+               WHERE integration_code='halyk_market' AND display_name<>'Halyk Market'"""
+        )
+        conn.execute(
+            """UPDATE tenant_integrations SET display_name='Forte Market'
+               WHERE integration_code='forte_market' AND display_name<>'Forte Market'"""
+        )
+        # Keep the legacy approval column internally compatible for working
+        # connections; the current product flow has no integration review step.
+        if approval_column_added:
+            conn.execute(
+                """UPDATE tenant_integrations SET approval_status='approved'
+                   WHERE approval_status='draft' AND status IN ('active','setup')
+                     AND submitted_at IS NULL AND reviewed_at IS NULL"""
             )
 
-        users = conn.execute("SELECT id,role FROM app_users").fetchall()
+        # Company grants and live connections are different concepts. Preserve
+        # only proven legacy connections during the one-way compatibility
+        # backfill; pending and newly created companies receive no grants.
+        conn.execute(
+            """
+            INSERT INTO tenant_marketplace_access(
+                tenant_id,marketplace_code,is_allowed,granted_at,updated_at
+            )
+            SELECT ti.tenant_id,ti.integration_code,1,?,?
+            FROM tenant_integrations ti
+            JOIN tenants t ON t.id=ti.tenant_id
+            WHERE t.status IN ('active','approved','confirmed')
+              AND ti.status IN ('active','setup')
+              AND ti.approval_status='approved'
+            ON CONFLICT(tenant_id,marketplace_code) DO NOTHING
+            """,
+            (stamp, stamp),
+        )
+
+        # Compatibility only: attach genuinely orphaned legacy users to the
+        # default tenant. Never add a second tenant membership to modern users.
+        users = conn.execute(
+            """SELECT u.id,u.role FROM app_users u
+               WHERE NOT EXISTS(
+                   SELECT 1 FROM tenant_users tu WHERE tu.user_id=u.id
+               )"""
+        ).fetchall()
         for user_id,role in users:
             conn.execute(
                 """
@@ -593,47 +1223,32 @@ def ensure_database(path: Path) -> None:
                 """,
                 (default_tenant_id,int(user_id),str(role or 'viewer'),1,stamp),
             )
-        memberships = conn.execute(
-            "SELECT tenant_id,user_id FROM tenant_users WHERE is_active=1"
-        ).fetchall()
+        # Older versions could accidentally attach every user to the default
+        # tenant on startup. Disable only the later duplicate default
+        # membership; rows are retained for audit and rollback.
+        conn.execute(
+            """UPDATE tenant_users
+               SET is_primary=0,is_active=0
+               WHERE tenant_id=?
+                 AND EXISTS(
+                     SELECT 1 FROM tenant_users other
+                     WHERE other.user_id=tenant_users.user_id
+                       AND other.tenant_id<>tenant_users.tenant_id
+                       AND other.is_active=1
+                       AND datetime(other.created_at)<=datetime(tenant_users.created_at)
+                 )""",
+            (default_tenant_id,),
+        )
         conn.execute(
             "UPDATE tenant_integrations SET status='active',updated_at=? "
             "WHERE integration_code='halyk_market' AND status='coming_soon'",
             (stamp,),
         )
-        for membership in memberships:
-            tenant_id = int(membership[0])
-            user_id = int(membership[1])
-            integrations = conn.execute(
-                "SELECT integration_code,status FROM tenant_integrations WHERE tenant_id=?",
-                (tenant_id,),
-            ).fetchall()
-            for integration_code, integration_status in integrations:
-                enabled = 1 if str(integration_status) in {"active", "setup"} else 0
-                conn.execute(
-                    """
-                    INSERT INTO user_marketplace_access(
-                        tenant_id,user_id,marketplace_code,is_enabled,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?)
-                    ON CONFLICT(tenant_id,user_id,marketplace_code) DO NOTHING
-                    """,
-                    (tenant_id,user_id,str(integration_code),enabled,stamp,stamp),
-                )
-
         conn.execute(
-            """
-            UPDATE user_marketplace_access
-            SET is_enabled=1,updated_at=?
-            WHERE marketplace_code='halyk_market'
-              AND is_enabled=0
-              AND tenant_id IN (
-                  SELECT tenant_id FROM tenant_integrations
-                  WHERE integration_code='halyk_market' AND status='active'
-              )
-            """,
+            "UPDATE tenant_integrations SET status='active',updated_at=? "
+            "WHERE integration_code='forte_market' AND status='coming_soon'",
             (stamp,),
         )
-
         first_admin = conn.execute("SELECT id FROM app_users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
         if first_admin is not None:
             conn.execute(
@@ -643,6 +1258,63 @@ def ensure_database(path: Path) -> None:
         conn.execute("UPDATE app_events SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
         conn.execute("UPDATE app_reports SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
         conn.execute("UPDATE app_product_state SET tenant_id=? WHERE tenant_id IS NULL",(default_tenant_id,))
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tenant_product_state(
+                tenant_id,product_code,watched,priority,note,expected_monthly_units,
+                updated_by,updated_at
+            )
+            SELECT COALESCE(tenant_id,?),product_code,watched,priority,note,
+                   expected_monthly_units,updated_by,updated_at
+            FROM app_product_state
+            """,
+            (default_tenant_id,),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tenant_catalog_products(
+                tenant_id,marketplace_code,source_product_code,title,source_url,image_url,
+                currency,active,first_seen_at,last_seen_at
+            )
+            SELECT ?, 'kaspi', product_code, COALESCE(title_catalog,''),
+                   COALESCE(product_url,''), COALESCE(image_url,''), 'KZT',
+                   1, COALESCE(collected_at,?), COALESCE(collected_at,?)
+            FROM catalog_products
+            """,
+            (default_tenant_id, stamp, stamp),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tenant_catalog_products(
+                tenant_id,marketplace_code,source_product_code,title,brand,source_url,image_url,
+                category_name,price_amount,currency,availability_status,attributes_json,
+                active,first_seen_at,last_seen_at,source_updated_at
+            )
+            SELECT ?, 'halyk_market', product_id, COALESCE(name,''), COALESCE(brand,''),
+                   COALESCE(product_url,''), COALESCE(image_url,''),
+                   COALESCE(json_extract(categories_json,'$[0]'),''), price_kzt,
+                   COALESCE(currency,'KZT'), '', COALESCE(specs_json,'[]'),
+                   COALESCE(active,1), first_seen_at, last_seen_at, last_catalog_at
+            FROM halyk_products
+            """,
+            (default_tenant_id,),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tenant_catalog_products(
+                tenant_id,marketplace_code,source_product_code,tenant_seller_id,title,brand,
+                source_url,image_url,category_name,price_amount,currency,availability_status,
+                attributes_json,active,first_seen_at,last_seen_at,source_updated_at
+            )
+            SELECT ?, 'forte_market', product_id, NULL, COALESCE(name,''), COALESCE(brand,''),
+                   COALESCE(product_url,''), COALESCE(image_url,''),
+                   COALESCE(json_extract(categories_json,'$[0]'),''),
+                   price_kzt, COALESCE(currency,'KZT'), '',
+                   COALESCE(specs_json,'[]'), COALESCE(active,1), first_seen_at,last_seen_at,last_catalog_at
+            FROM forte_products
+            """,
+            (default_tenant_id,),
+        )
         conn.commit()
     finally:
         conn.close()

@@ -28,8 +28,15 @@ class BrowserSession:
     def __init__(self, debug_port: int, start_url: str) -> None:
         self.debug_port = debug_port
         self.start_url = start_url
+        parsed_start = urlparse(start_url)
+        self.site_host = str(parsed_start.hostname or "www.ozon.ru").casefold()
+        self.site_root = f"https://{self.site_host}"
+        bare_host = self.site_host.removeprefix("www.")
+        self.allowed_hosts = {bare_host, f"www.{bare_host}"}
+        self.marketplace_label = "Ozon.kz" if bare_host == "ozon.kz" else "Ozon.ru"
         self.debug_base = f"http://127.0.0.1:{debug_port}"
-        self.profile_dir = Path(__file__).resolve().parent / "chrome_vpn_profile"
+        profile_name = "chrome_kz_profile" if bare_host == "ozon.kz" else "chrome_vpn_profile"
+        self.profile_dir = Path(__file__).resolve().parent / profile_name
         self.driver = None
         self.target_id = ""
         self.original_url = ""
@@ -38,7 +45,7 @@ class BrowserSession:
     def debugger_json(self, path: str, timeout: int = 8) -> Any:
         request = urllib.request.Request(
             f"{self.debug_base}{path}",
-            headers={"User-Agent": "Unityre-Ozon-Collector/3.0"},
+            headers={"User-Agent": "Spyon-Ozon-Collector/3.1"},
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -46,20 +53,18 @@ class BrowserSession:
         except urllib.error.URLError as exc:
             if path == "/json/list":
                 raise RuntimeError(
-                    "Ozon debug-браузер недоступен на 127.0.0.1:"
-                    f"{self.debug_port}. Запустите collectors\\ozon\\1_OPEN_VPN_BROWSER.bat, "
-                    "откройте Ozon через VPN и оставьте это окно Chrome открытым."
+                    f"{self.marketplace_label} debug-браузер недоступен на 127.0.0.1:"
+                    f"{self.debug_port}. Повторите запуск и оставьте открывшееся окно Chrome открытым."
                 ) from exc
             raise
 
-    @staticmethod
-    def _is_ozon_page(url: str) -> bool:
+    def _is_ozon_page(self, url: str) -> bool:
         try:
             parsed = urlparse(url)
         except Exception:
             return False
         host = parsed.netloc.lower().split(":")[0]
-        return host in {"ozon.ru", "www.ozon.ru"} and "/api/" not in parsed.path
+        return host in self.allowed_hosts and "/api/" not in parsed.path
 
     def _debugger_ready(self, timeout: int = 2) -> bool:
         try:
@@ -97,7 +102,7 @@ class BrowserSession:
     def _launch_debug_browser(self) -> None:
         if os.environ.get("OZON_AUTO_OPEN_BROWSER", "1").strip().casefold() in {"0", "false", "no", "off"}:
             raise RuntimeError(
-                "Ozon debug browser is not open and OZON_AUTO_OPEN_BROWSER is disabled."
+                f"{self.marketplace_label} debug browser is not open and OZON_AUTO_OPEN_BROWSER is disabled."
             )
         chrome = self._chrome_executable()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +123,7 @@ class BrowserSession:
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
         subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=creationflags)
         self.launched_browser = True
-        print(f"Ozon browser opened on port {self.debug_port}. Profile: {self.profile_dir}")
+        print(f"{self.marketplace_label} browser opened on port {self.debug_port}. Profile: {self.profile_dir}")
 
     def ensure_debug_browser(self) -> None:
         if self._debugger_ready():
@@ -130,7 +135,7 @@ class BrowserSession:
                 return
             time.sleep(1.0)
         raise RuntimeError(
-            f"Ozon browser was opened, but debugger port {self.debug_port} did not become ready."
+            f"{self.marketplace_label} browser was opened, but debugger port {self.debug_port} did not become ready."
         )
 
     def _open_debug_tab(self, url: str) -> None:
@@ -173,7 +178,7 @@ class BrowserSession:
             candidates.append({**target, "_score": score})
         if not candidates:
             raise RuntimeError(
-                "Не найдена открытая вкладка Ozon. Запустите 1_OPEN_VPN_BROWSER.bat."
+                f"Не найдена открытая вкладка {self.marketplace_label}. Повторите запуск сборщика."
             )
         candidates.sort(
             key=lambda row: (int(row.get("_score") or 0), len(str(row.get("title") or ""))),
@@ -199,7 +204,7 @@ class BrowserSession:
                 self.driver = webdriver.Chrome(options=options)
         except WebDriverException as exc:
             raise RuntimeError(
-                "ChromeDriver для Ozon не найден или не подходит к установленному Chrome. "
+                f"ChromeDriver для {self.marketplace_label} не найден или не подходит к установленному Chrome. "
                 "Запустите collectors\\ozon\\0_SETUP.bat. Если сервер без доступа к Selenium/Google, "
                 "положите подходящий chromedriver.exe в collectors\\ozon\\drivers\\chromedriver.exe "
                 "или задайте переменную CHROMEDRIVER_PATH."
@@ -261,7 +266,7 @@ class BrowserSession:
             except Exception:
                 pass
             time.sleep(0.5)
-        raise RuntimeError("Не удалось переключиться на рабочую вкладку Ozon.")
+        raise RuntimeError(f"Не удалось переключиться на рабочую вкладку {self.marketplace_label}.")
 
     def snapshot(self) -> tuple[str, str, str]:
         assert self.driver is not None
@@ -336,7 +341,8 @@ class BrowserSession:
                   const text = ((card || anchor).innerText || anchor.textContent || '').trim();
                   const lines = text.split(/\\n+/).map(v => v.trim()).filter(Boolean);
                   const title = anchor.getAttribute('aria-label') || (img && (img.alt || img.title)) || lines.find(v => !/[₽₸]/.test(v)) || '';
-                  const priceLine = lines.find(v => /[₽₸]|руб/i.test(v)) || '';
+                  const priceLines = lines.filter(v => /[₽₸]|руб/i.test(v));
+                  const priceLine = priceLines.find(v => !/(?:×|x)\s*\d+\s*(?:мес|month)/i.test(v)) || priceLines[0] || '';
                   rows.push({
                     url: href,
                     name: title,
@@ -541,7 +547,7 @@ class BrowserSession:
     def load_product_api(self, article: str, wait_seconds: int, reloads: int) -> dict[str, Any]:
         assert self.driver is not None
         url = (
-            "https://www.ozon.ru/api/composer-api.bx/page/json/v2"
+            f"{self.site_root}/api/composer-api.bx/page/json/v2"
             f"?url=/product/{article}&__rr=1"
         )
         started = time.monotonic()

@@ -29,6 +29,25 @@
     "sleep_seconds": 0.25,
     "max_products": 0
   },
+  "forte": {
+    "seller_name": "",
+    "merchant_id": "",
+    "city_id": "KZ",
+    "category_id": "171884c9-4db0-11e7-abc4-708bcda3b266",
+    "page_size": 100,
+    "timeout_seconds": 30,
+    "sleep_seconds": 0.25,
+    "max_products": 0
+  },
+  "wildberries": {
+    "currency": "kzt",
+    "destination": "123585596",
+    "page_size": 100,
+    "timeout_seconds": 30,
+    "retries": 4,
+    "sleep_seconds": 0.35,
+    "max_products": 0
+  },
   "analysis": {
     "discover_workers": 2,
     "price_workers": 2,

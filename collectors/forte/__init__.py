@@ -1,0 +1,1 @@
+"""Forte Market collector package."""

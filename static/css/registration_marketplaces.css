@@ -1,0 +1,39 @@
+.integration-selector {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.integration-description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.integration-card:has(input:checked) {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 7%, var(--surface));
+  box-shadow: 0 12px 28px rgba(7, 155, 208, .12);
+}
+
+.marketplace-selection-error {
+  display: block;
+  margin-top: 10px;
+  color: #a83243;
+}
+
+.integration-selector:not(.invalid) .marketplace-selection-error {
+  display: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -5,15 +5,17 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sqlite3
 import sys
 import time
 import traceback
+from dataclasses import replace
 from urllib.parse import quote_plus
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from collector_config import ROOT, Settings, load_settings
+from collector_config import ROOT, Settings, load_settings, seller_root_url
 from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import, seller_match_status
 from registry import Registry, now_iso
@@ -23,6 +25,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 from collectors.ozon.market_matching import build_search_queries, evaluate_match
+from catalog_configuration_service import CatalogConfigurationService
+from storage.postgres_compat import connect_database
 
 
 def run_id_for(mode: str) -> str:
@@ -33,6 +37,17 @@ def run_id_for(mode: str) -> str:
 def sleep_range(pair: tuple[float, float], multiplier: float = 1.0) -> None:
     delay = random.uniform(pair[0], pair[1]) * multiplier
     time.sleep(delay)
+
+
+def portable_storage_path(path: Path) -> str:
+    """Keep raw artefact paths portable across the RU and KZ collectors."""
+    resolved = path.resolve()
+    for root in (ROOT.resolve(), PROJECT_ROOT.resolve()):
+        try:
+            return str(resolved.relative_to(root))
+        except ValueError:
+            continue
+    return str(resolved)
 
 
 class Collector:
@@ -61,9 +76,9 @@ class Collector:
 
     def open_browser(self) -> dict[str, Any]:
         browser = self.ensure_browser()
-        print("Ozon browser is ready.")
+        print("Ozon.ru browser is ready.")
         print(f"Working tab: {browser.original_url}")
-        print("Choose a Russian city or pickup point in this Chrome profile if Ozon asks for it.")
+        print("Choose a Russian city or pickup point in this Chrome profile if Ozon.ru asks for it.")
         return {
             "status": "READY",
             "debug_port": self.settings.debug_port,
@@ -97,7 +112,7 @@ class Collector:
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{run_id}.json"
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        return str(path.relative_to(ROOT))
+        return portable_storage_path(path)
 
     def discover(self, product_limit: int | None = None, max_pages: int | None = None) -> dict[str, Any]:
         mode = "discover"
@@ -515,7 +530,7 @@ class Collector:
         print(f"\nГотово: {metrics['items_success']}/{metrics['items_total']}; точных/сильных {metrics['exact_found']}; бренд+размер {metrics['comparable_found']}; время {metrics['duration_seconds']} сек.")
         return {"run_id":run_id,"run_dir":str(run_dir),"status":status,**metrics}
 
-    def full_sync(self, limit: int | None = None) -> dict[str, Any]:
+    def sync_catalog(self, limit: int | None = None) -> dict[str, Any]:
         discovery = self.discover()
         remaining = self.registry.select_articles(
             "enrich-new", limit or 0, self.settings.stale_days, self.settings.max_task_attempts
@@ -526,6 +541,15 @@ class Collector:
         else:
             details = self.process("enrich-new", limit)
         return {"discovery": discovery, "details": details}
+
+    def full_sync(self, limit: int | None = None) -> dict[str, Any]:
+        # Keep the same Selenium attachment alive for every stage.  Separate
+        # CLI processes detach from the debug target and can leave the next
+        # stage without an Ozon tab.
+        catalog = self.sync_catalog(limit)
+        prices = self.process("refresh-prices", limit)
+        market = self.market_search(limit)
+        return {"catalog": catalog, "prices": prices, "market": market}
 
     def generate_outputs(self) -> None:
         self.registry.export_current(
@@ -545,36 +569,140 @@ def load_article_filter(path_value: str | None) -> set[str] | None:
     value = json.loads(path.read_text(encoding="utf-8"))
     raw = value.get("articles") if isinstance(value, dict) else value
     if not isinstance(raw, list):
-        raise ValueError("Некорректный список товаров Ozon.")
+        raise ValueError("Некорректный список товаров Ozon.ru.")
     result = {str(article).strip().removeprefix("ozon:") for article in raw if str(article).strip()}
     return result
 
 
+def settings_for_args(settings: Settings, args: argparse.Namespace) -> Settings:
+    updates: dict[str, Any] = {}
+    source_url = str(getattr(args, "source_url", "") or "").strip()
+    if source_url:
+        root_url = seller_root_url(source_url)
+        if not root_url:
+            raise ValueError("Для российского коллектора укажите ссылку продавца на ozon.ru.")
+        updates["start_url"] = root_url
+        updates["start_urls"] = (root_url,)
+    expected = str(getattr(args, "expected_seller", "") or "").strip()
+    if expected:
+        updates["expected_seller"] = expected
+    database_path = str(getattr(args, "database_path", "") or "").strip()
+    if database_path:
+        updates["database_path"] = Path(database_path).resolve()
+    return replace(settings, **updates) if updates else settings
+
+
+def materialize_tenant_catalog(
+    settings: Settings,
+    tenant_id: int,
+    app_db: str,
+    marketplace_code: str = "ozon",
+) -> int:
+    if int(tenant_id or 0) <= 0 or not str(app_db or "").strip():
+        return 0
+    source_urls = {str(url).strip() for url in settings.start_urls if str(url).strip()}
+    conn = connect_database(settings.database_path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        params: list[Any] = []
+        where = "p.active=1"
+        if source_urls:
+            placeholders = ",".join("?" for _ in source_urls)
+            where += f" AND EXISTS(SELECT 1 FROM product_sources ps WHERE ps.article=p.article AND ps.source_url IN ({placeholders}))"
+            params.extend(sorted(source_urls))
+        rows = conn.execute(
+            f"""SELECT p.* FROM products p WHERE {where} ORDER BY p.article""",
+            params,
+        ).fetchall()
+        offers = {
+            str(row["article"]): dict(row)
+            for row in conn.execute(
+                """SELECT o.* FROM offers o
+                   WHERE o.active=1 AND (
+                       lower(o.seller_name)=lower(?) OR lower(o.seller_id)=lower(?)
+                       OR lower(o.seller_url) LIKE lower(?)
+                   ) ORDER BY o.last_checked_at DESC""",
+                (
+                    settings.expected_seller,
+                    settings.expected_seller,
+                    f"%/{settings.expected_seller}/%",
+                ),
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    products: list[dict[str, Any]] = []
+    currency = "KZT" if marketplace_code == "ozon_kz" else "RUB"
+    for raw in rows:
+        value = dict(raw)
+        own = offers.get(str(value.get("article") or ""), {})
+        attributes = [
+            {"name": label, "value": value.get(key)}
+            for key, label in (
+                ("model", "Модель"), ("manufacturer_article", "Артикул производителя"),
+                ("tire_size", "Размер"), ("season", "Сезон"),
+            )
+            if value.get(key) not in (None, "", "UNKNOWN")
+        ]
+        products.append({
+            "product_id": value.get("article") or "",
+            "title": value.get("title") or value.get("article") or "",
+            "brand": value.get("brand") or "",
+            "model": value.get("model") or "",
+            "url": value.get("canonical_url") or "",
+            "image_url": value.get("image_url") or "",
+            "price": own.get("card_price") or value.get("catalog_price") or None,
+            "currency": own.get("currency") or currency,
+            "category": "",
+            "attributes": attributes,
+            "updated_at": value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at"),
+        })
+    return CatalogConfigurationService(Path(app_db)).replace_catalog_products(
+        int(tenant_id), marketplace_code, products
+    )
+
+
+def add_connection_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-url", default="")
+    parser.add_argument("--expected-seller", default="")
+    parser.add_argument("--database-path", default="")
+    parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--app-db", default="")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ozon Collector 3.0")
+    parser = argparse.ArgumentParser(description="Ozon.ru Collector 3.0")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("open-browser")
+    open_browser = sub.add_parser("open-browser")
+    add_connection_options(open_browser)
     discover = sub.add_parser("discover")
+    add_connection_options(discover)
     discover.add_argument("--limit", type=int, default=None)
     discover.add_argument("--pages", type=int, default=None)
+    sync_catalog = sub.add_parser("sync-catalog")
+    add_connection_options(sync_catalog)
+    sync_catalog.add_argument("--limit", type=int, default=None)
     for name in ("enrich-new", "refresh-prices", "refresh-stale", "retry-failed", "stress-test"):
         child = sub.add_parser(name)
+        add_connection_options(child)
         child.add_argument("--limit", type=int, default=None)
         child.add_argument("--articles-file", default="")
     market = sub.add_parser("market-search")
+    add_connection_options(market)
     market.add_argument("--limit", type=int, default=None)
     market.add_argument("--articles-file", default="")
     full = sub.add_parser("full-sync")
+    add_connection_options(full)
     full.add_argument("--limit", type=int, default=None)
-    sub.add_parser("report")
-    sub.add_parser("export")
-    sub.add_parser("stats")
+    for name in ("report", "export", "stats"):
+        child = sub.add_parser(name)
+        add_connection_options(child)
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    settings = load_settings()
+    settings = settings_for_args(load_settings(), args)
     collector = Collector(settings)
     article_filter = load_article_filter(getattr(args, "articles_file", ""))
     try:
@@ -582,6 +710,8 @@ def main() -> int:
             collector.open_browser()
         elif args.command == "discover":
             collector.discover(args.limit, args.pages)
+        elif args.command == "sync-catalog":
+            collector.sync_catalog(args.limit)
         elif args.command in {"enrich-new", "refresh-prices", "refresh-stale", "retry-failed", "stress-test"}:
             collector.process(args.command, args.limit, article_filter)
         elif args.command == "market-search":
@@ -596,6 +726,10 @@ def main() -> int:
             print(settings.exports_dir)
         elif args.command == "stats":
             print(json.dumps(collector.registry.counts(), ensure_ascii=False, indent=2))
+        if args.command not in {"open-browser", "stats"}:
+            materialize_tenant_catalog(
+                settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon"
+            )
         return 0
     finally:
         collector.close()

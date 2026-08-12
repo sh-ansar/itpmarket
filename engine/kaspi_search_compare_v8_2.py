@@ -39,6 +39,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from storage.postgres_compat import connect_database
+
 try:
     from playwright.async_api import (
         BrowserContext,
@@ -637,7 +643,7 @@ class Database:
                 f"Не найдена база {path}. Сначала укажите путь к существующему "
                 "output_market_v7\\kaspi_market.db"
             )
-        self.conn = sqlite3.connect(path, timeout=60)
+        self.conn = connect_database(path, timeout=60)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
@@ -1580,11 +1586,23 @@ def _price_position(
     return status, round(difference, 2), difference_pct
 
 
-def report_rows(db: Database, seller_name: str) -> list[dict[str, Any]]:
+def report_rows(
+    db: Database,
+    seller_name: str,
+    product_codes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    requested_codes = [clean_text(value) for value in (product_codes or []) if clean_text(value)]
+    code_filter = ""
+    params: list[Any] = []
+    if product_codes is not None:
+        if not requested_codes:
+            return []
+        code_filter = f"WHERE c.product_code IN ({','.join('?' for _ in requested_codes)})"
+        params = requested_codes
     sources = [
         dict(row)
         for row in db.conn.execute(
-            """
+            f"""
             SELECT
                 c.product_code,
                 COALESCE(NULLIF(d.title_detail, ''), c.title_catalog) AS title,
@@ -1603,8 +1621,10 @@ def report_rows(db: Database, seller_name: str) -> list[dict[str, Any]]:
             LEFT JOIN product_details d ON d.product_code=c.product_code
             LEFT JOIN market_search_runs r
                 ON r.source_product_code=c.product_code
+            {code_filter}
             ORDER BY c.page_number, c.position_on_page, c.product_code
-            """
+            """,
+            params,
         ).fetchall()
     ]
 

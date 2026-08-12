@@ -7,6 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+from storage.postgres_compat import connect_database
 
 
 def _esc(value: Any) -> str:
@@ -19,7 +20,7 @@ def _pct(value: float) -> str:
 
 def generate_dashboard(db_path: Path, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = connect_database(db_path)
     conn.row_factory = sqlite3.Row
 
     counts = {

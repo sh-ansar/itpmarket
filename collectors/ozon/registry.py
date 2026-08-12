@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
+from storage.postgres_compat import connect_database
 
 
 SCHEMA = r"""
@@ -243,7 +244,7 @@ class Registry:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path)
+        self.conn = connect_database(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.backfill_source_memberships()

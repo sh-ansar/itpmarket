@@ -1,0 +1,489 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Iterator
+
+
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class TablePlan:
+    source_schema: str
+    table: str
+    rows: int
+    columns: list[str]
+    primary_key: list[str]
+    target_table: str
+
+
+def _postgres_type(declared: str) -> str:
+    value = str(declared or "").strip().upper()
+    if "BLOB" in value:
+        return "bytea"
+    if any(token in value for token in ("REAL", "FLOA", "DOUB")):
+        return "double precision"
+    if "INT" in value:
+        return "bigint"
+    return "text"
+
+
+def _postgres_default(value: Any, target_type: str) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.strip("()").strip().casefold().replace(" ", "")
+    if normalized in {"datetime('now')", "current_timestamp"}:
+        return "CURRENT_TIMESTAMP::text" if target_type == "text" else "CURRENT_TIMESTAMP"
+    if raw.upper() == "NULL":
+        return None
+    if target_type in {"bigint", "double precision"}:
+        try:
+            float(raw)
+            return raw
+        except ValueError:
+            return None
+    if raw.startswith("'") and raw.endswith("'"):
+        return raw
+    return None
+
+
+def sqlite_table_metadata(path: Path, table: str) -> dict[str, Any]:
+    conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=30)
+    try:
+        quoted = quote_sqlite_identifier(table)
+        columns = []
+        for row in conn.execute(f"PRAGMA table_info({quoted})").fetchall():
+            columns.append({
+                "position": int(row[0]), "name": str(row[1]),
+                "declared_type": str(row[2] or ""), "not_null": bool(row[3]),
+                "default": row[4], "primary_position": int(row[5] or 0),
+            })
+        indexes = []
+        for index in conn.execute(f"PRAGMA index_list({quoted})").fetchall():
+            index_name = str(index[1])
+            index_columns = [
+                str(item[2]) for item in conn.execute(
+                    f"PRAGMA index_info({quote_sqlite_identifier(index_name)})"
+                ).fetchall() if item[2] is not None
+            ]
+            if index_columns:
+                indexes.append({
+                    "name": index_name, "unique": bool(index[2]),
+                    "origin": str(index[3] or ""), "columns": index_columns,
+                })
+        foreign_rows = conn.execute(f"PRAGMA foreign_key_list({quoted})").fetchall()
+        foreign_keys: dict[int, dict[str, Any]] = {}
+        for row in foreign_rows:
+            item = foreign_keys.setdefault(int(row[0]), {
+                "table": str(row[2]), "from": [], "to": [],
+                "on_update": str(row[5] or "NO ACTION"),
+                "on_delete": str(row[6] or "NO ACTION"),
+            })
+            item["from"].append(str(row[3]))
+            item["to"].append(str(row[4]))
+        return {"columns": columns, "indexes": indexes, "foreign_keys": list(foreign_keys.values())}
+    finally:
+        conn.close()
+
+
+def prepare_target_schema(
+    source_path: Path, target_schema: str, database_url: str,
+) -> dict[str, Any]:
+    """Create a PostgreSQL-native schema matching a SQLite source.
+
+    Integer single-column primary keys use BY DEFAULT identity so an initial
+    migration may preserve explicit ids and later runtime inserts still receive
+    sequence values.
+    """
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError as exc:
+        raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    plans = inventory(source_path, target_schema)
+    created_tables = 0
+    created_indexes = 0
+    with psycopg.connect(database_url) as target:
+        with target.cursor() as cursor:
+            cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                sql.Identifier(target_schema)
+            ))
+            for plan in plans:
+                metadata = sqlite_table_metadata(source_path, plan.table)
+                primary = [
+                    item["name"] for item in sorted(
+                        metadata["columns"], key=lambda value: value["primary_position"]
+                    ) if item["primary_position"] > 0
+                ]
+                definitions = []
+                for column in metadata["columns"]:
+                    target_type = _postgres_type(column["declared_type"])
+                    is_identity = (
+                        len(primary) == 1 and primary[0] == column["name"]
+                        and target_type == "bigint"
+                    )
+                    parts = [sql.Identifier(column["name"])]
+                    if is_identity:
+                        parts.append(sql.SQL("bigint GENERATED BY DEFAULT AS IDENTITY"))
+                    else:
+                        parts.append(sql.SQL(target_type))
+                    if column["not_null"] or column["name"] in primary:
+                        parts.append(sql.SQL("NOT NULL"))
+                    default = _postgres_default(column["default"], target_type)
+                    if default and not is_identity:
+                        parts.extend((sql.SQL("DEFAULT"), sql.SQL(default)))
+                    definitions.append(sql.SQL(" ").join(parts))
+                if primary:
+                    definitions.append(sql.SQL("PRIMARY KEY ({})").format(
+                        sql.SQL(",").join(sql.Identifier(value) for value in primary)
+                    ))
+                cursor.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} ({})").format(
+                    sql.Identifier(target_schema), sql.Identifier(plan.table),
+                    sql.SQL(",").join(definitions),
+                ))
+                created_tables += 1
+            for plan in plans:
+                metadata = sqlite_table_metadata(source_path, plan.table)
+                for index in metadata["indexes"]:
+                    if index["origin"] == "pk":
+                        continue
+                    safe_name = re.sub(r"[^A-Za-z0-9_]", "_", index["name"])
+                    if len(safe_name) > 50:
+                        suffix = hashlib.sha1(safe_name.encode()).hexdigest()[:8]
+                        safe_name = safe_name[:41] + "_" + suffix
+                    cursor.execute(sql.SQL("CREATE {} INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                        sql.SQL("UNIQUE" if index["unique"] else ""),
+                        sql.Identifier(safe_name), sql.Identifier(target_schema),
+                        sql.Identifier(plan.table),
+                        sql.SQL(",").join(sql.Identifier(value) for value in index["columns"]),
+                    ))
+                    created_indexes += 1
+        target.commit()
+    return {"tables": created_tables, "indexes": created_indexes}
+
+
+def finalize_target_schema(
+    source_path: Path, target_schema: str, database_url: str,
+) -> dict[str, Any]:
+    """Install foreign keys and align identity sequences after data copy."""
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError as exc:
+        raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    constraints = 0
+    sequences = 0
+    with psycopg.connect(database_url) as target:
+        with target.cursor() as cursor:
+            for plan in inventory(source_path, target_schema):
+                metadata = sqlite_table_metadata(source_path, plan.table)
+                primary = [
+                    item["name"] for item in sorted(
+                        metadata["columns"], key=lambda value: value["primary_position"]
+                    ) if item["primary_position"] > 0
+                ]
+                if len(primary) == 1 and _postgres_type(next(
+                    item["declared_type"] for item in metadata["columns"]
+                    if item["name"] == primary[0]
+                )) == "bigint":
+                    cursor.execute(
+                        "SELECT pg_get_serial_sequence(%s,%s)",
+                        (f"{target_schema}.{plan.table}", primary[0]),
+                    )
+                    sequence = cursor.fetchone()[0]
+                    if sequence:
+                        cursor.execute(sql.SQL(
+                            "SELECT setval(%s,COALESCE((SELECT MAX({}) FROM {}.{}),0)+1,false)"
+                        ).format(
+                            sql.Identifier(primary[0]), sql.Identifier(target_schema),
+                            sql.Identifier(plan.table),
+                        ), (sequence,))
+                        sequences += 1
+                for offset, foreign in enumerate(metadata["foreign_keys"]):
+                    digest = hashlib.sha1(
+                        f"{plan.table}:{foreign['from']}:{foreign['table']}:{foreign['to']}".encode()
+                    ).hexdigest()[:10]
+                    name = f"fk_{plan.table[:35]}_{offset}_{digest}"
+                    cursor.execute(
+                        """SELECT 1 FROM information_schema.table_constraints
+                           WHERE constraint_schema=%s AND table_name=%s
+                             AND constraint_name=%s""",
+                        (target_schema, plan.table, name),
+                    )
+                    if cursor.fetchone():
+                        continue
+                    action_delete = foreign["on_delete"] if foreign["on_delete"] in {
+                        "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"
+                    } else "NO ACTION"
+                    action_update = foreign["on_update"] if foreign["on_update"] in {
+                        "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"
+                    } else "NO ACTION"
+                    cursor.execute(sql.SQL(
+                        "ALTER TABLE {}.{} ADD CONSTRAINT {} FOREIGN KEY ({}) "
+                        "REFERENCES {}.{} ({}) ON UPDATE {} ON DELETE {} NOT VALID"
+                    ).format(
+                        sql.Identifier(target_schema), sql.Identifier(plan.table),
+                        sql.Identifier(name),
+                        sql.SQL(",").join(sql.Identifier(value) for value in foreign["from"]),
+                        sql.Identifier(target_schema), sql.Identifier(foreign["table"]),
+                        sql.SQL(",").join(sql.Identifier(value) for value in foreign["to"]),
+                        sql.SQL(action_update), sql.SQL(action_delete),
+                    ))
+                    cursor.execute(sql.SQL("ALTER TABLE {}.{} VALIDATE CONSTRAINT {}").format(
+                        sql.Identifier(target_schema), sql.Identifier(plan.table), sql.Identifier(name)
+                    ))
+                    constraints += 1
+        target.commit()
+    return {"foreign_keys": constraints, "identity_sequences": sequences}
+
+
+def quote_sqlite_identifier(value: str) -> str:
+    if not IDENTIFIER_RE.fullmatch(value):
+        raise ValueError(f"Недопустимый SQLite identifier: {value!r}")
+    return f'"{value}"'
+
+
+def inventory(path: Path, target_schema: str) -> list[TablePlan]:
+    if not IDENTIFIER_RE.fullmatch(target_schema):
+        raise ValueError("Некорректное имя PostgreSQL schema.")
+    conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=30)
+    try:
+        tables = [str(row[0]) for row in conn.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"""
+        ).fetchall()]
+        result = []
+        for table in tables:
+            quoted = quote_sqlite_identifier(table)
+            columns_info = conn.execute(f"PRAGMA table_info({quoted})").fetchall()
+            columns = [str(row[1]) for row in columns_info]
+            primary_key = [
+                str(row[1]) for row in sorted(columns_info, key=lambda item: int(item[5]))
+                if int(row[5]) > 0
+            ]
+            rows = int(conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0])
+            result.append(TablePlan(
+                source_schema=target_schema,
+                table=table,
+                rows=rows,
+                columns=columns,
+                primary_key=primary_key,
+                target_table=table,
+            ))
+        return result
+    finally:
+        conn.close()
+
+
+def row_digest(columns: list[str], row: sqlite3.Row) -> str:
+    payload = [row[column] for column in columns]
+    encoded = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def source_rows(path: Path, table: TablePlan) -> Iterator[tuple[str, str, list[Any]]]:
+    conn = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=30)
+    conn.row_factory = sqlite3.Row
+    quoted = quote_sqlite_identifier(table.table)
+    try:
+        cursor = conn.execute(f"SELECT rowid AS __migration_rowid__,* FROM {quoted} ORDER BY rowid")
+        for row in cursor:
+            if table.primary_key:
+                key_values = [row[column] for column in table.primary_key]
+                row_key = json.dumps(key_values, ensure_ascii=False, default=str, separators=(",", ":"))
+            else:
+                row_key = f"rowid:{row['__migration_rowid__']}"
+            yield row_key, row_digest(table.columns, row), [row[column] for column in table.columns]
+    finally:
+        conn.close()
+
+
+def migrate_append_only(
+    source_path: Path,
+    target_schema: str,
+    database_url: str,
+    source_id: str,
+) -> dict[str, Any]:
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError as exc:
+        raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    plans = inventory(source_path, target_schema)
+    copied = 0
+    skipped = 0
+    with psycopg.connect(database_url) as target:
+        with target.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA IF NOT EXISTS itp_migration")
+            cursor.execute(
+                """CREATE TABLE IF NOT EXISTS itp_migration.row_ledger(
+                       source_id text NOT NULL,
+                       target_schema text NOT NULL,
+                       table_name text NOT NULL,
+                       row_key text NOT NULL,
+                       digest text NOT NULL,
+                       migrated_at timestamptz NOT NULL DEFAULT now(),
+                       PRIMARY KEY(source_id,target_schema,table_name,row_key)
+                   )"""
+            )
+        target.commit()
+        for plan in plans:
+            with target.transaction():
+                with target.cursor() as cursor:
+                    cursor.execute(
+                        """SELECT column_name FROM information_schema.columns
+                           WHERE table_schema=%s AND table_name=%s""",
+                        (target_schema, plan.target_table),
+                    )
+                    target_columns = {str(row[0]) for row in cursor.fetchall()}
+                    missing = set(plan.columns) - target_columns
+                    if missing:
+                        raise RuntimeError(
+                            f"Target {target_schema}.{plan.target_table} не готов; "
+                            f"отсутствуют columns: {sorted(missing)}"
+                        )
+                    statement = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({}) ON CONFLICT DO NOTHING").format(
+                        sql.Identifier(target_schema),
+                        sql.Identifier(plan.target_table),
+                        sql.SQL(",").join(map(sql.Identifier, plan.columns)),
+                        sql.SQL(",").join(sql.Placeholder() for _ in plan.columns),
+                    )
+                    for row_key, digest, values in source_rows(source_path, plan):
+                        cursor.execute(
+                            """SELECT digest FROM itp_migration.row_ledger
+                               WHERE source_id=%s AND target_schema=%s
+                                 AND table_name=%s AND row_key=%s""",
+                            (source_id, target_schema, plan.table, row_key),
+                        )
+                        ledger = cursor.fetchone()
+                        if ledger:
+                            if str(ledger[0]) != digest:
+                                raise RuntimeError(
+                                    f"Source row changed after migration: {plan.table} {row_key}. "
+                                    "Append-only mode refuses to overwrite it."
+                                )
+                            skipped += 1
+                            continue
+                        cursor.execute(statement, values)
+                        cursor.execute(
+                            """INSERT INTO itp_migration.row_ledger(
+                                   source_id,target_schema,table_name,row_key,digest
+                               ) VALUES(%s,%s,%s,%s,%s)""",
+                            (source_id, target_schema, plan.table, row_key, digest),
+                        )
+                        copied += 1
+    return {"copied": copied, "skipped": skipped, "tables": len(plans)}
+
+
+def _canonical_digest(values: list[Any]) -> str:
+    normalized = []
+    for value in values:
+        if isinstance(value, memoryview):
+            value = bytes(value)
+        if isinstance(value, bytes):
+            normalized.append({"bytes_hex": value.hex()})
+        else:
+            normalized.append(value)
+    encoded = json.dumps(normalized, ensure_ascii=False, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def verify_migration(
+    source_path: Path, target_schema: str, database_url: str,
+) -> dict[str, Any]:
+    try:
+        import psycopg
+        from psycopg import sql
+    except ImportError as exc:
+        raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    results = []
+    with psycopg.connect(database_url) as target:
+        with target.cursor() as cursor:
+            for plan in inventory(source_path, target_schema):
+                source_digests = sorted(
+                    _canonical_digest(values)
+                    for _, _, values in source_rows(source_path, plan)
+                )
+                cursor.execute(sql.SQL("SELECT {} FROM {}.{}").format(
+                    sql.SQL(",").join(sql.Identifier(value) for value in plan.columns),
+                    sql.Identifier(target_schema), sql.Identifier(plan.target_table),
+                ))
+                target_digests = sorted(
+                    _canonical_digest(list(row)) for row in cursor.fetchall()
+                )
+                source_count = len(source_digests)
+                target_count = len(target_digests)
+                digest_ok = source_digests == target_digests
+                results.append({
+                    "table": plan.table, "source_rows": source_count,
+                    "target_rows": target_count, "count_ok": source_count == target_count,
+                    "digest_ok": digest_ok,
+                })
+        target.rollback()
+    return {
+        "ok": all(item["count_ok"] and item["digest_ok"] for item in results),
+        "schema": target_schema, "tables": results,
+        "source_rows": sum(item["source_rows"] for item in results),
+        "target_rows": sum(item["target_rows"] for item in results),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Safe append-only SQLite to PostgreSQL shadow migration."
+    )
+    parser.add_argument("action", choices=("plan", "prepare", "apply", "verify"))
+    parser.add_argument("--sqlite", required=True, type=Path)
+    parser.add_argument("--target-schema", required=True)
+    parser.add_argument("--source-id", default="")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--prepare-target", action="store_true")
+    args = parser.parse_args()
+    source = args.sqlite.resolve()
+    if not source.exists():
+        raise SystemExit("SQLite source не найден.")
+    plans = inventory(source, args.target_schema)
+    if args.action == "plan":
+        print(json.dumps({
+            "mode": "read_only_plan",
+            "source": str(source),
+            "target_schema": args.target_schema,
+            "tables": [asdict(item) for item in plans],
+            "total_rows": sum(item.rows for item in plans),
+            "destructive_actions": False,
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.action in {"prepare", "apply"} and not args.apply:
+        raise SystemExit("Для записи требуется явный флаг --apply.")
+    database_url = str(os.environ.get("DATABASE_URL") or "").strip()
+    if not database_url.startswith(("postgresql://", "postgres://")):
+        raise SystemExit("DATABASE_URL не задан или не является PostgreSQL URL.")
+    if args.action == "prepare":
+        print(json.dumps({
+            "ok": True,
+            **prepare_target_schema(source, args.target_schema, database_url),
+        }, ensure_ascii=False))
+        return 0
+    if args.action == "verify":
+        result = verify_migration(source, args.target_schema, database_url)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["ok"] else 2
+    if args.prepare_target:
+        prepare_target_schema(source, args.target_schema, database_url)
+    source_id = args.source_id or hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:20]
+    result = migrate_append_only(source, args.target_schema, database_url, source_id)
+    finalized = finalize_target_schema(source, args.target_schema, database_url)
+    print(json.dumps({"ok": True, **result, **finalized}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

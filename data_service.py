@@ -12,8 +12,10 @@ import re
 import statistics
 from typing import Any
 from urllib.parse import urlencode, urljoin
+from storage.postgres_compat import connect_database, database_error_types
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
+from collectors.wildberries.wildberries_collector import image_url_for_article
 from market_intelligence import (
     STATUS_INFO,
     Candidate,
@@ -26,6 +28,7 @@ from market_intelligence import (
 from schema import ensure_database
 
 HALYK_BASE_URL = "https://halykmarket.kz"
+FORTE_BASE_URL = "https://market.forte.kz"
 
 SORT_FIELDS = {
     "updated": "_updated_sort",
@@ -75,12 +78,16 @@ class DataService:
         ozon_db_path: Path | None = None,
         seller_id: str = "",
         halyk_seller_name: str = "Unityre",
+        forte_seller_name: str = "Unityre",
+        ozon_kz_db_path: Path | None = None,
     ):
         self.db_path = Path(db_path)
         self.seller_name = seller_name
         self.seller_id = seller_id
         self.ozon_db_path = Path(ozon_db_path) if ozon_db_path else None
         self.halyk_seller_name = halyk_seller_name
+        self.forte_seller_name = forte_seller_name
+        self.ozon_kz_db_path = Path(ozon_kz_db_path) if ozon_kz_db_path else None
         self.lock = threading.RLock()
         self._rows_cache: list[dict[str, Any]] = []
         self._rows_cached_at = 0.0
@@ -90,7 +97,7 @@ class DataService:
         db.conn.close()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = connect_database(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -98,7 +105,7 @@ class DataService:
 
     @staticmethod
     def _connect_path(path: Path) -> sqlite3.Connection:
-        conn = sqlite3.connect(path, timeout=30)
+        conn = connect_database(path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
@@ -135,6 +142,14 @@ class DataService:
             return urljoin(HALYK_BASE_URL, path)
         query = str(product_id or "").strip() or str(title or "").strip()
         return f"{HALYK_BASE_URL}/search?{urlencode({'query': query})}" if query else ""
+
+    @staticmethod
+    def _forte_public_url(product_id: Any, slug: Any = "", stored_url: Any = "") -> str:
+        stored = str(stored_url or "").strip()
+        if stored:
+            return urljoin(FORTE_BASE_URL, stored)
+        route = str(slug or "").strip() or str(product_id or "").strip()
+        return f"{FORTE_BASE_URL}/items/{route}" if route else ""
 
     def preferences(self, user_id: int | None) -> dict[str, Any]:
         defaults = {
@@ -225,11 +240,20 @@ class DataService:
     def _normalized_seller(value: Any) -> str:
         return " ".join(str(value or "").strip().casefold().split())
 
-    def _is_own_exact_offer(self, row: dict[str, Any]) -> bool:
+    def _is_own_exact_offer(
+        self,
+        row: dict[str, Any],
+        seller_id: str | None = None,
+        seller_name: str | None = None,
+    ) -> bool:
         merchant_id = self._normalized_seller(row.get("merchant_id"))
         merchant_name = self._normalized_seller(row.get("merchant_name"))
-        seller_id = self._normalized_seller(self.seller_id)
-        seller_name = self._normalized_seller(self.seller_name)
+        seller_id = self._normalized_seller(
+            self.seller_id if seller_id is None else seller_id
+        )
+        seller_name = self._normalized_seller(
+            self.seller_name if seller_name is None else seller_name
+        )
         return bool(
             (seller_id and merchant_id == seller_id)
             or (seller_name and merchant_name == seller_name)
@@ -237,6 +261,7 @@ class DataService:
 
     def _load_kaspi_support_data(
         self,
+        product_codes: list[str] | None = None,
     ) -> tuple[
         dict[str, Any],
         dict[str, Any],
@@ -244,68 +269,80 @@ class DataService:
         dict[str, dict[str, Any]],
         dict[str, int],
     ]:
+        requested_codes = [str(value).strip() for value in (product_codes or []) if str(value).strip()]
+        if product_codes is not None and not requested_codes:
+            return {}, {"details": {}, "extras": {}}, defaultdict(list), {}, {}
+        placeholders = ",".join("?" for _ in requested_codes)
+        params: list[Any] = requested_codes
+        product_where = f" WHERE product_code IN ({placeholders})" if product_codes is not None else ""
         conn = self._connect()
         try:
-            states = {
-                str(row["product_code"]): dict(row)
-                for row in conn.execute(
-                    "SELECT product_code,watched,priority,note,expected_monthly_units,updated_at FROM app_product_state"
-                ).fetchall()
-            }
+            # Tenant-specific state is overlaid after the shared row cache is
+            # built. Caching it here would leak notes between organizations.
+            states: dict[str, dict[str, Any]] = {}
             details = {
                 str(row["product_code"]): dict(row)
                 for row in conn.execute(
-                    "SELECT product_code,title_detail,specifications_json,detail_status,detail_error,detail_collected_at FROM product_details"
+                    f"SELECT product_code,title_detail,specifications_json,detail_status,detail_error,detail_collected_at FROM product_details{product_where}",
+                    params,
                 ).fetchall()
             }
             extras = {
                 str(row["product_code"]): dict(row)
                 for row in conn.execute(
-                    """
+                    f"""
                     SELECT c.product_code,c.image_url,m.stock,m.discount_percent,
                            m.price_before_discount_kzt,m.source_segment,m.active
                     FROM catalog_products c
                     LEFT JOIN catalog_product_meta m ON m.product_code=c.product_code
-                    """
+                    {product_where.replace('product_code', 'c.product_code')}
+                    """,
+                    params,
                 ).fetchall()
             }
             exact_offers: dict[str, list[dict[str, Any]]] = defaultdict(list)
             try:
                 for row in conn.execute(
-                    """
+                    f"""
                     SELECT source_product_code,candidate_product_code,merchant_id,merchant_name,
                            merchant_sku,price_kzt,merchant_rating,merchant_reviews,captured_at
                     FROM market_seller_offers
                     WHERE source_product_code=candidate_product_code AND price_kzt IS NOT NULL
+                    {('AND source_product_code IN (' + placeholders + ')') if product_codes is not None else ''}
                     ORDER BY source_product_code,price_kzt,merchant_name
-                    """
+                    """,
+                    params,
                 ).fetchall():
                     value = dict(row)
                     exact_offers[str(value["source_product_code"])].append(value)
-            except sqlite3.OperationalError:
+            except database_error_types():
                 pass
             exact_scans: dict[str, dict[str, Any]] = {}
             try:
                 exact_scans = {
                     str(row["product_code"]): dict(row)
-                    for row in conn.execute("SELECT * FROM exact_offer_scans").fetchall()
+                    for row in conn.execute(
+                        f"SELECT * FROM exact_offer_scans{product_where}", params
+                    ).fetchall()
                 }
-            except sqlite3.OperationalError:
+            except database_error_types():
                 pass
             legacy_counts: dict[str, int] = {}
             try:
                 legacy_counts = {
                     str(row["source_product_code"]): int(row["count_value"] or 0)
                     for row in conn.execute(
-                        """
+                        f"""
                         SELECT source_product_code,COUNT(*) AS count_value
                         FROM market_candidates
                         WHERE candidate_product_code<>source_product_code
+                        {('AND source_product_code IN (' + placeholders + ')') if product_codes is not None else ''}
                         GROUP BY source_product_code
-                        """
+                        """,
+                        params,
                     ).fetchall()
                 }
-            except sqlite3.OperationalError:
+            except database_error_types():
                 pass
             return states, {"details": details, "extras": extras}, exact_offers, exact_scans, legacy_counts
         finally:
@@ -318,10 +355,12 @@ class DataService:
         product_url: str,
         source_brand: str,
         offers: list[dict[str, Any]],
+        seller_id: str | None = None,
+        seller_name: str | None = None,
     ) -> list[Candidate]:
         selected: dict[str, dict[str, Any]] = {}
         for row in offers:
-            if self._is_own_exact_offer(row):
+            if self._is_own_exact_offer(row, seller_id, seller_name):
                 continue
             price = row.get("price_kzt")
             try:
@@ -354,13 +393,25 @@ class DataService:
         result.sort(key=lambda item: (item.price, item.title.casefold()))
         return result
 
-    def _kaspi_rows(self) -> list[dict[str, Any]]:
+    def _kaspi_rows(
+        self,
+        product_codes: list[str] | None = None,
+        *,
+        seller_id: str | None = None,
+        seller_name: str | None = None,
+        seller_url: str = "",
+    ) -> list[dict[str, Any]]:
+        own_seller_id = self.seller_id if seller_id is None else str(seller_id or "")
+        own_seller_name = self.seller_name if seller_name is None else str(seller_name or "")
+        seller_match = own_seller_id or own_seller_name
         db = Database(self.db_path)
         try:
-            raw_rows = enriched_comparison_rows(db, self.seller_name)
+            raw_rows = enriched_comparison_rows(db, seller_match, product_codes)
         finally:
             db.conn.close()
-        states, support, exact_offer_groups, exact_scans, legacy_counts = self._load_kaspi_support_data()
+        states, support, exact_offer_groups, exact_scans, legacy_counts = self._load_kaspi_support_data(
+            product_codes
+        )
         details = support["details"]
         extras = support["extras"]
         result: list[dict[str, Any]] = []
@@ -376,8 +427,13 @@ class DataService:
             title = str(base.get("title") or detail.get("title_detail") or "")
             product_url = str(base.get("product_url") or "")
             exact_offers = exact_offer_groups.get(code, [])
+            own_exact_offer = next((
+                offer for offer in exact_offers
+                if self._is_own_exact_offer(offer, own_seller_id, own_seller_name)
+            ), None)
             competitors = self._exact_offer_candidates(
-                code, title, product_url, source_brand, exact_offers
+                code, title, product_url, source_brand, exact_offers,
+                own_seller_id, own_seller_name,
             )
             scan = exact_scans.get(code, {})
             scan_status = str(scan.get("status") or ("ok" if exact_offers else ""))
@@ -410,7 +466,12 @@ class DataService:
                 "size": characteristics.get("size") or base.get("size") or self._identity_size(ident),
                 "product_type": characteristics.get("product_type") or "other",
                 "product_url": product_url,
-                "seller_name": self.seller_name,
+                "seller_id": own_seller_id,
+                "seller_name": str(
+                    (own_exact_offer or {}).get("merchant_name")
+                    or own_seller_name or own_seller_id
+                ),
+                "seller_url": seller_url,
                 "own_price_kzt": own_price,
                 "price_original": own_price,
                 "currency_original": "KZT",
@@ -852,14 +913,14 @@ class DataService:
                     product=products.get(candidate_article,{})
                     accepted[key]={
                         'article':candidate_article,'merchant_id':offer.get('seller_id') or '',
-                        'merchant_name':offer.get('seller_name') or 'Продавец Ozon','merchant_rating':offer.get('seller_rating'),
+                        'merchant_name':offer.get('seller_name') or 'Продавец Ozon.ru','merchant_rating':offer.get('seller_rating'),
                         'price_rub':price,'currency':offer.get('currency') or 'RUB','product_url':product.get('canonical_url') or '',
                         'product_title':product.get('title') or '', 'captured_at':offer.get('last_checked_at') or offer.get('last_seen_at'),
                         'match_method':method,'match_method_label':label,'match_level':level,'match_score':score,'match_reason':reason,
                         'is_own':False,'_priority':priority,
                     }
                 for offer in article_offers:
-                    add_candidate(article,offer,'OZON_SAME_ARTICLE','Та же карточка Ozon','EXACT',100,'Другой продавец той же карточки')
+                    add_candidate(article,offer,'OZON_SAME_ARTICLE','Та же карточка Ozon.ru','EXACT',100,'Другой продавец той же карточки')
                 matched_articles={}
                 for key in self._strict_ozon_keys(value):
                     method='OZON_MANUFACTURER_ARTICLE' if key[0]=='MFR' else 'OZON_STRICT_FINGERPRINT'
@@ -912,7 +973,7 @@ class DataService:
                 )
                 result.append({
                     **characteristics,
-                    'product_code':f'ozon:{article}','source_product_code':article,'platform':'ozon','platform_label':'Ozon','source_type':'CLIENT_CATALOG',
+                    'product_code':f'ozon:{article}','source_product_code':article,'platform':'ozon','platform_label':'Ozon.ru','source_type':'CLIENT_CATALOG',
                     'title':value.get('title') or '','brand':value.get('brand') or '','model':value.get('model') or '','size':characteristics.get('size') or value.get('tire_size') or '',
                     'product_type':characteristics.get('product_type') or self._ozon_product_type(value.get('title')),'strict_identity_eligible':bool(value.get('brand') and value.get('tire_size')),
                     'product_url':value.get('canonical_url') or '','image_url':value.get('image_url') or '','own_price_kzt':None,'market_price_kzt':None,
@@ -934,10 +995,134 @@ class DataService:
                     '_price_sort':float(own_price or 0),'_delta_sort':float(difference_pct or 0),'_updated_sort':own_updated,
                 })
             return result
-        except sqlite3.Error:
+        except database_error_types():
             return []
         finally:
             if conn is not None: conn.close()
+
+    def _ozon_kz_rows(self) -> list[dict[str, Any]]:
+        if not self.ozon_kz_db_path or not self.ozon_kz_db_path.exists():
+            return []
+        conn = self._connect_path(self.ozon_kz_db_path)
+        try:
+            tables = {
+                str(row[0]) for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if not {"ozon_kz_products", "ozon_kz_offers"} <= tables:
+                return []
+            offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for row in conn.execute(
+                """SELECT * FROM ozon_kz_offers WHERE active=1
+                   ORDER BY product_id,is_own DESC,price_kzt,seller_name"""
+            ).fetchall():
+                offers_by_product[str(row["product_id"])].append(dict(row))
+            products = conn.execute(
+                "SELECT * FROM ozon_kz_products WHERE active=1 ORDER BY last_seen_at DESC"
+            ).fetchall()
+        except database_error_types():
+            return []
+        finally:
+            conn.close()
+
+        result: list[dict[str, Any]] = []
+        for row in products:
+            value = dict(row)
+            product_id = str(value.get("product_id") or "")
+            code = f"ozon_kz:{product_id}"
+            specs = self._json(value.get("specifications_json"), [])
+            ident = identity(
+                str(value.get("title") or ""), specs, str(value.get("brand") or "")
+            )
+            characteristics = self._characteristics(
+                value.get("title") or "", specs, value.get("brand") or "",
+                {
+                    "size": self._identity_size(ident),
+                    "product_type": ident.get("type"),
+                    "model": value.get("model") or ident.get("model"),
+                },
+            )
+            offers = offers_by_product.get(product_id, [])
+            own_offer = next((item for item in offers if int(item.get("is_own") or 0)), None)
+            own_price = (
+                own_offer.get("price_kzt") if own_offer and own_offer.get("price_kzt") is not None
+                else value.get("own_price_kzt")
+            )
+            competitors = [
+                Candidate(
+                    code=str(item.get("seller_id") or ""),
+                    title=str(item.get("seller_name") or "Продавец Ozon.kz"),
+                    url=str(value.get("canonical_url") or ""),
+                    price=float(item.get("price_kzt") or 0),
+                    brand=str(value.get("brand") or ident.get("brand") or ""),
+                    tier="SAME_PRODUCT_CARD",
+                    model=str(value.get("title") or ""),
+                    score=100.0,
+                    relation="OZON_KZ_SAME_CARD",
+                    reasons=["same_ozon_kz_product_id", f"product_id={product_id}"],
+                )
+                for item in offers
+                if not int(item.get("is_own") or 0) and float(item.get("price_kzt") or 0) > 0
+            ]
+            position = exact_offer_position(
+                own_price, competitors, "ok" if value.get("last_seen_at") else ""
+            )
+            status_code = str(position.get("price_status") or "NOT_ANALYZED")
+            status_info = STATUS_INFO.get(status_code, STATUS_INFO["NOT_ANALYZED"])
+            result.append({
+                **position,
+                **characteristics,
+                "product_code": code,
+                "source_product_code": product_id,
+                "platform": "ozon_kz",
+                "platform_label": "Ozon.kz",
+                "source_type": "SEPARATE_KZ_CONNECTOR",
+                "title": value.get("title") or "",
+                "brand": value.get("brand") or ident.get("brand") or "",
+                "model": value.get("model") or ident.get("model") or "",
+                "size": characteristics.get("size") or self._identity_size(ident),
+                "product_type": characteristics.get("product_type") or "other",
+                "product_url": value.get("canonical_url") or "",
+                "image_url": value.get("image_url") or "",
+                "price_kzt": own_price,
+                "own_price_kzt": own_price,
+                "price_original": own_price,
+                "currency_original": "KZT",
+                "availability_status": (
+                    own_offer.get("availability_status") if own_offer
+                    else value.get("availability_status") or "UNKNOWN"
+                ),
+                "seller_id": own_offer.get("seller_id") if own_offer else "",
+                "seller_name": own_offer.get("seller_name") if own_offer else "",
+                "seller_url": own_offer.get("seller_url") if own_offer else "",
+                "price_status": status_code,
+                "status_label": status_info["label"],
+                "status_tone": status_info["tone"],
+                "reference_type": "OZON_KZ_SAME_CARD",
+                "match_method": "OZON_KZ_PRODUCT_ID",
+                "match_method_label": "Та же карточка Ozon.kz",
+                "exact_offer_status": "ok" if value.get("last_seen_at") else "not_checked",
+                "exact_offer_checked_at": value.get("last_seen_at"),
+                "exact_offer_count": len(offers),
+                "competitor_seller_count": len(competitors),
+                "candidate_count": len(competitors),
+                "reference_count": position.get("reference_count") or len(competitors),
+                "exact_candidates": [item.as_dict() for item in competitors],
+                "watched": False,
+                "priority": "normal",
+                "note": "",
+                "expected_monthly_units": None,
+                "updated_at": value.get("last_seen_at"),
+                "freshness_status": self._freshness(value.get("last_seen_at"))[0],
+                "freshness_label": self._freshness(value.get("last_seen_at"))[1],
+                "_price_sort": float(own_price or 0),
+                "_delta_sort": float(position.get("difference_kzt") or 0),
+                "_updated_sort": value.get("last_seen_at") or "",
+                "raw_price_status": status_code,
+                "_ozon_kz_specifications": specs,
+            })
+        return result
 
     def _halyk_rows(self) -> list[dict[str, Any]]:
         conn = self._connect()
@@ -949,12 +1134,7 @@ class DataService:
             }
             if "halyk_products" not in tables:
                 return []
-            states = {
-                str(row["product_code"]): dict(row)
-                for row in conn.execute(
-                    "SELECT product_code,watched,priority,note,expected_monthly_units,updated_at FROM app_product_state"
-                ).fetchall()
-            }
+            states: dict[str, dict[str, Any]] = {}
             offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
             if "halyk_offers" in tables:
                 for row in conn.execute(
@@ -1076,11 +1256,456 @@ class DataService:
             })
         return result
 
+    def _forte_rows(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            tables = {
+                str(row[0]) for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "forte_products" not in tables:
+                return []
+            # Tenant-specific state is overlaid after the shared row cache is
+            # built. Caching it here would leak notes between organizations.
+            states: dict[str, dict[str, Any]] = {}
+            offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            if "forte_offers" in tables:
+                for row in conn.execute(
+                    """
+                    SELECT * FROM forte_offers
+                    WHERE active=1
+                    ORDER BY product_id,is_own DESC,CASE WHEN price_kzt>0 THEN 0 ELSE 1 END,price_kzt,merchant_name
+                    """
+                ).fetchall():
+                    offers_by_product[str(row["product_id"])].append(dict(row))
+            products = conn.execute(
+                "SELECT * FROM forte_products WHERE active=1 ORDER BY last_seen_at DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        result: list[dict[str, Any]] = []
+        for row in products:
+            value = dict(row)
+            product_id = str(value.get("product_id") or "")
+            code = f"forte:{product_id}"
+            public_url = self._forte_public_url(
+                product_id, value.get("slug"), value.get("product_url")
+            )
+            specs = self._json(value.get("specs_json"), [])
+            ident = identity(str(value.get("name") or ""), specs, str(value.get("brand") or ""))
+            characteristics = self._characteristics(
+                value.get("name") or "", specs, value.get("brand") or "",
+                {
+                    "size": self._identity_size(ident),
+                    "product_type": ident.get("type"),
+                    "model": ident.get("model"),
+                },
+            )
+            offers = offers_by_product.get(product_id, [])
+            own_offer = next((offer for offer in offers if int(offer.get("is_own") or 0) == 1), None)
+            own_price = (
+                own_offer.get("price_kzt")
+                if own_offer and own_offer.get("price_kzt") is not None
+                else value.get("price_kzt")
+            )
+            competitors = [
+                Candidate(
+                    code=str(offer.get("merchant_id") or offer.get("merchant_key") or ""),
+                    title=str(offer.get("merchant_name") or "Продавец Forte Market"),
+                    url=public_url,
+                    price=float(offer.get("price_kzt") or 0),
+                    brand=str(value.get("brand") or ident.get("brand") or ""),
+                    tier="SAME_PRODUCT_CARD",
+                    model=str(value.get("name") or ""),
+                    score=100.0,
+                    relation="FORTE_SAME_CARD",
+                    reasons=["same_forte_product_id", f"product_id={product_id}", "different_seller"],
+                )
+                for offer in offers
+                if int(offer.get("is_own") or 0) == 0 and float(offer.get("price_kzt") or 0) > 0
+            ]
+            scan_status = "ok" if value.get("last_market_at") else ""
+            position = exact_offer_position(own_price, competitors, scan_status)
+            position.update({
+                "reference_type": "FORTE_SAME_CARD",
+                "match_method": "FORTE_PRODUCT_ID",
+            })
+            status = str(position.get("price_status") or "NOT_ANALYZED")
+            info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+            state = states.get(code, {})
+            result.append({
+                **position,
+                **characteristics,
+                "product_code": code,
+                "source_product_code": product_id,
+                "platform": "forte_market",
+                "platform_label": "Forte Market",
+                "source_type": "CLIENT_CATALOG",
+                "title": value.get("name") or "",
+                "brand": value.get("brand") or ident.get("brand") or "",
+                "model": ident.get("model") or "",
+                "size": characteristics.get("size") or self._identity_size(ident),
+                "product_type": characteristics.get("product_type") or "other",
+                "product_url": public_url,
+                "image_url": value.get("image_url") or "",
+                "price_kzt": own_price,
+                "own_price_kzt": own_price,
+                "market_price_kzt": position.get("market_price_kzt"),
+                "price_original": own_price,
+                "currency_original": "KZT",
+                "seller_id": value.get("merchant_id") or "",
+                "seller_name": self.forte_seller_name,
+                "seller_url": f"{FORTE_BASE_URL}/merchant-products/{value.get('merchant_id')}" if value.get("merchant_id") else "",
+                "price_status": status,
+                "status_label": info["label"],
+                "status_tone": info["tone"],
+                "match_method_label": "Та же карточка Forte Market",
+                "exact_offer_status": scan_status or "not_checked",
+                "exact_offer_checked_at": value.get("last_market_at"),
+                "exact_offer_count": len(offers),
+                "competitor_seller_count": len(competitors),
+                "candidate_count": len(competitors),
+                "reference_count": position.get("reference_count") or len(competitors),
+                "exact_candidates": [item.as_dict() for item in competitors],
+                "segment_candidates": [],
+                "review_candidates": [],
+                "watched": bool(state.get("watched")),
+                "priority": state.get("priority") or "normal",
+                "note": state.get("note") or "",
+                "expected_monthly_units": state.get("expected_monthly_units"),
+                "identity_completeness_percent": 100 if product_id else 0,
+                "catalog_rating": value.get("catalog_rating"),
+                "catalog_reviews": value.get("catalog_reviews"),
+                "updated_at": value.get("last_market_at") or value.get("last_catalog_at") or value.get("last_seen_at"),
+                "freshness_status": self._freshness(value.get("last_market_at") or value.get("last_catalog_at"))[0],
+                "freshness_label": self._freshness(value.get("last_market_at") or value.get("last_catalog_at"))[1],
+                "_price_sort": float(own_price or 0),
+                "_delta_sort": float(position.get("difference_kzt") or 0),
+                "_updated_sort": value.get("last_market_at") or value.get("last_catalog_at") or value.get("last_seen_at") or "",
+                "raw_price_status": status,
+            })
+        return result
+
+    def _tenant_id_for_user(self, user_id: int | None) -> int | None:
+        if not user_id:
+            return None
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT tenant_id FROM tenant_users
+                   WHERE user_id=? AND is_active=1
+                   ORDER BY is_primary DESC,tenant_id LIMIT 1""",
+                (int(user_id),),
+            ).fetchone()
+            return int(row["tenant_id"]) if row else None
+        finally:
+            conn.close()
+
+    def _tenant_states(self, user_id: int | None) -> dict[str, dict[str, Any]]:
+        tenant_id = self._tenant_id_for_user(user_id)
+        if tenant_id is None:
+            return {}
+        conn = self._connect()
+        try:
+            return {
+                str(row["product_code"]): dict(row)
+                for row in conn.execute(
+                    """SELECT product_code,watched,priority,note,
+                              expected_monthly_units,updated_at
+                       FROM tenant_product_state WHERE tenant_id=?""",
+                    (tenant_id,),
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+
+    def _with_tenant_state(
+        self, rows: list[dict[str, Any]], user_id: int | None
+    ) -> list[dict[str, Any]]:
+        states = self._tenant_states(user_id)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            state = states.get(str(item.get("product_code") or ""), {})
+            item["watched"] = bool(state.get("watched"))
+            item["priority"] = str(state.get("priority") or "normal")
+            item["note"] = str(state.get("note") or "")
+            item["expected_monthly_units"] = state.get("expected_monthly_units")
+            item["user_state_updated_at"] = state.get("updated_at")
+            result.append(item)
+        return result
+
+    def user_owns_shared_catalog(self, user_id: int | None) -> bool:
+        if not user_id:
+            return True
+        tenant_id = self._tenant_id_for_user(user_id)
+        conn = self._connect()
+        try:
+            owner = conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()
+            owner_id = int(owner["id"]) if owner else None
+        finally:
+            conn.close()
+        return tenant_id is not None and tenant_id == owner_id
+
+    @staticmethod
+    def _catalog_product_code(platform: str, source_product_code: str) -> str:
+        prefixes = {
+            "kaspi": "",
+            "ozon": "ozon:",
+            "ozon_kz": "ozon_kz:",
+            "halyk_market": "halyk:",
+            "forte_market": "forte:",
+            "wildberries": "wb:",
+        }
+        prefix = prefixes.get(str(platform), "")
+        value = str(source_product_code or "")
+        return value if prefix and value.startswith(prefix) else prefix + value
+
+    def _tenant_catalog_snapshot(
+        self, tenant_id: int, marketplaces: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            requested = {
+                str(value).strip() for value in (marketplaces or set())
+                if str(value).strip()
+            }
+            where = "tenant_id=? AND active=1"
+            params: list[Any] = [int(tenant_id)]
+            if requested:
+                where += f" AND marketplace_code IN ({','.join('?' for _ in requested)})"
+                params.extend(sorted(requested))
+            rows = conn.execute(
+                f"""SELECT * FROM tenant_catalog_products
+                    WHERE {where}
+                    ORDER BY marketplace_code,source_product_code""",
+                params,
+            ).fetchall()
+            integrations = {
+                str(row["integration_code"]): dict(row)
+                for row in conn.execute(
+                    """SELECT integration_code,seller_identifier,seller_name,seller_url
+                       FROM tenant_integrations WHERE tenant_id=?""",
+                    (int(tenant_id),),
+                ).fetchall()
+            }
+            tenant = conn.execute(
+                "SELECT name FROM tenants WHERE id=?", (int(tenant_id),)
+            ).fetchone()
+        finally:
+            conn.close()
+        tenant_name = str(tenant["name"] if tenant else "").strip()
+        legacy_seller_names = {
+            self._normalized_seller(self.seller_name),
+            self._normalized_seller(self.halyk_seller_name),
+            self._normalized_seller(self.forte_seller_name),
+            self._normalized_seller("Unityre"),
+        }
+        labels = {
+            "kaspi": "Kaspi",
+            "ozon": "Ozon.ru",
+            "ozon_kz": "Ozon.kz",
+            "halyk_market": "Halyk Market",
+            "forte_market": "Forte Market",
+            "wildberries": "Wildberries",
+        }
+        result: list[dict[str, Any]] = []
+        for raw in rows:
+            value = dict(raw)
+            platform = str(value.get("marketplace_code") or "")
+            integration = integrations.get(platform, {})
+            integration_seller = str(integration.get("seller_name") or "").strip()
+            if (
+                not integration_seller
+                or self._normalized_seller(integration_seller) in legacy_seller_names
+            ):
+                integration_seller = tenant_name
+            source_code = str(value.get("source_product_code") or "")
+            amount = value.get("price_amount")
+            is_rub = str(value.get("currency") or "").upper() == "RUB"
+            try:
+                attributes = json.loads(str(value.get("attributes_json") or "[]"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                attributes = []
+            updated = value.get("source_updated_at") or value.get("last_seen_at")
+            result.append({
+                "product_code": self._catalog_product_code(platform, source_code),
+                "source_product_code": source_code,
+                "platform": platform,
+                "platform_label": labels.get(platform, platform),
+                "title": value.get("title") or source_code,
+                "product_url": value.get("source_url") or "",
+                "image_url": value.get("image_url") or (
+                    image_url_for_article(source_code) if platform == "wildberries" else ""
+                ),
+                "brand": value.get("brand") or "",
+                "model": value.get("model") or "",
+                "size": "",
+                "product_type": "other",
+                "product_type_label": PRODUCT_TYPE_LABELS.get("other", "Other"),
+                "season": "UNKNOWN",
+                "season_label": SEASON_LABELS.get("UNKNOWN", "Unknown"),
+                "characteristic_group": "",
+                "characteristic_group_label": "",
+                "own_price_kzt": None if is_rub else amount,
+                "price_original": amount if is_rub else None,
+                "currency_original": value.get("currency") or "",
+                "market_price_kzt": None,
+                "difference_kzt": None,
+                "difference_pct": None,
+                "price_status": "NOT_ANALYZED",
+                "status_label": STATUS_INFO.get("NOT_ANALYZED", {}).get("label", "Not analyzed"),
+                "status_tone": STATUS_INFO.get("NOT_ANALYZED", {}).get("tone", "neutral"),
+                "reference_count": 0,
+                "candidate_count": 0,
+                "seller_id": integration.get("seller_identifier") or "",
+                "seller_name": integration_seller or integration.get("seller_identifier") or tenant_name,
+                "seller_url": integration.get("seller_url") or "",
+                "updated_at": updated,
+                "freshness_status": self._freshness(updated)[0],
+                "freshness_label": self._freshness(updated)[1],
+                "source_type": "TENANT_CATALOG",
+                "raw_price_status": "NOT_ANALYZED",
+                "_updated_sort": updated or "",
+                "_price_sort": float(amount or 0),
+                "_delta_sort": 0.0,
+                "_tenant_attributes": attributes,
+                "_tenant_catalog_only": True,
+            })
+        return result
+
+    def rows_for_user(
+        self, user_id: int | None, marketplaces: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        if not user_id:
+            return self.rows()
+        tenant_id = self._tenant_id_for_user(user_id)
+        if tenant_id is None:
+            return []
+        requested = {
+            str(value).strip() for value in (marketplaces or set())
+            if str(value).strip()
+        }
+        snapshot = self._tenant_catalog_snapshot(tenant_id, requested or None)
+        # Wildberries is stored exclusively in the tenant catalog. Avoid the
+        # expensive legacy Kaspi/Forte/Halyk materialization for a WB-only view,
+        # including the normal unfiltered catalogue request.
+        snapshot_platforms = {
+            str(row.get("platform") or "") for row in snapshot
+            if str(row.get("platform") or "")
+        }
+        if requested == {"wildberries"} or (
+            snapshot and snapshot_platforms == {"wildberries"}
+        ):
+            return self._with_tenant_state(snapshot, user_id)
+        snapshot_by_key = {
+            (str(row.get("platform") or ""), str(row.get("source_product_code") or "")): row
+            for row in snapshot
+        }
+        memberships = {
+            (str(row.get("platform") or ""), str(row.get("source_product_code") or ""))
+            for row in snapshot
+        }
+        legacy_owner = self.user_owns_shared_catalog(user_id)
+        # A newly approved non-owner tenant has no shared-catalog fallback. Do
+        # not materialize every legacy marketplace merely to prove its own
+        # tenant snapshot is empty; on a production-sized database that turns a
+        # zero-row page into a multi-second request.
+        if not memberships and not legacy_owner:
+            return self._with_tenant_state(snapshot, user_id)
+        platforms_with_membership = {platform for platform, _ in memberships}
+        if legacy_owner:
+            shared_rows = self.rows()
+        else:
+            shared_platforms = platforms_with_membership - {"wildberries"}
+            kaspi_codes = sorted(
+                source_code for platform, source_code in memberships
+                if platform == "kaspi"
+            )
+            conn = self._connect()
+            try:
+                integration = conn.execute(
+                    """SELECT seller_identifier,seller_name,seller_url
+                       FROM tenant_integrations
+                       WHERE tenant_id=? AND integration_code='kaspi'""",
+                    (int(tenant_id),),
+                ).fetchone()
+            finally:
+                conn.close()
+            integration_value = dict(integration) if integration else {}
+            tenant_kaspi_rows = self._kaspi_rows(
+                kaspi_codes,
+                seller_id=str(integration_value.get("seller_identifier") or ""),
+                seller_name=str(integration_value.get("seller_name") or ""),
+                seller_url=str(integration_value.get("seller_url") or ""),
+            ) if kaspi_codes else []
+            if shared_platforms <= {"kaspi"}:
+                shared_rows = tenant_kaspi_rows
+            else:
+                # The remaining legacy connectors still use their established
+                # shared loaders. Tenant membership is applied below before any
+                # row is returned.
+                shared_rows = [
+                    row for row in self.rows()
+                    if str(row.get("platform") or "") != "kaspi"
+                ] + tenant_kaspi_rows
+        visible: list[dict[str, Any]] = []
+        represented: set[tuple[str, str]] = set()
+        for row in shared_rows:
+            key = (str(row.get("platform") or ""), str(row.get("source_product_code") or ""))
+            # Explicit tenant catalogue membership is authoritative and safe to
+            # enrich with the shared collector row for that exact product. The
+            # tenant snapshot still owns its public metadata and own price, while
+            # exact-card offers/specifications come from the collector tables.
+            if key in memberships:
+                item = dict(row)
+                tenant_row = snapshot_by_key[key]
+                for field in (
+                    "title", "product_url", "image_url", "brand", "model",
+                    "currency_original", "updated_at", "freshness_status",
+                    "freshness_label", "seller_id", "seller_url",
+                ):
+                    if tenant_row.get(field) not in (None, ""):
+                        item[field] = tenant_row[field]
+                # The exact-card offer carries the human-readable seller name
+                # (for example, LICK), while the integration may only know the
+                # numeric merchant id. Never replace it with a global seller.
+                if not str(item.get("seller_name") or "").strip():
+                    item["seller_name"] = tenant_row.get("seller_name") or ""
+                elif self._normalized_seller(item.get("seller_name")) in {
+                    self._normalized_seller(self.seller_name),
+                    self._normalized_seller(self.halyk_seller_name),
+                    self._normalized_seller(self.forte_seller_name),
+                } and str(tenant_row.get("seller_name") or "").strip():
+                    item["seller_name"] = tenant_row["seller_name"]
+                tenant_price = tenant_row.get("own_price_kzt")
+                if key[0] != "ozon" and tenant_price not in (None, ""):
+                    item["own_price_kzt"] = tenant_price
+                    item["price_kzt"] = tenant_price
+                    item["price_original"] = tenant_price
+                item["_tenant_catalog_only"] = False
+                visible.append(item)
+                represented.add(key)
+            # Compatibility for the original workspace: old collector tables have
+            # no tenant_id. Platforms without explicit membership retain the
+            # legacy fallback only for the original owning workspace.
+            elif legacy_owner and key[0] not in platforms_with_membership:
+                visible.append(row)
+                represented.add(key)
+        visible.extend(row for row in snapshot if (
+            str(row.get("platform") or ""), str(row.get("source_product_code") or "")
+        ) not in represented)
+        return self._with_tenant_state(visible, user_id)
+
     def _source_signature(self) -> tuple[int, ...]:
         values: list[int] = []
         paths = [self.db_path]
         if self.ozon_db_path:
             paths.append(self.ozon_db_path)
+        if self.ozon_kz_db_path:
+            paths.append(self.ozon_kz_db_path)
         for path in paths:
             for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
                 try:
@@ -1095,7 +1720,13 @@ class DataService:
             signature = self._source_signature()
             if self._rows_cache and self._rows_signature == signature:
                 return self._rows_cache
-            self._rows_cache = self._kaspi_rows() + self._ozon_rows() + self._halyk_rows()
+            self._rows_cache = (
+                self._kaspi_rows()
+                + self._ozon_rows()
+                + self._ozon_kz_rows()
+                + self._halyk_rows()
+                + self._forte_rows()
+            )
             self._rows_cached_at = time.monotonic()
             self._rows_signature = self._source_signature()
             return self._rows_cache
@@ -1137,13 +1768,19 @@ class DataService:
         except Exception:
             snapshot = {}
         preferences = self.preferences(user_id)
-        rows = [self._apply_user_values(row, preferences) for row in self.rows()]
+        rows = [
+            self._apply_user_values(row, preferences)
+            for row in self.rows_for_user(user_id, allowed_platforms)
+        ]
         if allowed_platforms is not None:
             rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
+        ozon_kz_rows = [row for row in rows if row.get("platform") == "ozon_kz"]
         halyk_rows = [row for row in rows if row.get("platform") == "halyk_market"]
-        exact_rows = kaspi_rows + halyk_rows
+        forte_rows = [row for row in rows if row.get("platform") == "forte_market"]
+        wildberries_rows = [row for row in rows if row.get("platform") == "wildberries"]
+        exact_rows = kaspi_rows + ozon_kz_rows + halyk_rows + forte_rows
         counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in exact_rows)
         active_count = len(rows)
         priced_count = sum(1 for row in rows if row.get("price_kzt") is not None)
@@ -1155,11 +1792,26 @@ class DataService:
             row for row in ozon_rows
             if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
         ]
+        ozon_kz_ready_rows = [
+            row for row in ozon_kz_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") not in UNSCANNED_STATUSES
+        ]
         halyk_analyzed_rows = [
             row for row in halyk_rows
             if str(row.get("price_status") or "NOT_ANALYZED") not in UNSCANNED_STATUSES
         ]
-        data_ready_count = len(kaspi_analyzed_rows) + len(halyk_analyzed_rows) + len(ozon_ready_rows)
+        forte_analyzed_rows = [
+            row for row in forte_rows
+            if str(row.get("price_status") or "NOT_ANALYZED") not in UNSCANNED_STATUSES
+        ]
+        wildberries_ready_rows = [
+            row for row in wildberries_rows if row.get("own_price_kzt") is not None
+        ]
+        data_ready_count = (
+            len(kaspi_analyzed_rows) + len(ozon_ready_rows) + len(ozon_kz_ready_rows)
+            + len(halyk_analyzed_rows) + len(forte_analyzed_rows)
+            + len(wildberries_ready_rows)
+        )
         risk_count = sum(counts[key] for key in RISK_STATUSES)
         opportunity_count = sum(counts[key] for key in OPPORTUNITY_STATUSES)
         potential_rows = [
@@ -1174,10 +1826,14 @@ class DataService:
         )
         conn = self._connect()
         try:
+            tenant_id = self._tenant_id_for_user(user_id)
             recent_events = [dict(row) for row in conn.execute(
                 """SELECT e.event_type,e.entity_type,e.entity_id,e.created_at,u.display_name
                    FROM app_events e LEFT JOIN app_users u ON u.id=e.user_id
-                   ORDER BY e.id DESC LIMIT 8""").fetchall()]
+                   WHERE e.tenant_id=?
+                   ORDER BY e.id DESC LIMIT 8""",
+                (tenant_id,),
+            ).fetchall()] if tenant_id is not None else []
             last_own_price = conn.execute(
                 "SELECT MAX(captured_at) FROM own_price_snapshots WHERE status='ok'"
             ).fetchone()[0]
@@ -1203,7 +1859,10 @@ class DataService:
             "catalog_count": active_count,
             "kaspi_count": len(kaspi_rows),
             "ozon_count": len(ozon_rows),
+            "ozon_kz_count": len(ozon_kz_rows),
             "halyk_count": len(halyk_rows),
+            "forte_count": len(forte_rows),
+            "wildberries_count": len(wildberries_rows),
             "expected_count": effective_expected,
             "catalog_coverage_pct": round(len(kaspi_rows) / effective_expected * 100, 2) if effective_expected else None,
             "catalog_sync": latest_catalog_sync_value,
@@ -1218,8 +1877,14 @@ class DataService:
             "kaspi_market_coverage_pct": round(len(kaspi_analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0,
             "ozon_data_ready_count": len(ozon_ready_rows),
             "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0,
+            "ozon_kz_data_ready_count": len(ozon_kz_ready_rows),
+            "ozon_kz_data_coverage_pct": round(len(ozon_kz_ready_rows) / len(ozon_kz_rows) * 100, 2) if ozon_kz_rows else 0,
             "halyk_market_analyzed_count": len(halyk_analyzed_rows),
             "halyk_market_coverage_pct": round(len(halyk_analyzed_rows) / len(halyk_rows) * 100, 2) if halyk_rows else 0,
+            "forte_market_analyzed_count": len(forte_analyzed_rows),
+            "forte_market_coverage_pct": round(len(forte_analyzed_rows) / len(forte_rows) * 100, 2) if forte_rows else 0,
+            "wildberries_data_ready_count": len(wildberries_ready_rows),
+            "wildberries_data_coverage_pct": round(len(wildberries_ready_rows) / len(wildberries_rows) * 100, 2) if wildberries_rows else 0,
             "watched_count": sum(1 for row in rows if row.get("watched")),
             "risk_count": risk_count,
             "favorable_count": opportunity_count,
@@ -1254,15 +1919,18 @@ class DataService:
         active_filters = filters or {}
         rows = [
             self._apply_user_values(row, preferences)
-            for row in self.rows()
+            for row in self.rows_for_user(user_id, allowed_platforms)
             if self._matches(row, active_filters)
         ]
         if allowed_platforms is not None:
             rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         kaspi_rows = [row for row in rows if row.get("platform") == "kaspi"]
         ozon_rows = [row for row in rows if row.get("platform") == "ozon"]
+        ozon_kz_rows = [row for row in rows if row.get("platform") == "ozon_kz"]
         halyk_rows = [row for row in rows if row.get("platform") == "halyk_market"]
-        exact_rows = kaspi_rows + halyk_rows
+        forte_rows = [row for row in rows if row.get("platform") == "forte_market"]
+        wildberries_rows = [row for row in rows if row.get("platform") == "wildberries"]
+        exact_rows = kaspi_rows + ozon_kz_rows + halyk_rows + forte_rows
 
         status_counts = Counter(str(row.get("price_status") or "NOT_ANALYZED") for row in exact_rows)
         analyzed_rows = [row for row in exact_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]
@@ -1270,7 +1938,10 @@ class DataService:
             row for row in ozon_rows
             if str(row.get("price_status") or "NOT_ANALYZED") in OZON_READY_STATUSES
         ]
-        combined_ready_count = len(analyzed_rows) + len(ozon_ready_rows)
+        wildberries_ready_rows = [
+            row for row in wildberries_rows if row.get("own_price_kzt") is not None
+        ]
+        combined_ready_count = len(analyzed_rows) + len(ozon_ready_rows) + len(wildberries_ready_rows)
         risk_rows = [row for row in exact_rows if str(row.get("price_status") or "") in RISK_STATUSES]
         opportunity_rows = [row for row in exact_rows if str(row.get("price_status") or "") in OPPORTUNITY_STATUSES]
         review_rows = [row for row in exact_rows if str(row.get("price_status") or "") == "REVIEW_REQUIRED"]
@@ -1339,7 +2010,7 @@ class DataService:
         )[:10]
 
         platform_rows = []
-        for name, values in (("Kaspi", kaspi_rows), ("Ozon", ozon_rows), ("Halyk Market", halyk_rows)):
+        for name, values in (("Kaspi", kaspi_rows), ("Ozon.ru", ozon_rows), ("Ozon.kz", ozon_kz_rows), ("Halyk Market", halyk_rows), ("Forte Market", forte_rows), ("Wildberries", wildberries_rows)):
             priced = sum(1 for row in values if row.get("price_kzt") is not None or row.get("own_price_kzt") is not None)
             platform_rows.append({
                 "platform": name,
@@ -1383,17 +2054,26 @@ class DataService:
                 "total_products": len(rows),
                 "kaspi_products": len(kaspi_rows),
                 "ozon_products": len(ozon_rows),
+                "ozon_kz_products": len(ozon_kz_rows),
                 "halyk_products": len(halyk_rows),
+                "forte_products": len(forte_rows),
+                "wildberries_products": len(wildberries_rows),
                 "analyzed_count": combined_ready_count,
                 "analysis_coverage_pct": round(combined_ready_count / len(rows) * 100, 2) if rows else 0.0,
                 "data_ready_count": combined_ready_count,
                 "data_coverage_pct": round(combined_ready_count / len(rows) * 100, 2) if rows else 0.0,
-                "kaspi_market_analyzed_count": len(analyzed_rows),
-                "kaspi_market_coverage_pct": round(len(analyzed_rows) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0.0,
+                "kaspi_market_analyzed_count": len([row for row in kaspi_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]),
+                "kaspi_market_coverage_pct": round(len([row for row in kaspi_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]) / len(kaspi_rows) * 100, 2) if kaspi_rows else 0.0,
                 "ozon_data_ready_count": len(ozon_ready_rows),
                 "ozon_data_coverage_pct": round(len(ozon_ready_rows) / len(ozon_rows) * 100, 2) if ozon_rows else 0.0,
+                "ozon_kz_data_ready_count": len([row for row in ozon_kz_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]),
+                "ozon_kz_data_coverage_pct": round(len([row for row in ozon_kz_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]) / len(ozon_kz_rows) * 100, 2) if ozon_kz_rows else 0.0,
                 "halyk_market_analyzed_count": len([row for row in halyk_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]),
                 "halyk_market_coverage_pct": round(len([row for row in halyk_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]) / len(halyk_rows) * 100, 2) if halyk_rows else 0.0,
+                "forte_market_analyzed_count": len([row for row in forte_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]),
+                "forte_market_coverage_pct": round(len([row for row in forte_rows if str(row.get("price_status") or "") not in UNSCANNED_STATUSES]) / len(forte_rows) * 100, 2) if forte_rows else 0.0,
+                "wildberries_data_ready_count": len(wildberries_ready_rows),
+                "wildberries_data_coverage_pct": round(len(wildberries_ready_rows) / len(wildberries_rows) * 100, 2) if wildberries_rows else 0.0,
                 "risk_count": len(risk_rows),
                 "opportunity_count": len(opportunity_rows),
                 "review_count": len(review_rows),
@@ -1429,6 +2109,9 @@ class DataService:
 
     @staticmethod
     def _matches(row: dict[str, Any], filters: dict[str, Any]) -> bool:
+        attribute_codes = filters.get("attribute_product_codes")
+        if attribute_codes is not None and str(row.get("product_code") or "") not in set(attribute_codes):
+            return False
         query = str(filters.get("query") or "").strip().casefold()
         if query:
             haystack = " ".join(str(row.get(key) or "") for key in (
@@ -1487,7 +2170,15 @@ class DataService:
 
     def products(self, page: int, page_size: int, filters: dict[str, Any], user_id: int | None = None) -> dict[str, Any]:
         preferences = self.preferences(user_id)
-        rows = [self._apply_user_values(row, preferences) for row in self.rows() if self._matches(row, filters)]
+        marketplaces = self._filter_set(filters.get("platforms"))
+        platform = str(filters.get("platform") or "").strip().casefold()
+        if platform:
+            marketplaces.add(platform)
+        rows = [
+            self._apply_user_values(row, preferences)
+            for row in self.rows_for_user(user_id, marketplaces or None)
+            if self._matches(row, filters)
+        ]
         sort_name = str(filters.get("sort") or "updated")
         sort_field = SORT_FIELDS.get(sort_name, "_updated_sort")
         reverse = str(filters.get("direction") or "desc").casefold() != "asc"
@@ -1521,11 +2212,25 @@ class DataService:
         items = [{key: row.get(key) for key in fields} for row in rows[start:start + page_size]]
         return {"items": items, "page": page, "pages": pages, "page_size": page_size, "total": total}
 
-    def product_codes(self, filters: dict[str, Any], limit: int = 10000) -> list[str]:
-        return [str(row["product_code"]) for row in self.rows() if self._matches(row, filters)][:max(1, min(int(limit), 10000))]
+    def product_codes(
+        self, filters: dict[str, Any], limit: int = 10000, user_id: int | None = None
+    ) -> list[str]:
+        marketplaces = self._filter_set(filters.get("platforms"))
+        platform = str(filters.get("platform") or "").strip().casefold()
+        if platform:
+            marketplaces.add(platform)
+        return [
+            str(row["product_code"])
+            for row in self.rows_for_user(user_id, marketplaces or None)
+            if self._matches(row, filters)
+        ][:max(1, min(int(limit), 10000))]
 
-    def filter_options(self, allowed_platforms: set[str] | None = None) -> dict[str, Any]:
-        rows = self.rows()
+    def filter_options(
+        self,
+        allowed_platforms: set[str] | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        rows = self.rows_for_user(user_id, allowed_platforms)
         if allowed_platforms is not None:
             rows = [row for row in rows if str(row.get("platform")) in allowed_platforms]
         brands = sorted({str(row.get("brand") or "").strip() for row in rows if str(row.get("brand") or "").strip()}, key=str.casefold)
@@ -1576,19 +2281,35 @@ class DataService:
             "platforms": [
                 item for item in [
                     {"value": "kaspi", "label": "Kaspi"},
-                    {"value": "ozon", "label": "Ozon"},
+                    {"value": "ozon", "label": "Ozon.ru"},
+                    {"value": "ozon_kz", "label": "Ozon.kz"},
                     {"value": "halyk_market", "label": "Halyk Market"},
+                    {"value": "forte_market", "label": "Forte Market"},
+                    {"value": "wildberries", "label": "Wildberries"},
                 ] if allowed_platforms is None or item["value"] in allowed_platforms
             ],
             "statuses": [{"value": status, "label": STATUS_INFO.get(status, {}).get("label", status), "tone": STATUS_INFO.get(status, {}).get("tone", "neutral")} for status in statuses],
         }
 
     def product(self, code: str, user_id: int | None = None) -> dict[str, Any] | None:
-        base = next((row for row in self.rows() if str(row.get("product_code")) == str(code)), None)
+        marketplace_scope = {"wildberries"} if str(code).startswith("wb:") else None
+        base = next((
+            row for row in self.rows_for_user(user_id, marketplace_scope)
+            if str(row.get("product_code")) == str(code)
+        ), None)
         if base is None:
             return None
         result = self._apply_user_values(base, self.preferences(user_id))
         result.pop("_price_sort", None); result.pop("_delta_sort", None); result.pop("_updated_sort", None)
+        if result.pop("_tenant_catalog_only", False):
+            result["specifications"] = normalize_specifications(
+                result.pop("_tenant_attributes", [])
+            )
+            result["detail"] = None
+            result["candidates"] = []
+            result["offers"] = []
+            result["history"] = []
+            return result
         if result.get("platform") == "halyk_market":
             product_id = str(result.get("source_product_code") or "").removeprefix("halyk:")
             conn = self._connect()
@@ -1623,6 +2344,70 @@ class DataService:
             ]
             result["history"] = self.price_history(code, user_id=user_id)
             return result
+        if result.get("platform") == "forte_market":
+            product_id = str(result.get("source_product_code") or "").removeprefix("forte:")
+            conn = self._connect()
+            try:
+                detail = conn.execute("SELECT * FROM forte_products WHERE product_id=?", (product_id,)).fetchone()
+                offers = conn.execute(
+                    """
+                    SELECT merchant_name,merchant_key,merchant_id,price_kzt,merchant_rating,merchant_reviews,
+                           offer_type,availability_status,is_own,last_checked_at
+                    FROM forte_offers
+                    WHERE product_id=? AND active=1
+                    ORDER BY CASE WHEN is_own=1 THEN 0 ELSE 1 END,price_kzt,merchant_name
+                    LIMIT 100
+                    """,
+                    (product_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+            result["specifications"] = normalize_specifications(detail["specs_json"] if detail else [])
+            result["detail"] = dict(detail) if detail else None
+            result["candidates"] = result.get("exact_candidates") or []
+            result["offers"] = [
+                {
+                    **dict(row),
+                    "merchant_rating": row["merchant_rating"],
+                    "merchant_reviews": row["merchant_reviews"],
+                    "captured_at": row["last_checked_at"],
+                    "product_url": result.get("product_url") or "",
+                    "match_method": "FORTE_PRODUCT_ID",
+                    "match_method_label": "Та же карточка Forte Market",
+                }
+                for row in offers
+            ]
+            result["history"] = self.price_history(code, user_id=user_id)
+            return result
+        if result.get("platform") == "ozon_kz":
+            product_id = str(result.get("source_product_code") or "")
+            detail = None
+            offers: list[dict[str, Any]] = []
+            if self.ozon_kz_db_path and self.ozon_kz_db_path.exists():
+                conn = self._connect_path(self.ozon_kz_db_path)
+                try:
+                    detail_row = conn.execute(
+                        "SELECT * FROM ozon_kz_products WHERE product_id=?",
+                        (product_id,),
+                    ).fetchone()
+                    detail = dict(detail_row) if detail_row else None
+                    offers = [dict(row) for row in conn.execute(
+                        """SELECT * FROM ozon_kz_offers
+                           WHERE product_id=? AND active=1
+                           ORDER BY is_own DESC,price_kzt,seller_name LIMIT 100""",
+                        (product_id,),
+                    ).fetchall()]
+                finally:
+                    conn.close()
+            result["specifications"] = normalize_specifications(
+                (detail or {}).get("specifications_json") or []
+            )
+            result["detail"] = detail
+            result["candidates"] = result.get("exact_candidates") or []
+            result["offers"] = offers
+            result["history"] = self.price_history(code, user_id=user_id)
+            result.pop("_ozon_kz_specifications", None)
+            return result
         if result.get("platform") == "ozon":
             result["specifications"] = self._ozon_specifications(result)
             rate = float(self.preferences(user_id).get("rub_to_kzt") or 5.5)
@@ -1649,7 +2434,7 @@ class DataService:
                        ORDER BY price_kzt ASC,merchant_name ASC LIMIT 100""",
                     (raw_code, raw_code),
                 ).fetchall()
-            except sqlite3.OperationalError:
+            except database_error_types():
                 pass
         finally:
             conn.close()
@@ -1689,6 +2474,49 @@ class DataService:
             conn.close()
 
     def price_history(self, code: str, limit: int = 120, user_id: int | None = None) -> list[dict[str, Any]]:
+        if str(code).startswith("ozon_kz:"):
+            product_id = str(code).split(":", 1)[1]
+            if not self.ozon_kz_db_path or not self.ozon_kz_db_path.exists():
+                return []
+            conn = self._connect_path(self.ozon_kz_db_path)
+            try:
+                return [dict(row) for row in conn.execute(
+                    """SELECT captured_at AS at,price_kzt AS price,
+                              CASE WHEN seller_id='' THEN 'own' ELSE seller_id END AS series,
+                              availability_status
+                       FROM ozon_kz_price_history
+                       WHERE product_id=? ORDER BY captured_at DESC LIMIT ?""",
+                    (product_id, int(limit)),
+                ).fetchall()]
+            except database_error_types():
+                return []
+            finally:
+                conn.close()
+        if str(code).startswith("forte:"):
+            product_id = str(code).split(":", 1)[1]
+            conn = self._connect()
+            try:
+                own = conn.execute(
+                    """
+                    SELECT captured_at AS at,price_kzt AS price,'own' AS series
+                    FROM forte_price_history
+                    WHERE product_id=? AND is_own=1 AND price_kzt IS NOT NULL
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (product_id, int(limit)),
+                ).fetchall()
+                market = conn.execute(
+                    """
+                    SELECT captured_at AS at,MIN(price_kzt) AS price,'market' AS series
+                    FROM forte_price_history
+                    WHERE product_id=? AND is_own=0 AND price_kzt IS NOT NULL
+                    GROUP BY run_id,captured_at ORDER BY captured_at DESC LIMIT ?
+                    """,
+                    (product_id, int(limit)),
+                ).fetchall()
+                return sorted([dict(row) for row in own] + [dict(row) for row in market], key=lambda item: item.get("at") or "")
+            finally:
+                conn.close()
         if str(code).startswith("halyk:"):
             product_id = str(code).split(":", 1)[1]
             conn = self._connect()
@@ -1745,38 +2573,55 @@ class DataService:
                     "GROUP BY run_id,captured_at ORDER BY captured_at DESC LIMIT ?",
                     (raw_code, int(limit)),
                 ).fetchall()
-            except sqlite3.OperationalError:
+            except database_error_types():
                 pass
             return sorted([dict(row) for row in own] + [dict(row) for row in market], key=lambda item: item.get("at") or "")
         finally:
             conn.close()
 
     def set_product_state(self, codes: list[str], watched: bool | None, priority: str | None, note: str | None, user_id: int, expected_monthly_units: int | None = None) -> int:
-        clean_codes = sorted({str(code).strip() for code in codes if str(code).strip() and not str(code).startswith("ozon:")})
+        clean_codes = sorted({str(code).strip() for code in codes if str(code).strip()})
         if not clean_codes:
             return 0
+        visible_codes = {
+            str(row.get("product_code") or "") for row in self.rows_for_user(user_id)
+        }
+        if set(clean_codes) - visible_codes:
+            raise PermissionError("Один или несколько товаров не принадлежат каталогу компании.")
         if priority is not None and priority not in {"low", "normal", "high", "critical"}:
             raise ValueError("Неизвестный приоритет.")
+        tenant_id = self._tenant_id_for_user(user_id)
+        if tenant_id is None:
+            raise PermissionError("Пользователь не привязан к активной организации.")
         conn = self._connect()
         try:
             for code in clean_codes:
-                raw_code = code if code.startswith("halyk:") else code.removeprefix("kaspi:")
-                current = conn.execute("SELECT watched,priority,note,expected_monthly_units FROM app_product_state WHERE product_code=?", (raw_code,)).fetchone()
+                raw_code = code.removeprefix("kaspi:")
+                current = conn.execute(
+                    """SELECT watched,priority,note,expected_monthly_units
+                       FROM tenant_product_state WHERE tenant_id=? AND product_code=?""",
+                    (tenant_id, raw_code),
+                ).fetchone()
                 current_values = dict(current) if current else {"watched": 0, "priority": "normal", "note": "", "expected_monthly_units": None}
                 units = current_values.get("expected_monthly_units") if expected_monthly_units is None else max(0, int(expected_monthly_units))
                 conn.execute(
-                    """INSERT INTO app_product_state(product_code,watched,priority,note,expected_monthly_units,updated_by,updated_at)
-                       VALUES(?,?,?,?,?,?,datetime('now'))
-                       ON CONFLICT(product_code) DO UPDATE SET watched=excluded.watched,priority=excluded.priority,
+                    """INSERT INTO tenant_product_state(
+                           tenant_id,product_code,watched,priority,note,
+                           expected_monthly_units,updated_by,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,datetime('now'))
+                       ON CONFLICT(tenant_id,product_code) DO UPDATE SET
+                           watched=excluded.watched,priority=excluded.priority,
                            note=excluded.note,expected_monthly_units=excluded.expected_monthly_units,
                            updated_by=excluded.updated_by,updated_at=excluded.updated_at""",
-                    (raw_code, int(watched if watched is not None else bool(current_values.get("watched"))),
-                     priority if priority is not None else current_values.get("priority") or "normal",
-                     note if note is not None else current_values.get("note") or "", units, int(user_id)),
+                    (tenant_id, raw_code, int(watched if watched is not None else bool(current_values.get("watched"))),
+                      priority if priority is not None else current_values.get("priority") or "normal",
+                      note if note is not None else current_values.get("note") or "", units, int(user_id)),
                 )
             conn.execute(
-                "INSERT INTO app_events(user_id,event_type,entity_type,entity_id,details_json,created_at) VALUES(?,?,?,?,?,datetime('now'))",
-                (int(user_id), "product_state_updated", "product_set", str(len(clean_codes)), json.dumps({"codes": clean_codes[:100], "watched": watched, "priority": priority, "expected_monthly_units": expected_monthly_units}, ensure_ascii=False)),
+                """INSERT INTO app_events(
+                       user_id,tenant_id,event_type,entity_type,entity_id,details_json,created_at
+                   ) VALUES(?,?,?,?,?,?,datetime('now'))""",
+                (int(user_id), tenant_id, "product_state_updated", "product_set", str(len(clean_codes)), json.dumps({"codes": clean_codes[:100], "watched": watched, "priority": priority, "expected_monthly_units": expected_monthly_units}, ensure_ascii=False)),
             )
             conn.commit()
         finally:

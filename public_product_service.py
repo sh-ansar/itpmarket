@@ -5,14 +5,15 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from storage.postgres_compat import connect_database, database_error_types
 
 PUBLIC_CAPABILITIES = [
-    {"code": "sales_automation", "title_key": "public_cap_sales_title", "text_key": "public_cap_sales_text"},
-    {"code": "market_analytics", "title_key": "public_cap_market_title", "text_key": "public_cap_market_text"},
-    {"code": "assortment_control", "title_key": "public_cap_assortment_title", "text_key": "public_cap_assortment_text"},
-    {"code": "price_recommendations", "title_key": "public_cap_recommend_title", "text_key": "public_cap_recommend_text"},
-    {"code": "scheduled_operations", "title_key": "public_cap_automation_title", "text_key": "public_cap_automation_text"},
-    {"code": "multi_channel", "title_key": "public_cap_channels_title", "text_key": "public_cap_channels_text"},
+    {"code": "sales_automation", "title_key": "public_cap_sales_title", "text_key": "public_cap_sales_text", "title": "Автоматизация онлайн-продаж", "text": "Регулярные операции и рабочие сценарии без постоянного ручного запуска."},
+    {"code": "market_analytics", "title_key": "public_cap_market_title", "text_key": "public_cap_market_text", "title": "Рыночная аналитика", "text": "Контроль позиции и ценового диапазона на основе подтверждённых сопоставлений."},
+    {"code": "assortment_control", "title_key": "public_cap_assortment_title", "text_key": "public_cap_assortment_text", "title": "Контроль ассортимента", "text": "Единый каталог, актуальность данных и история изменения позиций."},
+    {"code": "price_recommendations", "title_key": "public_cap_recommend_title", "text_key": "public_cap_recommend_text", "title": "Рекомендации по позициям", "text": "Выделение товаров, которые требуют проверки или дополнительного внимания."},
+    {"code": "scheduled_operations", "title_key": "public_cap_automation_title", "text_key": "public_cap_automation_text", "title": "Плановые операции", "text": "Расписание обновлений, контроль выполнения и история запусков."},
+    {"code": "multi_channel", "title_key": "public_cap_channels_title", "text_key": "public_cap_channels_text", "title": "Несколько каналов продаж", "text": "Раздельная логика источников при единой аналитической модели."},
 ]
 
 DEFAULT_PUBLIC_SETTINGS = {
@@ -297,7 +298,7 @@ class PublicProductService:
         self.db_path = Path(db_path)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = connect_database(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
@@ -308,7 +309,7 @@ class PublicProductService:
         try:
             try:
                 row = conn.execute("SELECT value_json FROM platform_settings WHERE setting_key='public_product'").fetchone()
-            except sqlite3.OperationalError:
+            except database_error_types():
                 # Older or source-only installations may not have the platform settings table yet.
                 row = None
             if row:

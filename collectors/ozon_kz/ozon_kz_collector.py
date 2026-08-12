@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse, urlunparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+OZON_RU_ROOT = PROJECT_ROOT / "collectors" / "ozon"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(OZON_RU_ROOT) not in sys.path:
+    sys.path.insert(0, str(OZON_RU_ROOT))
+
+from collector_config import Settings, load_settings  # noqa: E402
+from ozon_collector import Collector, materialize_tenant_catalog  # noqa: E402
+from registry import now_iso  # noqa: E402
+from collectors.ozon_kz.storage import connect, ensure_schema  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent
+DEFAULT_DB = ROOT / "data" / "ozon_kz_registry.db"
+
+
+def seller_root_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    host = str(parsed.hostname or "").casefold()
+    if host not in {"ozon.kz", "www.ozon.kz"}:
+        return ""
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2 or parts[0].casefold() != "seller":
+        return ""
+    return urlunparse(("https", "ozon.kz", f"/seller/{parts[1]}/", "", "", ""))
+
+
+def build_settings(args: argparse.Namespace) -> Settings:
+    source_url = seller_root_url(args.source_url)
+    if not source_url:
+        raise ValueError("Укажите ссылку продавца вида https://ozon.kz/seller/name/.")
+    base = load_settings()
+    return replace(
+        base,
+        start_url=source_url,
+        start_urls=(source_url,),
+        expected_seller=str(args.expected_seller or "").strip(),
+        debug_port=max(1024, int(args.debug_port)),
+        catalog_wait_seconds=min(30, base.catalog_wait_seconds),
+        request_wait_seconds=min(30, base.request_wait_seconds),
+        page_reloads=min(1, base.page_reloads),
+        product_reloads=min(1, base.product_reloads),
+        database_path=Path(args.db).resolve(),
+        runs_dir=ROOT / "runs",
+        reports_dir=ROOT / "reports",
+        exports_dir=ROOT / "exports",
+        raw_dir=ROOT / "raw",
+    )
+
+
+def _attributes(value: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"name": label, "value": value.get(key)}
+        for key, label in (
+            ("model", "Модель"),
+            ("manufacturer_article", "Артикул производителя"),
+            ("tire_size", "Размер"),
+            ("season", "Сезон"),
+        )
+        if value.get(key) not in (None, "", "UNKNOWN")
+    ]
+
+
+def mirror_public_registry(settings: Settings) -> dict[str, int]:
+    ensure_schema(settings.database_path)
+    conn = connect(settings.database_path)
+    stamp = now_iso()
+    try:
+        products = conn.execute(
+            """SELECT p.* FROM products p
+               WHERE p.active=1 AND EXISTS(
+                   SELECT 1 FROM product_sources ps
+                   WHERE ps.article=p.article AND ps.source_url=?
+               ) ORDER BY p.article""",
+            (settings.start_url,),
+        ).fetchall()
+        offers = conn.execute(
+            "SELECT * FROM offers WHERE active=1 ORDER BY article,last_checked_at DESC"
+        ).fetchall()
+        offers_by_article: dict[str, list[dict[str, Any]]] = {}
+        for raw in offers:
+            item = dict(raw)
+            offers_by_article.setdefault(str(item["article"]), []).append(item)
+        conn.execute("UPDATE ozon_kz_products SET active=0")
+        conn.execute("UPDATE ozon_kz_offers SET active=0")
+        offer_count = 0
+        for raw in products:
+            value = dict(raw)
+            article = str(value.get("article") or "")
+            article_offers = offers_by_article.get(article, [])
+            expected = settings.expected_seller.casefold()
+            own = next((item for item in article_offers if expected and expected in {
+                str(item.get("seller_id") or "").casefold(),
+                str(item.get("seller_name") or "").casefold(),
+            }), article_offers[0] if article_offers else {})
+            conn.execute(
+                """INSERT INTO ozon_kz_products(
+                       product_id,seller_sku,title,brand,model,specifications_json,
+                       canonical_url,image_url,currency,own_price_kzt,availability_status,
+                       active,source_payload_json,first_seen_at,last_seen_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(product_id) DO UPDATE SET
+                       title=excluded.title,brand=excluded.brand,model=excluded.model,
+                       specifications_json=excluded.specifications_json,
+                       canonical_url=excluded.canonical_url,image_url=excluded.image_url,
+                       own_price_kzt=excluded.own_price_kzt,
+                       availability_status=excluded.availability_status,active=1,
+                       source_payload_json=excluded.source_payload_json,
+                       last_seen_at=excluded.last_seen_at""",
+                (
+                    article, value.get("manufacturer_article") or "",
+                    value.get("title") or article, value.get("brand") or "",
+                    value.get("model") or "", json.dumps(_attributes(value), ensure_ascii=False),
+                    value.get("canonical_url") or "", value.get("image_url") or "", "KZT",
+                    own.get("card_price") or value.get("catalog_price") or None,
+                    own.get("availability_status") or "UNKNOWN", 1,
+                    json.dumps({"source_url": settings.start_url}, ensure_ascii=False),
+                    value.get("first_seen_at") or stamp, value.get("last_seen_at") or stamp,
+                ),
+            )
+            for item in article_offers:
+                seller_id = str(item.get("seller_id") or item.get("seller_key") or "unknown")
+                is_own = int(item is own)
+                conn.execute(
+                    """INSERT INTO ozon_kz_offers(
+                           product_id,seller_id,seller_name,seller_url,price_kzt,
+                           regular_price_kzt,availability_status,is_own,active,captured_at
+                       ) VALUES(?,?,?,?,?,?,?,?,1,?)
+                       ON CONFLICT(product_id,seller_id) DO UPDATE SET
+                           seller_name=excluded.seller_name,seller_url=excluded.seller_url,
+                           price_kzt=excluded.price_kzt,regular_price_kzt=excluded.regular_price_kzt,
+                           availability_status=excluded.availability_status,is_own=excluded.is_own,
+                           active=1,captured_at=excluded.captured_at""",
+                    (
+                        article, seller_id, item.get("seller_name") or "",
+                        item.get("seller_url") or "", item.get("card_price") or None,
+                        item.get("regular_price") or None,
+                        item.get("availability_status") or "UNKNOWN", is_own,
+                        item.get("last_checked_at") or stamp,
+                    ),
+                )
+                conn.execute(
+                    """INSERT INTO ozon_kz_price_history(
+                           product_id,seller_id,price_kzt,availability_status,captured_at
+                       ) VALUES(?,?,?,?,?)""",
+                    (
+                        article, seller_id, item.get("card_price") or None,
+                        item.get("availability_status") or "UNKNOWN",
+                        item.get("last_checked_at") or stamp,
+                    ),
+                )
+                offer_count += 1
+        conn.execute(
+            """UPDATE ozon_kz_connector_metadata
+               SET status='connected',source_url=?,source_type='public_storefront',
+                   auth_mode='separate_browser_profile',last_success_at=?,last_error='',updated_at=?
+               WHERE id=1""",
+            (settings.start_url, stamp, stamp),
+        )
+        conn.commit()
+        return {"products": len(products), "offers": offer_count}
+    finally:
+        conn.close()
+
+
+def parse_articles(value: str) -> set[str] | None:
+    result = {
+        item.strip().removeprefix("ozon_kz:")
+        for item in str(value or "").split(",") if item.strip()
+    }
+    return result or None
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Ozon.kz public storefront collector")
+    parser.add_argument("action", choices=("sync-catalog", "refresh-prices", "full-sync"))
+    parser.add_argument("--db", default=str(DEFAULT_DB))
+    parser.add_argument("--app-db", required=True)
+    parser.add_argument("--tenant-id", type=int, required=True)
+    parser.add_argument("--source-url", required=True)
+    parser.add_argument("--expected-seller", default="")
+    parser.add_argument("--debug-port", type=int, default=9333)
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--pages", type=int, default=100)
+    parser.add_argument("--articles", default="")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    settings = build_settings(args)
+    ensure_schema(settings.database_path)
+    collector = Collector(settings)
+    limit = int(args.limit) or None
+    articles = parse_articles(args.articles)
+    try:
+        if args.action in {"sync-catalog", "full-sync"}:
+            discovered = collector.discover(limit, int(args.pages))
+            if int(discovered.get("items_total") or 0) <= 0:
+                raise RuntimeError(
+                    "Ozon.kz не отдал карточки продавца. Проверьте открытую вкладку "
+                    "Ozon.kz; если показана проверка доступа, пройдите её и повторите запуск."
+                )
+        if args.action == "full-sync":
+            collector.process("enrich-new", limit, None)
+        if args.action in {"refresh-prices", "full-sync"}:
+            collector.process("refresh-prices", limit, articles)
+        mirrored = mirror_public_registry(settings)
+        tenant_count = materialize_tenant_catalog(
+            settings, int(args.tenant_id), str(args.app_db), "ozon_kz"
+        )
+        print(json.dumps({"ok": True, **mirrored, "tenant_products": tenant_count}, ensure_ascii=False))
+        return 0
+    except Exception as exc:
+        conn = connect(settings.database_path)
+        try:
+            conn.execute(
+                """UPDATE ozon_kz_connector_metadata
+                   SET status='error',source_url=?,last_error=?,updated_at=? WHERE id=1""",
+                (settings.start_url, str(exc)[:1000], now_iso()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        return 1
+    finally:
+        collector.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

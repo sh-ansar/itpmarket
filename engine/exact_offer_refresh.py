@@ -17,6 +17,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
+from catalog_configuration_service import CatalogConfigurationService
+from storage.postgres_compat import connect_database
 try:
     from . import kaspi_search_compare_v8_2 as core
     from .kaspi_market_v9_1 import Database, capture_with_retries
@@ -44,17 +46,25 @@ def is_own_offer(offer: dict[str, Any], seller_id: str, seller_name: str) -> boo
 def get_jobs(
     db_path: Path,
     *,
+    tenant_id: int = 0,
     codes: list[str],
     limit: int,
     refresh: bool,
     only_errors: bool,
     stale_hours: float,
 ) -> list[dict[str, Any]]:
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = connect_database(db_path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=60000")
     where = ["COALESCE(m.active,1)=1", "c.product_url IS NOT NULL", "TRIM(c.product_url)<>''"]
     params: list[Any] = []
+    tenant_join = ""
+    if int(tenant_id or 0) > 0:
+        tenant_join = """JOIN tenant_catalog_products tcp
+                              ON tcp.source_product_code=c.product_code
+                             AND tcp.marketplace_code='kaspi'
+                             AND tcp.tenant_id=? AND tcp.active=1"""
+        params.append(int(tenant_id))
     if codes:
         placeholders = ",".join("?" for _ in codes)
         where.append(f"c.product_code IN ({placeholders})")
@@ -73,6 +83,7 @@ def get_jobs(
                d.specifications_json,d.detail_status,
                s.status AS exact_status,s.checked_at AS exact_checked_at
         FROM catalog_products c
+        {tenant_join}
         LEFT JOIN catalog_product_meta m ON m.product_code=c.product_code
         LEFT JOIN product_details d ON d.product_code=c.product_code
         LEFT JOIN exact_offer_scans s ON s.product_code=c.product_code
@@ -234,6 +245,7 @@ async def run(args: argparse.Namespace) -> int:
     codes = [core.clean_text(value) for value in str(args.codes or "").split(",") if core.clean_text(value)]
     jobs = get_jobs(
         db_path,
+        tenant_id=int(args.tenant_id or 0),
         codes=codes,
         limit=max(0, int(args.limit)),
         refresh=bool(args.refresh),
@@ -333,6 +345,10 @@ async def run(args: argparse.Namespace) -> int:
     )
     print("Старые похожие карточки сохранены в базе как архив и не участвуют в аналитике.")
     print("=" * 78)
+    if int(args.tenant_id or 0) > 0:
+        CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
+            int(args.tenant_id), [str(item["product_code"]) for item in jobs], replace=False
+        )
     return 0 if (stats["ok"] + stats["no_competitors"]) > 0 else 2
 
 
@@ -343,6 +359,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", default="data/unityre_kaspi.db")
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
+    parser.add_argument("--tenant-id", type=int, default=0)
     parser.add_argument("--seller-name", default="Unityre")
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--workers", type=int, default=2)

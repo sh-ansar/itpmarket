@@ -5,8 +5,6 @@ import json
 import os
 import re
 import secrets
-import socket
-import ipaddress
 import sqlite3
 import sys
 import threading
@@ -32,9 +30,8 @@ from flask import (
     url_for,
 )
 from waitress import serve
-import psutil
 
-from auth_service import AuthService
+from auth_service import AuthService, validate_password
 from config import (
     ROOT,
     ensure_directories,
@@ -45,21 +42,42 @@ from config import (
     save_config,
 )
 from data_service import DataService
+from catalog_configuration_service import CatalogConfigurationService
 from schema import ensure_database
 from task_manager import TaskManager
 from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
+from marketplace_registry import (
+    LEGACY_MARKETPLACE_CODES,
+    MARKETPLACE_CODES,
+    allowed_marketplaces_from_user,
+    marketplace_for_action,
+    marketplace_for_product_code,
+)
+from security_hygiene import redact_sensitive
+from tenant_security import company_is_approved, has_permission
+from subscription_service import (
+    SubscriptionError,
+    SubscriptionLimitError,
+    SubscriptionService,
+)
+from notification_service import NotificationService
+from storage.database_backend import DatabaseSettings
+from storage.postgres_compat import connect_database
 
-VERSION = "3.4.14"
+VERSION = "3.6.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
 CFG = ensure_directories(load_config())
 DB_PATH = resolve_path(CFG, "database")
+DatabaseSettings.from_environment().assert_runtime_ready()
 ensure_database(DB_PATH)
 AUTH = AuthService(DB_PATH)
 SAAS = SaaSService(DB_PATH)
+SUBSCRIPTIONS = SubscriptionService(DB_PATH)
+NOTIFICATIONS = NotificationService(DB_PATH)
 PUBLIC = PublicProductService(DB_PATH)
 DATA = DataService(
     DB_PATH,
@@ -67,6 +85,11 @@ DATA = DataService(
     ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
     seller_id=str(CFG["kaspi"]["seller_id"]),
     halyk_seller_name=str(CFG["halyk"]["seller_name"]),
+    forte_seller_name=str(CFG["forte"]["seller_name"]),
+    ozon_kz_db_path=ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db",
+)
+CATALOG = CatalogConfigurationService(
+    DB_PATH, ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db"
 )
 TASKS = TaskManager(
     ROOT,
@@ -75,6 +98,27 @@ TASKS = TaskManager(
     max_parallel=int(CFG["app"].get("max_parallel_tasks", 3)),
 )
 PID_PATH = ROOT / "data" / "server.pid"
+
+
+def subscription_service() -> SubscriptionService:
+    """Return the service bound to the active application database.
+
+    Test/staging deployments may replace DB_PATH without importing the whole
+    module again. Keeping this lookup path-aware also prevents writes to a
+    stale database after a controlled runtime reconfiguration.
+    """
+    global SUBSCRIPTIONS
+    if Path(SUBSCRIPTIONS.db_path).resolve() != Path(DB_PATH).resolve():
+        SUBSCRIPTIONS = SubscriptionService(DB_PATH)
+    return SUBSCRIPTIONS
+
+
+def notification_service() -> NotificationService:
+    """Return the notification store bound to the current application DB."""
+    global NOTIFICATIONS
+    if Path(NOTIFICATIONS.db_path).resolve() != Path(DB_PATH).resolve():
+        NOTIFICATIONS = NotificationService(DB_PATH)
+    return NOTIFICATIONS
 
 
 def warm_data_cache() -> None:
@@ -102,8 +146,21 @@ LOGIN_MAX_ATTEMPTS = 6
 RECOVERY_MAX_ATTEMPTS = 5
 REGISTRATION_MAX_ATTEMPTS = 8
 CODE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,96}$")
+SENSITIVE_LOG_RE = re.compile(
+    r"(?i)(authorization|api[_-]?key|client[_-]?secret|password|passwd|token|cookie)"
+    r"(\s*[:=]\s*|\s+)([^\s,;]+)"
+)
 
 ACTION_INFO = {
+    "full_sync_all": {
+        "label": "Полная синхронизация доступных площадок",
+        "resource": [
+            "kaspi_browser", "ozon_browser", "ozon_kz", "halyk_api",
+            "forte_api", "wildberries_api",
+        ],
+        "roles": {"admin", "operator"},
+        "platform": "system",
+    },
     "kaspi_catalog_collect": {
         "label": "Kaspi: сбор каталога",
         "resource": ["kaspi_browser"],
@@ -157,7 +214,7 @@ ACTION_INFO = {
         "label": "Аудит каталога",
         "resource": ["reports"],
         "roles": {"admin", "operator"},
-        "platform": "system",
+        "platform": "kaspi",
     },
     "backup_database": {
         "label": "Резервное копирование",
@@ -165,35 +222,54 @@ ACTION_INFO = {
         "roles": {"admin"},
         "platform": "system",
     },
-    "ozon_catalog_collect": {"label": "Ozon: сбор каталога", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_price_actualize": {"label": "Ozon: актуализация цен", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_open_browser": {"label": "Ozon: open browser", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_discover": {"label": "Ozon: обнаружение товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_enrich": {"label": "Ozon: характеристики новых товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_market_search": {"label": "Ozon: поиск рыночных предложений", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_refresh_prices": {"label": "Ozon: обновление цен", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_refresh_stale": {"label": "Ozon: обновление характеристик", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_retry": {"label": "Ozon: повтор ошибок", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_full_sync": {"label": "Ozon: полная синхронизация", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
-    "ozon_export": {"label": "Ozon: экспорт реестра", "resource": ["reports"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_catalog_collect": {"label": "Ozon.ru: сбор каталога", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_price_actualize": {"label": "Ozon.ru: актуализация цен", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_open_browser": {"label": "Ozon.ru: открыть браузер", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_discover": {"label": "Ozon.ru: обнаружение товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_enrich": {"label": "Ozon.ru: характеристики новых товаров", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_market_search": {"label": "Ozon.ru: поиск рыночных предложений", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_refresh_prices": {"label": "Ozon.ru: обновление цен", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_refresh_stale": {"label": "Ozon.ru: обновление характеристик", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_retry": {"label": "Ozon.ru: повтор ошибок", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_full_sync": {"label": "Ozon.ru: полная синхронизация", "resource": ["ozon_browser"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_export": {"label": "Ozon.ru: экспорт реестра", "resource": ["reports"], "roles": {"admin", "operator"}, "platform": "ozon"},
+    "ozon_kz_status": {"label": "Ozon.kz: статус сборщика", "resource": ["ozon_kz"], "roles": {"admin", "operator"}, "platform": "ozon_kz"},
+    "ozon_kz_catalog_collect": {"label": "Ozon.kz: сбор каталога", "resource": ["ozon_kz"], "roles": {"admin", "operator"}, "platform": "ozon_kz"},
+    "ozon_kz_price_actualize": {"label": "Ozon.kz: актуализация цен", "resource": ["ozon_kz"], "roles": {"admin", "operator"}, "platform": "ozon_kz"},
+    "ozon_kz_full_sync": {"label": "Ozon.kz: полная синхронизация", "resource": ["ozon_kz"], "roles": {"admin", "operator"}, "platform": "ozon_kz"},
     "halyk_catalog_collect": {"label": "Halyk Market: сбор каталога", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
     "halyk_price_actualize": {"label": "Halyk Market: актуализация цен", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
     "halyk_sync_catalog": {"label": "Halyk Market: синхронизация каталога", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
     "halyk_refresh_offers": {"label": "Halyk Market: точные предложения продавцов", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
     "halyk_full_sync": {"label": "Halyk Market: полная синхронизация", "resource": ["halyk_api"], "roles": {"admin", "operator"}, "platform": "halyk_market"},
+    "forte_catalog_collect": {"label": "Forte Market: сбор каталога", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "forte_price_actualize": {"label": "Forte Market: актуализация цен", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "forte_probe": {"label": "Forte Market: проверка подключения", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "forte_sync_catalog": {"label": "Forte Market: синхронизация каталога", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "forte_refresh_offers": {"label": "Forte Market: точные предложения продавцов", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "forte_full_sync": {"label": "Forte Market: полная синхронизация", "resource": ["forte_api"], "roles": {"admin", "operator"}, "platform": "forte_market"},
+    "wb_catalog_collect": {"label": "Wildberries: сбор каталога", "resource": ["wildberries_api"], "roles": {"admin", "operator"}, "platform": "wildberries"},
+    "wb_price_actualize": {"label": "Wildberries: актуализация цен", "resource": ["wildberries_api"], "roles": {"admin", "operator"}, "platform": "wildberries"},
+    "wb_full_sync": {"label": "Wildberries: полная синхронизация", "resource": ["wildberries_api"], "roles": {"admin", "operator"}, "platform": "wildberries"},
 }
 
 FILTERABLE_ACTIONS = {
     "kaspi_price_actualize", "update_own_prices", "scan_market", "refresh_market", "retry_errors",
     "ozon_price_actualize", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices",
     "ozon_refresh_stale", "ozon_retry",
+    "ozon_kz_price_actualize",
     "halyk_price_actualize", "halyk_refresh_offers",
+    "forte_price_actualize", "forte_refresh_offers",
     "export_report",
 }
 FORCE_ALL_ACTIONS = {
+    "full_sync_all",
     "kaspi_catalog_collect", "kaspi_full_sync", "sync_catalog",
     "ozon_catalog_collect", "ozon_discover", "ozon_full_sync", "ozon_export", "ozon_open_browser",
+    "ozon_kz_status", "ozon_kz_catalog_collect", "ozon_kz_full_sync",
     "halyk_catalog_collect", "halyk_sync_catalog", "halyk_full_sync",
+    "forte_probe", "forte_catalog_collect", "forte_sync_catalog", "forte_full_sync",
+    "wb_catalog_collect", "wb_price_actualize", "wb_full_sync",
     "audit_catalog", "backup_database",
 }
 
@@ -242,6 +318,40 @@ def is_superadmin(user: dict[str, Any] | None = None) -> bool:
     return (user or current_user() or {}).get("platform_role") == "superadmin"
 
 
+SUBSCRIPTION_PERMISSION_FEATURES = {
+    "view_products": "products", "manage_products": "products",
+    "view_operations": "operations", "run_operations": "operations",
+    "manage_operations": "operations", "view_reports": "reports",
+    "create_reports": "reports", "manage_filters": "dynamic_filters",
+    "manage_users": "team_management",
+}
+
+
+def apply_subscription_permissions(user: dict[str, Any]) -> dict[str, Any]:
+    if is_superadmin(user) or not user.get("tenant_id"):
+        return user
+    entitlement = subscription_service().entitlement(int(user["tenant_id"]))
+    features = entitlement.get("features", {}) if entitlement.get("active") else {}
+    permissions = dict(user.get("permissions") or {})
+    for permission, feature in SUBSCRIPTION_PERMISSION_FEATURES.items():
+        if not features.get(feature, False):
+            permissions[permission] = False
+    user["permissions"] = permissions
+    enabled_marketplaces = {
+        code for code, value in entitlement.get("marketplaces", {}).items()
+        if value.get("enabled")
+    }
+    for field in ("marketplaces", "available_marketplaces", "marketplace_permissions"):
+        values = dict(user.get(field) or {})
+        user[field] = {
+            code: enabled for code, enabled in values.items()
+            if code in enabled_marketplaces
+        }
+    user["subscription_status"] = entitlement.get("status")
+    user["subscription_features"] = features
+    return user
+
+
 def rate_limit_hit(scope: str, key: str, max_attempts: int, window_seconds: int) -> bool:
     now = now_epoch()
     bucket = f"{scope}:{request.remote_addr or 'local'}:{key.strip().casefold()[:120]}"
@@ -263,20 +373,51 @@ def tenant_visibility_predicate(alias: str, user: dict[str, Any]) -> tuple[str, 
     )
 
 
-def visible_tasks(user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def visible_tasks(
+    user: dict[str, Any] | None = None, *, enrich: bool = True
+) -> list[dict[str, Any]]:
     value = user or current_user() or {}
-    tasks = TASKS.states()
+    tasks = TASKS.states() if enrich else TASKS.raw_states()
     if is_superadmin(value):
         return tasks
     tenant_id = value.get("tenant_id")
     user_id = value.get("id")
+    permitted = allowed_marketplaces(value)
     result = []
     for task in tasks:
         metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
         task_tenant_id = metadata.get("tenant_id")
-        if task_tenant_id is not None and tenant_id is not None and int(task_tenant_id) == int(tenant_id):
-            result.append(task)
-        elif task_tenant_id is None and user_id is not None and int(metadata.get("requested_by_id") or 0) == int(user_id):
+        same_tenant = (
+            task_tenant_id is not None and tenant_id is not None
+            and int(task_tenant_id) == int(tenant_id)
+        )
+        own_legacy_task = (
+            task_tenant_id is None and user_id is not None
+            and int(metadata.get("requested_by_id") or 0) == int(user_id)
+        )
+        platform = str(metadata.get("platform") or marketplace_for_action(
+            str(task.get("action") or ""), ACTION_INFO
+        ))
+        action = str(task.get("name") or task.get("action") or "")
+        if action == "backup_database":
+            continue
+        task_platforms = {
+            str(item) for item in (metadata.get("platforms") or [])
+            if str(item) in MARKETPLACE_CODES
+        }
+        if platform == "system":
+            if task_platforms:
+                platform_allowed = task_platforms <= permitted
+            else:
+                platform_allowed = (
+                    int(metadata.get("requested_by_id") or 0) == int(user_id or -1)
+                    or LEGACY_MARKETPLACE_CODES <= permitted
+                )
+        else:
+            platform_allowed = platform in permitted
+        if (same_tenant or own_legacy_task) and (
+            platform_allowed
+        ):
             result.append(task)
     return result
 
@@ -285,15 +426,69 @@ def visible_task(task_id: str, user: dict[str, Any] | None = None) -> dict[str, 
     return next((task for task in visible_tasks(user) if str(task.get("id")) == str(task_id)), None)
 
 
+def public_task(task: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the task state without executable commands or server paths."""
+    if not task:
+        return None
+    result = {
+        key: value for key, value in task.items()
+        if key not in {"command", "log_file", "pid_file"}
+    }
+    metadata = result.get("metadata")
+    if isinstance(metadata, dict):
+        result["metadata"] = {
+            key: value for key, value in metadata.items()
+            if key not in {"command", "log_file", "selection_file", "credentials"}
+        }
+    return result
+
+
+def redact_log_text(value: Any) -> str:
+    return SENSITIVE_LOG_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", str(value or ""))
+
+
 def schedule_actions_for_user(user: dict[str, Any]) -> list[dict[str, str]]:
-    blocked = set()
-    if not is_superadmin(user):
-        blocked.add("backup_database")
+    if (
+        not has_permission(user, "run_operations")
+        or (not company_is_approved(user.get("tenant_status")) and not is_superadmin(user))
+        or (not bool(user.get("tenant_profile_complete")) and not is_superadmin(user))
+    ):
+        return []
+    permitted = allowed_marketplaces(user)
     return [
         {"code": code, "platform": value[0], "name": value[1]}
         for code, value in SCHEDULE_ACTIONS.items()
-        if code not in blocked
+        if not (code == "backup_database" and not is_superadmin(user))
+        and (
+            marketplace_for_action(code, ACTION_INFO) == "system"
+            or marketplace_for_action(code, ACTION_INFO) in permitted
+        )
     ]
+
+
+def action_access_error(action: str, user: dict[str, Any]) -> str | None:
+    if action not in ACTION_INFO:
+        return "Выберите поддерживаемую операцию."
+    if action == "backup_database" and not is_superadmin(user):
+        return "Резервная копия всей базы доступна только platform superadmin."
+    if not company_is_approved(user.get("tenant_status")) and not is_superadmin(user):
+        return "Компания ещё не подтверждена. Реальные операции доступны после одобрения."
+    if not bool(user.get("tenant_profile_complete")) and not is_superadmin(user):
+        return "Заполните обязательные поля компании в настройках перед запуском операций."
+    if not has_permission(user, "run_operations"):
+        return "Нет разрешения на запуск операций."
+    if action == "export_report" and not has_permission(user, "create_reports"):
+        return "Нет разрешения на формирование отчётов."
+    platform = marketplace_for_action(action, ACTION_INFO)
+    if platform != "system" and platform not in allowed_marketplaces(user):
+        return "Для компании эта площадка не подключена."
+    if not is_superadmin(user):
+        subscription_error = subscription_service().operation_error(
+            int(user.get("tenant_id") or 0), platform
+        )
+        if subscription_error:
+            return subscription_error
+    return None
 
 
 def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
@@ -324,6 +519,20 @@ def roles_required(*roles: str) -> Callable[[Callable[..., Any]], Callable[..., 
     return decorator
 
 
+def permission_required(permission_code: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(view: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(view)
+        @login_required
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            if not has_permission(current_user(), permission_code):
+                if is_api_request():
+                    return jsonify({"ok": False, "error": "Недостаточно прав."}), 403
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
 def platform_roles_required(*roles: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     allowed = set(roles)
     def decorator(view: Callable[..., Any]) -> Callable[..., Any]:
@@ -342,7 +551,10 @@ def platform_roles_required(*roles: str) -> Callable[[Callable[..., Any]], Calla
 
 def current_tenant() -> dict[str, Any] | None:
     user = current_user() or {}
-    return SAAS.tenant_for_user(int(user["id"])) if user.get("id") and user.get("tenant_id") else None
+    tenant = SAAS.tenant_for_user(int(user["id"])) if user.get("id") and user.get("tenant_id") else None
+    if tenant:
+        tenant["workspace_profile"] = SAAS.workspace_profile_for_row(tenant)
+    return tenant
 
 
 def managed_user_or_error(user_id: int, actor: dict[str, Any]) -> dict[str, Any]:
@@ -360,15 +572,44 @@ def managed_user_or_error(user_id: int, actor: dict[str, Any]) -> dict[str, Any]
 
 def allowed_marketplaces(user: dict[str, Any] | None = None) -> set[str]:
     value = user or current_user() or {}
-    access = value.get("marketplaces")
-    if not isinstance(access, dict) or not access:
-        return {"kaspi", "ozon", "halyk_market"}
-    return {code for code, enabled in access.items() if bool(enabled)}
+    return set(allowed_marketplaces_from_user(value))
+
+
+def product_codes_access_error(codes: list[str], user: dict[str, Any]) -> str | None:
+    forbidden = {
+        marketplace_for_product_code(code)
+        for code in codes
+        if marketplace_for_product_code(code) not in allowed_marketplaces(user)
+    }
+    if not forbidden:
+        return None
+    return "Нет доступа к площадкам выбранных товаров: " + ", ".join(sorted(forbidden))
+
+
+def report_visible_to_user(report: dict[str, Any], user: dict[str, Any]) -> bool:
+    if is_superadmin(user):
+        return True
+    raw = report.get("platforms_json")
+    try:
+        platforms = {
+            str(value) for value in json.loads(str(raw or "[]"))
+            if str(value) in MARKETPLACE_CODES
+        }
+    except (TypeError, ValueError, json.JSONDecodeError):
+        platforms = set()
+    if platforms:
+        return platforms <= allowed_marketplaces(user)
+    # Legacy reports did not record their marketplace scope. Only the author,
+    # or a user with the complete legacy access set, may open them.
+    return (
+        int(report.get("created_by") or 0) == int(user.get("id") or -1)
+        or LEGACY_MARKETPLACE_CODES <= allowed_marketplaces(user)
+    )
 
 
 def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
     filters = product_filters_from_request()
-    visible = allowed_marketplaces() & {"kaspi", "ozon", "halyk_market"}
+    visible = allowed_marketplaces() & set(MARKETPLACE_CODES)
     requested_one = str(filters.get("platform") or "").strip()
     raw_many = filters.get("platforms")
     if isinstance(raw_many, (list, tuple, set)):
@@ -383,6 +624,31 @@ def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
             filters["platform"] = next(iter(visible))
         elif not visible:
             filters["platform"] = "__no_marketplace_access__"
+    selections: dict[str, list[str]] = {}
+    raw_json = request.args.get("attributes", "")
+    if raw_json:
+        try:
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict):
+                selections.update({
+                    str(key)[:80]: _payload_filter_values(value, 500)
+                    for key, value in parsed.items()
+                })
+        except json.JSONDecodeError:
+            raise PermissionError("Некорректный фильтр характеристик.")
+    for key in request.args:
+        if key.startswith("attr."):
+            selections[key[5:][:80]] = _payload_filter_values(
+                request.args.getlist(key), 500
+            )
+    user = current_user() or {}
+    selected_platforms = requested or visible
+    attribute_codes = CATALOG.matching_product_codes(
+        int(user["tenant_id"]), selected_platforms, selections
+    )
+    filters["attribute_product_codes"] = (
+        sorted(attribute_codes) if attribute_codes is not None else None
+    )
     return filters, visible
 
 
@@ -401,7 +667,7 @@ def json_error(message: str, status: int = 400) -> Any:
 
 def record_event(event_type: str, entity_type: str | None = None, entity_id: str | None = None, details: dict[str, Any] | None = None) -> None:
     user = current_user() or {}
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = connect_database(DB_PATH, timeout=30)
     try:
         conn.execute(
             """
@@ -410,7 +676,7 @@ def record_event(event_type: str, entity_type: str | None = None, entity_id: str
             """,
             (
                 user.get("id"), event_type, entity_type, entity_id,
-                json.dumps(details or {}, ensure_ascii=False),
+                json.dumps(redact_sensitive(details or {}), ensure_ascii=False),
                 user.get("tenant_id"),
             ),
         )
@@ -420,7 +686,7 @@ def record_event(event_type: str, entity_type: str | None = None, entity_id: str
 
 
 def reload_services() -> None:
-    global CFG, DB_PATH, AUTH, DATA, TASKS
+    global CFG, DB_PATH, AUTH, DATA, CATALOG, TASKS
     CFG = ensure_directories(load_config())
     DB_PATH = resolve_path(CFG, "database")
     ensure_database(DB_PATH)
@@ -431,6 +697,11 @@ def reload_services() -> None:
         ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db",
         seller_id=str(CFG["kaspi"]["seller_id"]),
         halyk_seller_name=str(CFG["halyk"]["seller_name"]),
+        forte_seller_name=str(CFG["forte"]["seller_name"]),
+        ozon_kz_db_path=ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db",
+    )
+    CATALOG = CatalogConfigurationService(
+        DB_PATH, ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db"
     )
     TASKS.max_parallel = max(1, int(CFG["app"].get("max_parallel_tasks", 3)))
     threading.Thread(target=warm_data_cache, daemon=True).start()
@@ -448,46 +719,6 @@ def _lines(path: Path) -> list[str]:
     except Exception:
         pass
     return []
-
-
-def local_ipv4_addresses() -> list[str]:
-    addresses: list[str] = []
-
-    def add(value: str) -> None:
-        try:
-            ip = ipaddress.ip_address(str(value))
-        except ValueError:
-            return
-        if ip.version != 4 or ip.is_loopback or ip.is_link_local or not ip.is_private:
-            return
-        text = str(ip)
-        if text not in addresses:
-            addresses.append(text)
-
-    try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.settimeout(1)
-        probe.connect(("1.1.1.1", 80))
-        add(str(probe.getsockname()[0]))
-        probe.close()
-    except Exception:
-        pass
-
-    try:
-        for interface_addresses in psutil.net_if_addrs().values():
-            for value in interface_addresses:
-                if value.family == socket.AF_INET:
-                    add(str(value.address))
-    except Exception:
-        pass
-
-    try:
-        for value in socket.gethostbyname_ex(socket.gethostname())[2]:
-            add(value)
-    except Exception:
-        pass
-
-    return addresses
 
 
 def load_ozon_public_config() -> dict[str, Any]:
@@ -513,7 +744,7 @@ def load_ozon_public_config() -> dict[str, Any]:
     if not db_path.exists():
         return result
     try:
-        conn = sqlite3.connect(db_path)
+        conn = connect_database(db_path)
         conn.row_factory = sqlite3.Row
         tables = {
             str(row[0]) for row in conn.execute(
@@ -620,16 +851,6 @@ def save_ozon_public_config(payload: dict[str, Any]) -> None:
 
 
 
-def network_public_config() -> dict[str, Any]:
-    port = int(os.environ.get("ITP_PORT") or CFG["app"]["port"])
-    return {
-        "port": port,
-        "local_url": f"http://127.0.0.1:{port}",
-        "lan_urls": [f"http://{address}:{port}" for address in local_ipv4_addresses()],
-        "lan_enabled": str(os.environ.get("ITP_HOST") or CFG["app"]["host"]) in {"0.0.0.0", "::"},
-    }
-
-
 def py_command(script: Path, *args: str) -> list[str]:
     return [sys.executable, "-u", str(script), *map(str, args)]
 
@@ -688,6 +909,10 @@ def cleanup_pending_command(command: list[str]) -> None:
             if manifest_path.exists():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 candidates.extend(Path(str(value)) for value in manifest.get("cleanup_files", []) if str(value).strip())
+                for step in manifest.get("steps", []):
+                    nested = step.get("command") if isinstance(step, dict) else None
+                    if isinstance(nested, list):
+                        cleanup_pending_command([str(value) for value in nested])
             candidates.append(manifest_path)
         except (OSError, ValueError, json.JSONDecodeError, IndexError):
             pass
@@ -729,17 +954,111 @@ def build_action_command(
     user_id: int,
     scope: str = "all",
 ) -> list[str]:
-    kaspi = CFG["kaspi"]
+    action_user = AUTH.get_user(int(user_id)) or {}
+    tenant_id = int(action_user.get("tenant_id") or 0)
+    if tenant_id <= 0:
+        raise ValueError("Компания пользователя не найдена.")
+    default_tenant_id = SAAS.default_tenant_id()
+    integration_by_code = {
+        str(item.get("integration_code") or ""): item
+        for item in SAAS.integrations(tenant_id)
+    }
+
+    def connection(code: str) -> dict[str, Any]:
+        return integration_by_code.get(code) or {}
+
+    def stable_identifier(code: str) -> str:
+        value = str(connection(code).get("seller_identifier") or "").strip()
+        return "" if value.startswith("candidate:") else value
+
+    kaspi = dict(CFG["kaspi"])
+    halyk = dict(CFG["halyk"])
+    forte = dict(CFG["forte"])
+    wildberries = dict(CFG["wildberries"])
+    for code, target, allowed_keys in (
+        ("kaspi", kaspi, {"city_id", "zone_id", "timeout_seconds", "retries", "min_delay", "max_delay"}),
+        ("halyk_market", halyk, {"location_id", "catalog_query", "catalog_category_id", "page_size", "max_products", "timeout_seconds", "sleep_seconds"}),
+        ("forte_market", forte, {"city_id", "category_id", "page_size", "max_products", "timeout_seconds", "sleep_seconds"}),
+        ("wildberries", wildberries, {"currency", "destination", "max_products", "timeout_seconds", "retries", "sleep_seconds"}),
+    ):
+        saved_config = connection(code).get("config")
+        if isinstance(saved_config, dict):
+            for key in allowed_keys:
+                if saved_config.get(key) not in (None, ""):
+                    target[key] = saved_config[key]
+    if connection("kaspi").get("seller_name"):
+        kaspi["seller_name"] = str(connection("kaspi")["seller_name"])
+    if stable_identifier("kaspi"):
+        kaspi["seller_id"] = stable_identifier("kaspi")
+    if connection("halyk_market").get("seller_name"):
+        halyk["seller_name"] = str(connection("halyk_market")["seller_name"])
+        halyk["catalog_query"] = ""
+        halyk["catalog_category_id"] = ""
+    if connection("forte_market").get("seller_name"):
+        forte["seller_name"] = str(connection("forte_market")["seller_name"])
+    forte_identifier = stable_identifier("forte_market")
+    forte_source_url = str(connection("forte_market").get("seller_url") or "").strip()
+    if forte_identifier and not forte_identifier.startswith("product:"):
+        forte["merchant_id"] = forte_identifier
+    elif forte_identifier.startswith("product:"):
+        forte["merchant_id"] = ""
+    elif tenant_id != default_tenant_id:
+        forte["merchant_id"] = ""
+
+    action_platform = marketplace_for_action(action, ACTION_INFO)
+    if (
+        action_platform == "kaspi" and tenant_id != default_tenant_id
+        and not stable_identifier("kaspi")
+    ):
+        raise ValueError("Подключите магазин Kaspi по ссылке в настройках компании.")
     analysis = CFG["analysis"]
     codes_text = ",".join(
         code.removeprefix("kaspi:")
         for code in codes
-        if not code.startswith(("ozon:", "halyk:"))
+        if not code.startswith(("ozon:", "ozon_kz:", "halyk:", "forte:", "wb:"))
     )
     ozon_cli = ROOT / "collectors" / "ozon" / "ozon_collector.py"
+    ozon_kz_cli = ROOT / "collectors" / "ozon_kz" / "ozon_kz_collector.py"
+    ozon_kz_status_cli = ROOT / "collectors" / "ozon_kz" / "ozon_kz_connector.py"
     halyk_cli = ROOT / "collectors" / "halyk" / "halyk_collector.py"
-    halyk = CFG["halyk"]
     halyk_codes_text = ",".join(code.removeprefix("halyk:") for code in codes if code.startswith("halyk:"))
+    forte_cli = ROOT / "collectors" / "forte" / "forte_collector.py"
+    forte_codes_text = ",".join(code.removeprefix("forte:") for code in codes if code.startswith("forte:"))
+    wildberries_cli = ROOT / "collectors" / "wildberries" / "wildberries_collector.py"
+
+    if action == "full_sync_all":
+        full_sync_actions = {
+            "kaspi": "kaspi_full_sync",
+            "ozon": "ozon_full_sync",
+            "ozon_kz": "ozon_kz_full_sync",
+            "halyk_market": "halyk_full_sync",
+            "forte_market": "forte_full_sync",
+            "wildberries": "wb_full_sync",
+        }
+        permitted_for_plan = set(MARKETPLACE_CODES)
+        if not is_superadmin(action_user):
+            entitlement = subscription_service().entitlement(tenant_id)
+            permitted_for_plan = {
+                code for code, limit in entitlement.get("marketplaces", {}).items()
+                if limit.get("enabled")
+            }
+        connected = [
+            code for code in MARKETPLACE_CODES
+            if code in allowed_marketplaces(action_user)
+            and code in permitted_for_plan
+            and code in full_sync_actions
+        ]
+        if len(connected) < 2:
+            raise ValueError(
+                "Полная синхронизация доступна при подключении минимум двух площадок."
+            )
+        return workflow_command([
+            (
+                ACTION_INFO[full_sync_actions[code]]["label"],
+                build_action_command(full_sync_actions[code], [], user_id, "all"),
+            )
+            for code in sorted(connected)
+        ])
 
     if action == "kaspi_catalog_collect":
         return build_action_command("sync_catalog", [], user_id, "all")
@@ -754,12 +1073,6 @@ def build_action_command(
             ("Собственные цены Kaspi", build_action_command("update_own_prices", [], user_id, "all")),
             ("Предложения продавцов Kaspi", build_action_command("scan_market", [], user_id, "all")),
         ])
-    if action == "ozon_catalog_collect":
-        enrich = command_option(build_action_command("ozon_enrich", [], user_id, "all"), "--limit", "100000")
-        return workflow_command([
-            ("Обнаружение товаров Ozon", build_action_command("ozon_discover", [], user_id, "all")),
-            ("Характеристики товаров Ozon", enrich),
-        ])
     if action == "ozon_price_actualize":
         selection_path = ozon_article_selection(codes) if codes else None
         operation_limit = str(max(1, len(codes)) if codes else 100000)
@@ -769,31 +1082,96 @@ def build_action_command(
             refresh += ["--articles-file", str(selection_path)]
             market += ["--articles-file", str(selection_path)]
         return workflow_command(
-            [("Цены Ozon", refresh), ("Рыночные предложения Ozon", market)],
+            [("Цены Ozon.ru", refresh), ("Рыночные предложения Ozon.ru", market)],
             [selection_path] if selection_path else [],
         )
-    if action == "ozon_full_sync":
-        enrich = command_option(build_action_command("ozon_enrich", [], user_id, "all"), "--limit", "100000")
-        refresh = command_option(build_action_command("ozon_refresh_prices", [], user_id, "all"), "--limit", "100000")
-        market = command_option(build_action_command("ozon_market_search", [], user_id, "all"), "--limit", "100000")
-        return workflow_command([
-            ("Обнаружение товаров Ozon", build_action_command("ozon_discover", [], user_id, "all")),
-            ("Характеристики товаров Ozon", enrich),
-            ("Цены Ozon", refresh),
-            ("Рыночные предложения Ozon", market),
-        ])
+    if action == "ozon_kz_price_actualize":
+        return build_action_command("ozon_kz_refresh_prices", codes, user_id, scope)
     if action == "halyk_catalog_collect":
         return build_action_command("halyk_sync_catalog", [], user_id, "all")
     if action == "halyk_price_actualize":
         return build_action_command("halyk_refresh_offers", codes, user_id, scope)
+    if action == "forte_catalog_collect":
+        return build_action_command("forte_sync_catalog", [], user_id, "all")
+    if action == "forte_price_actualize":
+        return build_action_command("forte_refresh_offers", codes, user_id, scope)
 
+    wildberries_actions = {
+        "wb_catalog_collect": "sync-catalog",
+        "wb_price_actualize": "refresh-prices",
+        "wb_full_sync": "full-sync",
+    }
+    if action in wildberries_actions:
+        seller_id = stable_identifier("wildberries")
+        source_url = str(connection("wildberries").get("seller_url") or "").strip()
+        if not seller_id or not seller_id.isdigit():
+            raise ValueError("Подключите продавца Wildberries по ссылке в настройках компании.")
+        command = py_command(
+            wildberries_cli, wildberries_actions[action],
+            "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
+            "--seller-id", seller_id,
+            "--source-url", source_url,
+            "--currency", str(wildberries.get("currency") or "kzt"),
+            "--destination", str(wildberries.get("destination") or "123585596"),
+            "--timeout", str(wildberries.get("timeout_seconds") or 30),
+            "--retries", str(wildberries.get("retries") or 4),
+            "--sleep", str(wildberries.get("sleep_seconds") or 0.35),
+        )
+        max_products = int(wildberries.get("max_products") or 0)
+        if max_products > 0:
+            command += ["--max-products", str(max_products)]
+        return command
+
+    if action == "ozon_kz_status":
+        return py_command(
+            ozon_kz_status_cli, "status",
+            "--db", str(ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"),
+        )
+    ozon_kz_actions = {
+        "ozon_kz_catalog_collect": "sync-catalog",
+        "ozon_kz_refresh_prices": "refresh-prices",
+        "ozon_kz_full_sync": "full-sync",
+    }
+    if action in ozon_kz_actions:
+        kz_connection = connection("ozon_kz")
+        source_url = str(kz_connection.get("seller_url") or "").strip()
+        if not source_url:
+            raise ValueError("Подключите магазин Ozon.kz по ссылке в настройках компании.")
+        command = py_command(
+            ozon_kz_cli, ozon_kz_actions[action],
+            "--db", str(ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"),
+            "--app-db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
+            "--source-url", source_url,
+            "--expected-seller", str(
+                kz_connection.get("seller_name") or kz_connection.get("seller_identifier") or ""
+            ),
+        )
+        if action == "ozon_kz_refresh_prices" and codes:
+            command += ["--articles", ",".join(
+                code.removeprefix("ozon_kz:") for code in codes if code.startswith("ozon_kz:")
+            )]
+        return command
     ozon_actions = {
-        "ozon_open_browser": "open-browser", "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
+        "ozon_open_browser": "open-browser", "ozon_catalog_collect": "sync-catalog",
+        "ozon_discover": "discover", "ozon_enrich": "enrich-new", "ozon_market_search": "market-search",
         "ozon_refresh_prices": "refresh-prices", "ozon_refresh_stale": "refresh-stale",
         "ozon_retry": "retry-failed", "ozon_full_sync": "full-sync", "ozon_export": "export",
     }
     if action in ozon_actions:
         command = py_command(ozon_cli, ozon_actions[action])
+        ozon_connection = connection("ozon")
+        source_url = str(ozon_connection.get("seller_url") or "").strip()
+        if source_url:
+            command += [
+                "--source-url", source_url,
+                "--expected-seller", str(
+                    ozon_connection.get("seller_name") or ozon_connection.get("seller_identifier") or ""
+                ),
+                "--tenant-id", str(tenant_id),
+                "--app-db", str(DB_PATH),
+            ]
         if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
             command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
         if codes and action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
@@ -811,7 +1189,10 @@ def build_action_command(
             halyk_cli,
             halyk_actions[action],
             "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
             "--seller-name", str(halyk["seller_name"]),
+            "--merchant-id", stable_identifier("halyk_market"),
+            "--source-url", str(connection("halyk_market").get("seller_url") or ""),
             "--location-id", str(halyk["location_id"]),
             "--catalog-query", str(halyk.get("catalog_query") or "shini-i-diski"),
             "--catalog-category-id", str(halyk.get("catalog_category_id") or "10038"),
@@ -825,10 +1206,51 @@ def build_action_command(
         if action == "halyk_refresh_offers" and halyk_codes_text:
             command += ["--product-ids", halyk_codes_text]
         return command
+    forte_actions = {
+        "forte_probe": "probe",
+        "forte_sync_catalog": "sync-catalog",
+        "forte_refresh_offers": "refresh-offers",
+        "forte_full_sync": "full-sync",
+    }
+    if action in forte_actions:
+        merchant_id = str(forte.get("merchant_id") or "").strip()
+        forte_discovery = connection("forte_market").get("discovery")
+        seed_product_id = str(
+            forte_discovery.get("product_id") if isinstance(forte_discovery, dict) else ""
+        ).strip()
+        if action in {"forte_sync_catalog", "forte_full_sync"} and not merchant_id and not forte_source_url:
+            raise ValueError("Подключите продавца или карточку товара Forte Market в настройках.")
+        command = py_command(
+            forte_cli,
+            forte_actions[action],
+            "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
+            "--seller-name", str(
+                connection("forte_market").get("seller_name")
+                or action_user.get("tenant_name")
+                or "Компания"
+            ),
+            "--merchant-id", merchant_id,
+            "--source-url", forte_source_url,
+            "--seed-product-id", seed_product_id,
+            "--city-id", str(forte.get("city_id") or "KZ"),
+            "--category-id", str(forte.get("category_id") or ""),
+            "--page-size", str(forte.get("page_size") or 100),
+            "--workers", str(max(1, int(analysis["discover_workers"]))),
+            "--timeout", str(forte.get("timeout_seconds") or 30),
+            "--sleep", str(forte.get("sleep_seconds") or 0.25),
+        )
+        max_products = int(forte.get("max_products") or 0)
+        if max_products > 0:
+            command += ["--max-products", str(max_products)]
+        if action == "forte_refresh_offers" and forte_codes_text:
+            command += ["--product-ids", forte_codes_text]
+        return command
     if action == "sync_catalog":
         command = py_command(
             ROOT / "engine" / "catalog_sync.py",
             "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
             "--profile", str(resolve_path(CFG, "profile")),
             "--seller-id", str(kaspi["seller_id"]),
             "--city-id", str(kaspi["city_id"]),
@@ -845,6 +1267,7 @@ def build_action_command(
         command = py_command(
             ROOT / "engine" / "own_price_refresh.py",
             "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
             "--profile", str(resolve_path(CFG, "profile")),
             "--seller-id", str(kaspi["seller_id"]),
             "--city-id", str(kaspi["city_id"]),
@@ -863,6 +1286,7 @@ def build_action_command(
         command = py_command(
             ROOT / "engine" / "exact_offer_refresh.py",
             "--db", str(DB_PATH),
+            "--tenant-id", str(tenant_id),
             "--profile", str(resolve_path(CFG, "profile")),
             "--seller-id", str(kaspi["seller_id"]),
             "--seller-name", str(kaspi["seller_name"]),
@@ -885,14 +1309,19 @@ def build_action_command(
             command.append("--headless")
         return command
     if action == "export_report":
+        report_user = AUTH.get_user(int(user_id)) or {}
+        report_platforms = sorted(allowed_marketplaces(report_user))
         command = py_command(
             ROOT / "engine" / "export_market_intelligence.py",
             "--db", str(DB_PATH),
             "--ozon-db", str(ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db"),
+            "--ozon-kz-db", str(ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"),
             "--output", str(resolve_path(CFG, "output")),
             "--seller-name", str(kaspi["seller_name"]),
             "--seller-id", str(kaspi["seller_id"]),
             "--user-id", str(user_id),
+            "--tenant-id", str(int(report_user.get("tenant_id") or 0)),
+            "--allowed-platforms", ",".join(report_platforms),
         )
         if codes:
             selection_dir = ROOT / "data" / "report_selections"
@@ -926,6 +1355,8 @@ def build_action_command(
 SCHEDULER = SchedulerService(
     SAAS, TASKS, ACTION_INFO, build_action_command,
     interval_seconds=int(os.environ.get("ITP_SCHEDULER_INTERVAL", "30")),
+    user_loader=AUTH.get_user,
+    subscription_service=subscription_service(),
 )
 if os.environ.get("ITP_DISABLE_SCHEDULER", "0") != "1":
     SCHEDULER.start()
@@ -939,7 +1370,7 @@ def before_request() -> Any:
     if user_id:
         user = AUTH.get_user(int(user_id))
         if user and user.get("is_active"):
-            g.user = user
+            g.user = apply_subscription_permissions(user)
         else:
             session.clear()
 
@@ -984,10 +1415,17 @@ def after_request(response: Any) -> Any:
     )
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    if request.path.startswith("/api/") or request.path.startswith("/static/"):
+    if request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    elif request.path.startswith("/static/"):
+        # Static URLs are versioned with ?v=<app version>, so re-downloading all
+        # CSS, JS and icons on every page transition only wastes time.
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable"
+            if request.args.get("v") else "public, max-age=3600"
+        )
     else:
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     if request.path.endswith(".js"):
@@ -997,12 +1435,32 @@ def after_request(response: Any) -> Any:
 
 @app.context_processor
 def template_context() -> dict[str, Any]:
+    user = current_user()
+    visible_catalog = INTEGRATION_CATALOG
+    if user and user.get("tenant_id") and not is_superadmin(user):
+        company_catalog = SAAS.marketplace_access(
+            int(user["tenant_id"]), include_unavailable=False
+        )
+        available = user.get("available_marketplaces") or {}
+        personal = user.get("marketplace_permissions") or {}
+        visible_codes = {
+            code for code, enabled in available.items()
+            if bool(enabled) and personal.get(code, True) is not False
+        }
+        visible_catalog = [
+            item for item in company_catalog
+            if str(item.get("code") or "") in visible_codes
+        ]
     return {
         "csrf_token": ensure_csrf(),
-        "current_user": current_user(),
+        "current_user": user,
         "current_tenant": current_tenant(),
         "version": VERSION,
-        "integration_catalog": INTEGRATION_CATALOG,
+        "integration_catalog": visible_catalog,
+        "visible_marketplace_codes": tuple(
+            str(item.get("code") or "") for item in visible_catalog
+            if str(item.get("code") or "") in MARKETPLACE_CODES
+        ),
         "public_capabilities": PUBLIC_CAPABILITIES,
         "public_settings": PUBLIC.settings(),
     }
@@ -1098,7 +1556,7 @@ def forgot_password() -> Any:
     return render_template("forgot_password.html")
 
 
-@app.post("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 @login_required
 def logout() -> Any:
     session.clear()
@@ -1107,42 +1565,124 @@ def logout() -> Any:
 
 @app.get("/")
 def landing() -> Any:
-    return render_template("landing.html", capabilities=PUBLIC_CAPABILITIES, has_users=AUTH.has_users())
+    return render_template(
+        "landing.html", capabilities=PUBLIC_CAPABILITIES,
+        plans=subscription_service().plans(public_only=True), has_users=AUTH.has_users(),
+    )
 
 
 @app.route("/register", methods=["GET", "POST"])
 def registration() -> Any:
     ensure_csrf()
+    workspace_templates = SAAS.workspace_templates()
+    default_workspace_template_code = SAAS.default_workspace_template_code()
+    default_workspace_template = next(
+        (item for item in workspace_templates if item["code"] == default_workspace_template_code),
+        workspace_templates[0] if workspace_templates else {},
+    )
+    template_data = {
+        "public_capabilities": PUBLIC_CAPABILITIES,
+        "workspace_templates": workspace_templates,
+        "public_integrations": SAAS.public_integrations(),
+        "default_workspace_template_code": default_workspace_template_code,
+        "default_workspace_template": default_workspace_template,
+        "default_marketplaces": default_workspace_template.get("recommended_integrations", []),
+        "selected_marketplaces": request.form.getlist("marketplaces") if request.method == "POST" else [],
+        "default_theme": default_workspace_template.get("theme", "system"),
+        "subscription_plans": subscription_service().plans(public_only=True),
+        "selected_plan_code": str(
+            request.form.get("plan_code") or request.args.get("plan") or "trial"
+        ),
+    }
     if request.method == "POST":
         if rate_limit_hit("registration", str(request.form.get("email") or ""), REGISTRATION_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS):
             flash("Слишком много заявок с этого адреса. Повторите позже.", "error")
-            return render_template("register.html", capabilities=PUBLIC_CAPABILITIES), 429
+            return render_template("register.html", **template_data), 429
+        email = str(request.form.get("email") or "").strip()
+        if AUTH.get_user_by_email(email):
+            flash("Пользователь с такой почтой уже существует.", "error")
+            return render_template("register.html", **template_data), 409
+        password = str(request.form.get("password") or "")
+        if password != str(request.form.get("password_confirm") or ""):
+            flash("Пароли не совпадают.", "error")
+            return render_template("register.html", **template_data), 400
         payload = {
             "company_name": request.form.get("company_name", ""),
             "registration_number": request.form.get("registration_number", ""),
             "contact_name": request.form.get("contact_name", ""),
-            "email": request.form.get("email", ""),
+            "email": email,
             "phone": request.form.get("phone", ""),
             "capabilities": request.form.getlist("capabilities"),
+            "marketplaces": request.form.getlist("marketplaces"),
             "estimated_products": request.form.get("estimated_products", "0"),
             "comment": request.form.get("comment", ""),
             "privacy_consent": request.form.get("privacy_consent") == "1",
             "terms_consent": request.form.get("terms_consent") == "1",
             "locale": request.form.get("locale", "ru"),
+            "launch_mode": "self_service",
+            "template_code": request.form.get("template_code", ""),
+            "theme": request.form.get("theme", ""),
             "source_page": "public_registration",
+            "subscription_plan_code": request.form.get("plan_code", "starter"),
         }
         try:
-            request_id = SAAS.create_registration_request(payload)
+            validate_password(password, email, str(payload["contact_name"] or payload["company_name"]))
+            submission = SAAS.submit_registration_request(payload)
+            request_id = int(submission["request_id"])
+            profile = dict(submission["workspace_profile"])
             session["registration_request_id"] = request_id
-            return redirect(url_for("registration_complete"))
+            completion_result: dict[str, Any] = {
+                "mode": "self_service",
+                "request_id": request_id,
+                "company_name": payload["company_name"],
+                "contact_name": payload["contact_name"],
+                "email": payload["email"],
+                "workspace_profile": profile,
+            }
+            provision = SAAS.provision_tenant_from_request(request_id, None, "pending")
+            user, recovery_code = AUTH.create_user(
+                payload["email"], payload["contact_name"] or payload["company_name"],
+                password, "admin", None, tenant_id=int(provision["tenant_id"]),
+            )
+            locale = str(payload.get("locale") or "ru").strip().casefold()
+            if locale not in {"ru", "kk", "en"}:
+                locale = "ru"
+            DATA.save_preferences(int(user["id"]), {"locale": locale, "theme": str(profile.get("theme") or "system")})
+            subscription_service().request_plan(
+                int(provision["tenant_id"]),
+                str(payload.get("subscription_plan_code") or "starter"),
+                int(user["id"]),
+            )
+            session.clear()
+            session.permanent = True
+            session["user_id"] = int(user["id"])
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            session["registration_request_id"] = request_id
+            completion_result.update({
+                "tenant_id": int(provision["tenant_id"]), "tenant": provision["tenant"],
+                "request": provision["request"], "user": user, "recovery_code": recovery_code,
+            })
+            return render_template("registration_complete.html", result=completion_result, **template_data)
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("register.html", capabilities=PUBLIC_CAPABILITIES)
+    return render_template("register.html", **template_data)
 
 
 @app.get("/register/complete")
 def registration_complete() -> Any:
-    return render_template("registration_complete.html", request_id=session.pop("registration_request_id", None))
+    return render_template(
+        "registration_complete.html",
+        request_id=session.pop("registration_request_id", None),
+        result=None,
+    )
+
+
+@app.get("/api/public/plans")
+def api_public_plans() -> Any:
+    return json_ok(
+        plans=subscription_service().plans(public_only=True),
+        addons=subscription_service().addons(public_only=True),
+    )
 
 
 @app.get("/legal/<document>")
@@ -1160,10 +1700,14 @@ def app_index() -> Any:
     return render_template("app.html")
 
 
-@app.get("/platform")
+@app.get("/platform", defaults={"section": "companies"})
+@app.get("/platform/<section>")
 @platform_roles_required("superadmin")
-def platform_index() -> Any:
-    return render_template("platform.html")
+def platform_index(section: str) -> Any:
+    value = str(section or "companies").strip().casefold()
+    if value not in {"companies", "packages", "link-rules", "payments"}:
+        abort(404)
+    return render_template("platform.html", platform_section=value)
 
 
 @app.get("/api/session")
@@ -1173,14 +1717,14 @@ def api_session() -> Any:
     return json_ok(
         user=user,
         tenant=current_tenant(),
-        integrations=SAAS.integrations(int(user["tenant_id"])) if user.get("tenant_id") else [],
+        integrations=SAAS.integrations(int(user["tenant_id"]), allowed_only=True) if user.get("tenant_id") else [],
         csrf_token=ensure_csrf(),
         version=VERSION,
     )
 
 
 @app.get("/api/overview")
-@login_required
+@permission_required("view_dashboard")
 def api_overview() -> Any:
     user = current_user() or {}
     return json_ok(
@@ -1195,9 +1739,12 @@ def api_overview() -> Any:
 
 
 @app.get("/api/products/options")
-@login_required
+@permission_required("view_products")
 def api_product_options() -> Any:
-    return json_ok(**DATA.filter_options(allowed_marketplaces()))
+    user = current_user() or {}
+    return json_ok(**DATA.filter_options(
+        allowed_marketplaces(user), user_id=int(user["id"])
+    ))
 
 
 def product_filters_from_request() -> dict[str, Any]:
@@ -1260,7 +1807,7 @@ def product_filters_from_payload(raw: Any, user: dict[str, Any]) -> dict[str, An
     if filters["direction"].casefold() not in {"asc", "desc"}:
         filters["direction"] = "desc"
 
-    allowed = allowed_marketplaces(user) & {"kaspi", "ozon", "halyk_market"}
+    allowed = allowed_marketplaces(user) & set(MARKETPLACE_CODES)
     requested = set(filters["platforms"])
     if filters["platform"]:
         requested.add(filters["platform"])
@@ -1271,11 +1818,22 @@ def product_filters_from_payload(raw: Any, user: dict[str, Any]) -> dict[str, An
             filters["platform"] = next(iter(allowed))
         elif not allowed:
             filters["platform"] = "__no_marketplace_access__"
+    raw_attributes = source.get("attributes")
+    selections = {
+        str(key)[:80]: _payload_filter_values(value, 500)
+        for key, value in (raw_attributes.items() if isinstance(raw_attributes, dict) else [])
+    }
+    attribute_codes = CATALOG.matching_product_codes(
+        int(user["tenant_id"]), requested or allowed, selections
+    )
+    filters["attribute_product_codes"] = (
+        sorted(attribute_codes) if attribute_codes is not None else None
+    )
     return filters
 
 
 @app.get("/api/products")
-@login_required
+@permission_required("view_products")
 def api_products() -> Any:
     try:
         page = int(request.args.get("page", 1))
@@ -1292,19 +1850,21 @@ def api_products() -> Any:
 
 
 @app.get("/api/products/codes")
-@login_required
+@permission_required("view_products")
 def api_product_codes() -> Any:
     try:
         filters, _ = requested_platform_filters()
     except PermissionError as exc:
         return json_error(str(exc), 403)
-    return json_ok(codes=DATA.product_codes(filters))
+    return json_ok(codes=DATA.product_codes(
+        filters, user_id=int((current_user() or {})["id"])
+    ))
 
 
 @app.get("/api/products/<code>")
-@login_required
+@permission_required("view_products")
 def api_product(code: str) -> Any:
-    platform = "halyk_market" if str(code).startswith("halyk:") else "ozon" if str(code).startswith("ozon:") else "kaspi"
+    platform = marketplace_for_product_code(code)
     if platform not in allowed_marketplaces():
         return json_error("Нет доступа к выбранной площадке.", 403)
     product = DATA.product(code, int((current_user() or {})["id"]))
@@ -1312,34 +1872,67 @@ def api_product(code: str) -> Any:
 
 
 @app.put("/api/products/state")
-@roles_required("admin", "operator")
+@permission_required("manage_products")
 def api_product_state() -> Any:
     payload = json_payload()
     codes = clean_codes(payload.get("codes"))
     if not codes:
         return json_error("Не выбраны товары.")
+    user = current_user() or {}
+    access_error = product_codes_access_error(codes, user)
+    if access_error:
+        return json_error(access_error, 403)
     try:
         count = DATA.set_product_state(
             codes,
             payload.get("watched") if "watched" in payload else None,
             payload.get("priority") if "priority" in payload else None,
             payload.get("note") if "note" in payload else None,
-            int((current_user() or {})["id"]),
+            int(user["id"]),
             payload.get("expected_monthly_units") if "expected_monthly_units" in payload else None,
         )
         return json_ok(updated=count)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
 
 
 @app.get("/api/tasks")
-@login_required
+@permission_required("view_operations")
 def api_tasks() -> Any:
-    return json_ok(tasks=visible_tasks())
+    return json_ok(tasks=[public_task(task) for task in visible_tasks()])
+
+
+@app.get("/api/notifications")
+@login_required
+def api_notifications_get() -> Any:
+    user = current_user() or {}
+    tasks = visible_tasks(user, enrich=False)
+    service = notification_service()
+    service.sync_tasks(tasks)
+    service.ensure_expiry_reminders(user.get("tenant_id"))
+    return json_ok(**service.list_for_user(
+        int(user["id"]), int(request.args.get("limit") or 50)
+    ))
+
+
+@app.post("/api/notifications/read-all")
+@login_required
+def api_notifications_read_all() -> Any:
+    return json_ok(updated=notification_service().mark_read(int((current_user() or {})["id"])))
+
+
+@app.post("/api/notifications/<int:notification_id>/read")
+@login_required
+def api_notification_read(notification_id: int) -> Any:
+    return json_ok(updated=notification_service().mark_read(
+        int((current_user() or {})["id"]), notification_id
+    ))
 
 
 @app.post("/api/tasks/start")
-@roles_required("admin", "operator")
+@permission_required("run_operations")
 def api_task_start() -> Any:
     payload = json_payload()
     action = str(payload.get("action") or "")
@@ -1347,18 +1940,14 @@ def api_task_start() -> Any:
     user = current_user() or {}
     if not info:
         return json_error("Неизвестная операция.")
-    if user.get("role") not in info["roles"]:
-        return json_error("Недостаточно прав.", 403)
-    if action == "backup_database" and not is_superadmin(user):
-        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
-    task_platform = info.get("platform") or (
-        "halyk_market" if action.startswith("halyk_") else
-        "ozon" if action.startswith("ozon_") else
-        "system" if action in {"export_report", "backup_database"} else "kaspi"
-    )
-    if task_platform in {"kaspi", "ozon", "halyk_market"} and task_platform not in allowed_marketplaces(user):
-        return json_error("Для пользователя не разрешена эта площадка.", 403)
+    access_error = action_access_error(action, user)
+    if access_error:
+        return json_error(access_error, 403)
+    task_platform = marketplace_for_action(action, ACTION_INFO)
     codes = clean_codes(payload.get("codes"))
+    access_error = product_codes_access_error(codes, user)
+    if access_error:
+        return json_error(access_error, 403)
     scope = str(payload.get("scope") or ("selected" if codes else "all")).strip().casefold()
     if scope not in {"all", "selected", "filtered"}:
         scope = "all"
@@ -1374,10 +1963,12 @@ def api_task_start() -> Any:
             operation_filters = product_filters_from_payload(payload.get("filters"), user)
         except PermissionError as exc:
             return json_error(str(exc), 403)
-        if task_platform in {"kaspi", "ozon", "halyk_market"}:
+        if task_platform in MARKETPLACE_CODES:
             operation_filters["platform"] = task_platform
             operation_filters["platforms"] = []
-        codes = DATA.product_codes(operation_filters, limit=10000)
+        codes = DATA.product_codes(
+            operation_filters, limit=10000, user_id=int(user["id"])
+        )
         if not codes:
             return json_error("По выбранным фильтрам товары не найдены.")
     elif scope == "selected":
@@ -1390,11 +1981,14 @@ def api_task_start() -> Any:
         codes = [code for code in codes if code.startswith("ozon:")]
     elif task_platform == "halyk_market":
         codes = [code for code in codes if code.startswith("halyk:")]
+    elif task_platform == "forte_market":
+        codes = [code for code in codes if code.startswith("forte:")]
     elif task_platform == "kaspi":
-        codes = [code for code in codes if not code.startswith(("ozon:", "halyk:"))]
+        codes = [code for code in codes if not code.startswith(("ozon:", "ozon_kz:", "halyk:", "forte:"))]
     if scope in {"selected", "filtered"} and action != "export_report" and not codes:
         return json_error("Для выбранной площадки подходящие товары не найдены.")
     command: list[str] = []
+    quota_platforms: list[str] = []
     try:
         command = build_action_command(action, codes, int(user["id"]), scope)
         if scope == "filtered":
@@ -1404,6 +1998,17 @@ def api_task_start() -> Any:
         else:
             suffix = " — весь каталог"
         label = info["label"] + (suffix if action not in {"sync_catalog", "audit_catalog", "backup_database"} else "")
+        if not is_superadmin(user):
+            quota_targets = (
+                sorted(allowed_marketplaces(user))
+                if action == "full_sync_all"
+                else [task_platform]
+            )
+            for quota_platform in quota_targets:
+                subscription_service().consume_operation(
+                    int(user["tenant_id"]), quota_platform
+                )
+                quota_platforms.append(quota_platform)
         task = TASKS.start(
             action,
             label,
@@ -1416,43 +2021,66 @@ def api_task_start() -> Any:
                 "requested_by_id": user.get("id"),
                 "tenant_id": user.get("tenant_id"),
                 "platform": task_platform,
+                "platforms": (
+                    sorted(allowed_marketplaces(user))
+                    if action == "full_sync_all"
+                    else
+                    sorted({marketplace_for_product_code(code) for code in codes})
+                    if action == "export_report" and codes
+                    else sorted(allowed_marketplaces(user))
+                    if action == "export_report"
+                    else [task_platform] if task_platform in MARKETPLACE_CODES else []
+                ),
                 "filters": operation_filters,
             },
         )
         record_event("task_started", "task", task["id"], {"action": action, "scope": scope, "codes": len(codes)})
-        return json_ok(task=task)
-    except (ValueError, RuntimeError) as exc:
+        return json_ok(task=public_task(task))
+    except (ValueError, RuntimeError, SubscriptionError) as exc:
+        for quota_platform in quota_platforms:
+            subscription_service().release_operation(
+                int(user.get("tenant_id") or 0), quota_platform
+            )
         cleanup_pending_command(command)
         return json_error(str(exc), 409)
 
 
 @app.post("/api/tasks/<task_id>/stop")
-@roles_required("admin", "operator")
+@permission_required("manage_operations")
 def api_task_stop(task_id: str) -> Any:
     if not visible_task(task_id):
         return json_error("Операция не найдена.", 404)
     task = TASKS.stop(task_id)
     record_event("task_stopped", "task", task_id, {})
-    return json_ok(task=task)
+    return json_ok(task=public_task(task))
 
 
 @app.post("/api/tasks/stop_by_product")
-@roles_required("admin", "operator")
+@permission_required("manage_operations")
 def api_tasks_stop_by_product() -> Any:
     payload = json_payload()
     product_code = str(payload.get("product_code") or "").strip()
     if not product_code:
         return json_error("Не указан код товара.", 400)
+    user = current_user() or {}
+    access_error = product_codes_access_error([product_code], user)
+    if access_error:
+        return json_error(access_error, 403)
     # Determine platform and raw code
     platform = "kaspi"
     raw_code = product_code
     if product_code.startswith("ozon:"):
         platform = "ozon"
         raw_code = product_code.split(":", 1)[1]
+    elif product_code.startswith("ozon_kz:"):
+        platform = "ozon_kz"
+        raw_code = product_code.split(":", 1)[1]
     elif product_code.startswith("halyk:"):
         platform = "halyk_market"
         raw_code = product_code.split(":", 1)[1]
-    user = current_user() or {}
+    elif product_code.startswith("forte:"):
+        platform = "forte_market"
+        raw_code = product_code.split(":", 1)[1]
     stopped: list[str] = []
     for task in visible_tasks(user):
         try:
@@ -1461,7 +2089,7 @@ def api_tasks_stop_by_product() -> Any:
             meta = task.get("metadata") or {}
             task_platform = str(meta.get("platform") or "").strip()
             # If task is platform-wide (ozon/halyk), stop tasks for same platform
-            if platform in {"ozon", "halyk_market"} and task_platform and task_platform == platform:
+            if platform in {"ozon", "ozon_kz", "halyk_market", "forte_market"} and task_platform and task_platform == platform:
                 TASKS.stop(str(task["id"]))
                 record_event("task_stopped", "task", str(task["id"]), {"by_product": product_code})
                 stopped.append(str(task["id"]))
@@ -1480,29 +2108,32 @@ def api_tasks_stop_by_product() -> Any:
 
 
 @app.get("/api/tasks/<task_id>/log")
-@login_required
+@permission_required("view_operations")
 def api_task_log(task_id: str) -> Any:
     task = visible_task(task_id)
     if not task or task.get("status") == "missing":
         return json_error("Операция не найдена.", 404)
-    return json_ok(task=task, log=TASKS.tail(task_id, int(request.args.get("lines", 500))))
+    return json_ok(
+        task=public_task(task),
+        log=redact_log_text(TASKS.tail(task_id, int(request.args.get("lines", 500)))),
+    )
 
 
 @app.delete("/api/tasks/<task_id>")
-@roles_required("admin", "operator")
+@permission_required("manage_operations")
 def api_task_delete(task_id: str) -> Any:
     if not visible_task(task_id):
         return json_error("Операция не найдена.", 404)
     try:
         task = TASKS.delete(task_id)
         record_event("task_deleted", "task", task_id, {})
-        return json_ok(task=task)
+        return json_ok(task=public_task(task))
     except RuntimeError as exc:
         return json_error(str(exc), 409)
 
 
 @app.delete("/api/tasks")
-@roles_required("admin", "operator")
+@permission_required("manage_operations")
 def api_tasks_clear() -> Any:
     if is_superadmin():
         count = TASKS.clear_finished()
@@ -1520,7 +2151,7 @@ def api_tasks_clear() -> Any:
 
 
 @app.get("/api/analytics/dashboard")
-@login_required
+@permission_required("view_dashboard")
 def api_analytics_dashboard() -> Any:
     user = current_user() or {}
     try:
@@ -1533,16 +2164,17 @@ def api_analytics_dashboard() -> Any:
 
 
 @app.get("/api/reports")
-@login_required
+@permission_required("view_reports")
 def api_reports() -> Any:
     user = current_user() or {}
     clause, params = tenant_visibility_predicate("r", user)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = connect_database(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
             f"""
-            SELECT r.id,r.report_type,r.scope,r.file_name,r.rows_count,r.created_at,u.display_name
+            SELECT r.id,r.report_type,r.scope,r.file_name,r.rows_count,r.created_at,
+                   r.created_by,r.platforms_json,u.display_name
             FROM app_reports r LEFT JOIN app_users u ON u.id=r.created_by
             WHERE {clause}
             ORDER BY r.id DESC LIMIT 100
@@ -1551,24 +2183,34 @@ def api_reports() -> Any:
         ).fetchall()
     finally:
         conn.close()
-    return json_ok(reports=[dict(row) for row in rows])
+    reports = []
+    for row in rows:
+        item = dict(row)
+        if report_visible_to_user(item, user):
+            try:
+                item["platforms"] = json.loads(str(item.pop("platforms_json") or "[]"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["platforms"] = []
+            reports.append(item)
+    return json_ok(reports=reports)
 
 
 @app.get("/api/reports/<int:report_id>/download")
-@login_required
+@permission_required("view_reports")
 def api_report_download(report_id: int) -> Any:
     user = current_user() or {}
     clause, params = tenant_visibility_predicate("app_reports", user)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = connect_database(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
-            f"SELECT file_name,file_path FROM app_reports WHERE id=? AND {clause}",
+            f"""SELECT file_name,file_path,created_by,platforms_json
+                FROM app_reports WHERE id=? AND {clause}""",
             [int(report_id), *params],
         ).fetchone()
     finally:
         conn.close()
-    if not row:
+    if not row or not report_visible_to_user(dict(row), user):
         abort(404)
     path = Path(row["file_path"]).resolve()
     output = resolve_path(CFG, "output").resolve()
@@ -1587,7 +2229,11 @@ def api_backups() -> Any:
             "size": path.stat().st_size,
             "modified_at": path.stat().st_mtime,
         }
-        for path in sorted(folder.glob("*.db"), key=lambda value: value.stat().st_mtime, reverse=True)
+        for path in sorted(
+            [*folder.glob("*.db"), *folder.glob("*.dump")],
+            key=lambda value: value.stat().st_mtime,
+            reverse=True,
+        )
     ]
     return json_ok(backups=items[:50])
 
@@ -1599,13 +2245,13 @@ def api_backup_download(name: str) -> Any:
         abort(404)
     path = (resolve_path(CFG, "backups") / name).resolve()
     folder = resolve_path(CFG, "backups").resolve()
-    if folder not in path.parents or not path.exists() or path.suffix.lower() != ".db":
+    if folder not in path.parents or not path.exists() or path.suffix.lower() not in {".db", ".dump"}:
         abort(404)
     return send_file(path, as_attachment=True, download_name=path.name)
 
 
 @app.get("/api/events")
-@login_required
+@permission_required("view_settings")
 def api_events() -> Any:
     user = current_user() or {}
     return json_ok(
@@ -1617,23 +2263,26 @@ def api_events() -> Any:
 
 
 @app.get("/api/settings")
-@login_required
+@permission_required("view_settings")
 def api_settings_get() -> Any:
     user = current_user() or {}
     config_result = None
-    if user.get("role") == "admin":
+    if is_superadmin(user):
         config_result = public_config(CFG)
         config_result["ozon"] = load_ozon_public_config()
     return json_ok(
         preferences=DATA.preferences(int(user["id"])),
         config=config_result,
         tenant=current_tenant(),
-        network=network_public_config(),
+        subscription=(
+            subscription_service().tenant_snapshot(int(user["tenant_id"]))
+            if user.get("tenant_id") else None
+        ),
     )
 
 
 @app.put("/api/settings")
-@login_required
+@permission_required("view_settings")
 def api_settings_put() -> Any:
     payload = json_payload()
     user = current_user() or {}
@@ -1641,14 +2290,14 @@ def api_settings_put() -> Any:
         preferences_payload = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else payload
         preferences = DATA.save_preferences(int(user["id"]), preferences_payload)
         tenant_result = None
-        if user.get("role") == "admin" and isinstance(payload.get("tenant"), dict) and user.get("tenant_id"):
+        if has_permission(user, "manage_company") and isinstance(payload.get("tenant"), dict) and user.get("tenant_id"):
             tenant_result = SAAS.update_tenant_profile(
                 int(user["tenant_id"]),
                 payload["tenant"],
                 int(user["id"]),
             )
         config_result = None
-        if user.get("role") == "admin" and isinstance(payload.get("config"), dict):
+        if is_superadmin(user) and isinstance(payload.get("config"), dict):
             config_payload = payload["config"]
             updated = load_config()
             kaspi = config_payload.get("kaspi") if isinstance(config_payload.get("kaspi"), dict) else {}
@@ -1656,6 +2305,7 @@ def api_settings_put() -> Any:
             app_values = config_payload.get("app") if isinstance(config_payload.get("app"), dict) else {}
             ozon_values = config_payload.get("ozon") if isinstance(config_payload.get("ozon"), dict) else {}
             halyk_values = config_payload.get("halyk") if isinstance(config_payload.get("halyk"), dict) else {}
+            forte_values = config_payload.get("forte") if isinstance(config_payload.get("forte"), dict) else {}
             for key in ("seller_id", "seller_name", "city_id", "zone_id"):
                 if key in kaspi:
                     updated["kaspi"][key] = str(kaspi[key]).strip()
@@ -1677,6 +2327,14 @@ def api_settings_put() -> Any:
                     updated["halyk"][key] = max(minimum, min(int(halyk_values[key]), maximum))
             if "sleep_seconds" in halyk_values:
                 updated["halyk"]["sleep_seconds"] = max(0.0, min(float(halyk_values["sleep_seconds"]), 10.0))
+            for key in ("seller_name", "merchant_id", "city_id", "category_id"):
+                if key in forte_values:
+                    updated["forte"][key] = str(forte_values[key]).strip()
+            for key, minimum, maximum in (("page_size", 1, 100), ("timeout_seconds", 10, 120), ("max_products", 0, 100000)):
+                if key in forte_values:
+                    updated["forte"][key] = max(minimum, min(int(forte_values[key]), maximum))
+            if "sleep_seconds" in forte_values:
+                updated["forte"]["sleep_seconds"] = max(0.0, min(float(forte_values["sleep_seconds"]), 10.0))
             for key, minimum, maximum in (("discover_workers", 1, 4), ("price_workers", 1, 4), ("search_pages", 1, 5), ("validate_top", 1, 12), ("search_cache_days", 0, 90), ("detail_cache_days", 0, 180)):
                 if key in analysis:
                     value = float(analysis[key]) if "days" in key else int(analysis[key])
@@ -1698,13 +2356,13 @@ def api_settings_put() -> Any:
 
 
 @app.get("/api/users")
-@roles_required("admin")
+@permission_required("manage_users")
 def api_users_get() -> Any:
     return json_ok(users=AUTH.list_users(int((current_user() or {})["tenant_id"])))
 
 
 @app.post("/api/users")
-@roles_required("admin")
+@permission_required("manage_users")
 def api_users_create() -> Any:
     payload = json_payload()
     try:
@@ -1717,18 +2375,13 @@ def api_users_create() -> Any:
             int(current["id"]),
             tenant_id=int(current["tenant_id"]),
         )
-        marketplaces = payload.get("marketplaces")
-        if marketplaces is not None:
-            user = AUTH.update_user(
-                int(user["id"]), {"marketplaces": marketplaces}, int(current["id"])
-            )
         return json_ok(user=user, recovery_code=recovery)
     except ValueError as exc:
         return json_error(str(exc))
 
 
 @app.put("/api/users/<int:user_id>")
-@roles_required("admin")
+@permission_required("manage_users")
 def api_users_update(user_id: int) -> Any:
     current = current_user() or {}
     try:
@@ -1744,7 +2397,7 @@ def api_users_update(user_id: int) -> Any:
 
 
 @app.delete("/api/users/<int:user_id>")
-@roles_required("admin")
+@permission_required("manage_users")
 def api_users_delete(user_id: int) -> Any:
     current = current_user() or {}
     try:
@@ -1760,7 +2413,7 @@ def api_users_delete(user_id: int) -> Any:
 
 
 @app.post("/api/users/<int:user_id>/recovery")
-@roles_required("admin")
+@permission_required("manage_users")
 def api_users_recovery(user_id: int) -> Any:
     current = current_user() or {}
     try:
@@ -1776,31 +2429,162 @@ def api_users_recovery(user_id: int) -> Any:
 
 
 @app.get("/api/tenant")
-@login_required
+@permission_required("view_settings")
 def api_tenant_get() -> Any:
     user = current_user() or {}
-    return json_ok(tenant=current_tenant(), integrations=SAAS.integrations(int(user["tenant_id"])))
+    marketplace_access = SAAS.marketplace_access(
+        int(user["tenant_id"]), include_unavailable=False
+    )
+    return json_ok(
+        tenant=current_tenant(),
+        integrations=SAAS.integrations(int(user["tenant_id"]), allowed_only=True),
+        marketplace_access=marketplace_access,
+        integration_catalog=[
+            {key: item[key] for key in (
+                "code", "name", "description", "availability", "connection_fields",
+                "credential_fields", "capabilities", "limitations"
+            ) if key in item}
+            for item in marketplace_access
+        ],
+    )
+
+
+@app.get("/api/catalog/filters")
+@permission_required("view_products")
+def api_catalog_filters_get() -> Any:
+    user = current_user() or {}
+    permitted = allowed_marketplaces(user)
+    requested = {
+        value.strip() for value in request.args.get("platforms", "").split(",")
+        if value.strip()
+    }
+    if requested - permitted:
+        return json_error("Нет доступа к одной из выбранных площадок.", 403)
+    scoped = requested or permitted
+    configuration = CATALOG.filter_configuration(int(user["tenant_id"]), scoped)
+    return json_ok(**configuration)
+
+
+@app.put("/api/catalog/filters")
+@permission_required("manage_filters")
+def api_catalog_filters_put() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    filters = payload.get("filters")
+    if not isinstance(filters, list):
+        return json_error("Передайте массив filters.")
+    visible_configuration = CATALOG.filter_configuration(
+        int(user["tenant_id"]), allowed_marketplaces(user)
+    )
+    visible_keys = {
+        str(item.get("attribute_key") or "")
+        for item in visible_configuration.get("filters", [])
+    }
+    requested_keys = {
+        str(item.get("attribute_key") or "")
+        for item in filters if isinstance(item, dict)
+    }
+    if requested_keys - visible_keys:
+        return json_error("Нет доступа к одной из характеристик каталога.", 403)
+    try:
+        CATALOG.update_filters(
+            int(user["tenant_id"]), filters, int(user["id"])
+        )
+        configuration = CATALOG.filter_configuration(
+            int(user["tenant_id"]), allowed_marketplaces(user)
+        )
+        return json_ok(**configuration)
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/catalog/attributes/refresh")
+@permission_required("manage_filters")
+def api_catalog_attributes_refresh() -> Any:
+    user = current_user() or {}
+    result = CATALOG.refresh_registry(
+        int(user["tenant_id"]), allowed_marketplaces(user)
+    )
+    return json_ok(result=result)
+
+
+@app.post("/api/tenant/marketplaces/check")
+@permission_required("manage_marketplaces")
+def api_tenant_marketplace_check() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        result = SAAS.detect_marketplace_url(
+            int(user["tenant_id"]),
+            str(payload.get("source") or payload.get("seller_url") or payload.get("url") or ""),
+            str(payload.get("marketplace_code") or ""),
+        )
+        return json_ok(result=result)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/tenant/marketplaces/connect")
+@permission_required("manage_marketplaces")
+def api_tenant_marketplace_connect() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        result = SAAS.connect_marketplace(
+            int(user["tenant_id"]),
+            str(payload.get("source") or payload.get("seller_url") or payload.get("url") or ""),
+            int(user["id"]),
+            str(payload.get("marketplace_code") or ""),
+        )
+        return json_ok(
+            result=result,
+            marketplace_access=SAAS.marketplace_access(
+                int(user["tenant_id"]), include_unavailable=False
+            ),
+        )
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    except ValueError as exc:
+        return json_error(str(exc))
 
 
 @app.get("/api/schedules")
-@login_required
+@permission_required("view_operations")
 def api_schedules_get() -> Any:
     user = current_user() or {}
     tenant_id = int(user["tenant_id"])
+    permitted = allowed_marketplaces(user)
+    schedules = [
+        item for item in SAAS.schedules(tenant_id)
+        if str(item.get("platform") or marketplace_for_action(item.get("action"), ACTION_INFO)) == "system"
+        or str(item.get("platform") or marketplace_for_action(item.get("action"), ACTION_INFO)) in permitted
+    ]
+    visible_schedule_ids = {int(item["id"]) for item in schedules}
+    runs = [
+        item for item in SAAS.schedule_runs(tenant_id, int(request.args.get("limit", 50)))
+        if int(item.get("schedule_id") or 0) in visible_schedule_ids
+    ]
     return json_ok(
-        schedules=SAAS.schedules(tenant_id),
-        runs=SAAS.schedule_runs(tenant_id, int(request.args.get("limit", 50))),
+        schedules=schedules,
+        runs=runs,
         actions=schedule_actions_for_user(user),
     )
 
 
 @app.post("/api/schedules")
-@roles_required("admin", "operator")
+@permission_required("run_operations")
 def api_schedules_create() -> Any:
     user = current_user() or {}
     payload = json_payload()
-    if str(payload.get("action") or "") == "backup_database" and not is_superadmin(user):
-        return json_error("Резервная копия всей базы доступна только platform superadmin.", 403)
+    if not is_superadmin(user) and not subscription_service().entitlement(
+        int(user["tenant_id"])
+    ).get("features", {}).get("schedules", False):
+        return json_error("Расписания не входят в активный пакет компании.", 403)
+    access_error = action_access_error(str(payload.get("action") or ""), user)
+    if access_error:
+        return json_error(access_error, 403)
     try:
         return json_ok(schedule=SAAS.create_schedule(int(user["tenant_id"]), payload, int(user["id"])))
     except (ValueError, TypeError) as exc:
@@ -1808,9 +2592,19 @@ def api_schedules_create() -> Any:
 
 
 @app.put("/api/schedules/<int:schedule_id>")
-@roles_required("admin", "operator")
+@permission_required("run_operations")
 def api_schedules_update(schedule_id: int) -> Any:
     user = current_user() or {}
+    if not is_superadmin(user) and not subscription_service().entitlement(
+        int(user["tenant_id"])
+    ).get("features", {}).get("schedules", False):
+        return json_error("Расписания не входят в активный пакет компании.", 403)
+    current = SAAS.schedule(schedule_id, int(user["tenant_id"]))
+    if not current:
+        return json_error("Расписание не найдено.", 404)
+    access_error = action_access_error(str(current.get("action") or ""), user)
+    if access_error:
+        return json_error(access_error, 403)
     try:
         return json_ok(schedule=SAAS.update_schedule(schedule_id, int(user["tenant_id"]), json_payload(), int(user["id"])))
     except (ValueError, TypeError) as exc:
@@ -1818,9 +2612,15 @@ def api_schedules_update(schedule_id: int) -> Any:
 
 
 @app.delete("/api/schedules/<int:schedule_id>")
-@roles_required("admin")
+@permission_required("manage_operations")
 def api_schedules_delete(schedule_id: int) -> Any:
     user = current_user() or {}
+    current = SAAS.schedule(schedule_id, int(user["tenant_id"]))
+    if not current:
+        return json_error("Расписание не найдено.", 404)
+    platform = marketplace_for_action(str(current.get("action") or ""), ACTION_INFO)
+    if platform != "system" and platform not in allowed_marketplaces(user):
+        return json_error("Нет доступа к площадке расписания.", 403)
     try:
         SAAS.delete_schedule(schedule_id, int(user["tenant_id"]), int(user["id"]))
         return json_ok(deleted=True)
@@ -1828,45 +2628,287 @@ def api_schedules_delete(schedule_id: int) -> Any:
         return json_error(str(exc), 404)
 
 
+@app.get("/api/subscription")
+@permission_required("view_settings")
+def api_subscription_get() -> Any:
+    user = current_user() or {}
+    return json_ok(subscription=subscription_service().tenant_snapshot(int(user["tenant_id"])))
+
+
+@app.post("/api/subscription/request")
+@permission_required("manage_company")
+def api_subscription_request() -> Any:
+    user = current_user() or {}
+    try:
+        result = subscription_service().request_plan(
+            int(user["tenant_id"]), str(json_payload().get("plan_code") or ""),
+            int(user["id"]),
+        )
+        return json_ok(request=result)
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/subscription/addons/request")
+@permission_required("manage_company")
+def api_subscription_addon_request() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        result = subscription_service().request_addon(
+            int(user["tenant_id"]), str(payload.get("addon_code") or ""),
+            str(payload.get("marketplace_code") or ""), int(payload.get("quantity") or 1),
+            int(user["id"]),
+        )
+        return json_ok(request=result)
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.get("/api/platform/subscriptions")
+@platform_roles_required("superadmin")
+def api_platform_subscriptions_get() -> Any:
+    return json_ok(**subscription_service().admin_snapshot())
+
+
+@app.post("/api/platform/subscription-plans")
+@platform_roles_required("superadmin")
+def api_platform_subscription_plan_create() -> Any:
+    try:
+        return json_ok(plan=subscription_service().save_plan(
+            json_payload(), int((current_user() or {})["id"])
+        ))
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.put("/api/platform/subscription-plans/<int:plan_id>")
+@platform_roles_required("superadmin")
+def api_platform_subscription_plan_update(plan_id: int) -> Any:
+    payload = json_payload()
+    payload["id"] = int(plan_id)
+    try:
+        return json_ok(plan=subscription_service().save_plan(
+            payload, int((current_user() or {})["id"])
+        ))
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/subscription-addons")
+@platform_roles_required("superadmin")
+def api_platform_subscription_addon_create() -> Any:
+    try:
+        return json_ok(addon=subscription_service().save_addon(
+            json_payload(), int((current_user() or {})["id"])
+        ))
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.put("/api/platform/subscription-addons/<int:addon_id>")
+@platform_roles_required("superadmin")
+def api_platform_subscription_addon_update(addon_id: int) -> Any:
+    payload = json_payload()
+    payload["id"] = int(addon_id)
+    try:
+        return json_ok(addon=subscription_service().save_addon(
+            payload, int((current_user() or {})["id"])
+        ))
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/subscriptions/<int:subscription_id>/<decision>")
+@platform_roles_required("superadmin")
+def api_platform_subscription_review(subscription_id: int, decision: str) -> Any:
+    payload = json_payload()
+    try:
+        result = subscription_service().review_subscription(
+            subscription_id, decision, int((current_user() or {})["id"]),
+            term_days=(int(payload["term_days"]) if payload.get("term_days") not in (None, "") else None),
+            price_amount=(float(payload["price_amount"]) if payload.get("price_amount") not in (None, "") else None),
+            review_note=str(payload.get("review_note") or ""),
+        )
+        return json_ok(subscription=result)
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/subscription-addons/requests/<int:request_id>/<decision>")
+@platform_roles_required("superadmin")
+def api_platform_subscription_addon_review(request_id: int, decision: str) -> Any:
+    try:
+        result = subscription_service().review_addon(
+            request_id, decision, int((current_user() or {})["id"]),
+            str(json_payload().get("review_note") or ""),
+        )
+        return json_ok(addon_request=result)
+    except SubscriptionError as exc:
+        return json_error(str(exc), 409)
+
+
 @app.get("/api/platform/overview")
 @platform_roles_required("superadmin")
 def api_platform_overview() -> Any:
-    user = current_user() or {}
-    overview = DATA.overview(int(CFG["kaspi"].get("expected_count", 0)), int(CFG["analysis"].get("discover_workers", 2)), int(user["id"]))
-    result = SAAS.platform_overview(int(overview.get("catalog_count") or 0), int(overview.get("processed_total_count") or overview.get("analyzed_count") or 0))
-    return json_ok(**result, requests=SAAS.registration_requests(), integration_catalog=SAAS.public_integrations())
+    section = str(request.args.get("section") or "companies").strip().casefold()
+    if section == "companies":
+        active_subscriptions = subscription_service().active_subscriptions()
+        result = SAAS.platform_overview()
+        active_by_tenant = {
+            int(item["tenant_id"]): item
+            for item in active_subscriptions
+        }
+        for tenant in result.get("tenants", []):
+            tenant["subscription"] = active_by_tenant.get(int(tenant["id"]))
+        subscriptions: dict[str, Any] = {}
+    else:
+        subscriptions = (
+            subscription_service().admin_snapshot()
+            if section in {"packages", "payments"} else {}
+        )
+        result = {"tenants": [], "totals": {"tenants": 0, "active_tenants": 0, "new_requests": 0, "products": 0}}
+    return json_ok(
+        **result,
+        requests=[],
+        integration_catalog=SAAS.public_integrations() if section == "link-rules" else [],
+        marketplace_source_rules=SAAS.marketplace_source_rules() if section == "link-rules" else {},
+        subscriptions=subscriptions,
+    )
+
+
+@app.get("/api/platform/marketplace-source-rules")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_source_rules_get() -> Any:
+    return json_ok(
+        marketplace_source_rules=SAAS.marketplace_source_rules(),
+        integration_catalog=SAAS.public_integrations(),
+    )
+
+
+@app.put("/api/platform/marketplace-source-rules")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_source_rules_put() -> Any:
+    try:
+        rules = SAAS.update_marketplace_source_rules(
+            json_payload(), int((current_user() or {})["id"])
+        )
+        return json_ok(
+            marketplace_source_rules=rules,
+            integration_catalog=SAAS.public_integrations(),
+        )
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/platform/marketplace-source-rules/preview")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_source_rules_preview() -> Any:
+    payload = json_payload()
+    try:
+        return json_ok(result=SAAS.preview_marketplace_source(
+            str(payload.get("source") or ""),
+            str(payload.get("marketplace_code") or ""),
+            payload.get("marketplace_source_rules"),
+        ))
+    except ValueError as exc:
+        return json_error(str(exc))
 
 
 @app.get("/api/platform/tenants/<int:tenant_id>/detail")
 @platform_roles_required("superadmin")
 def api_platform_tenant_detail(tenant_id: int) -> Any:
-    try: return json_ok(**SAAS.tenant_detail(tenant_id))
-    except ValueError as exc: return json_error(str(exc),404)
-
-
-@app.get("/api/platform/public-settings")
-@platform_roles_required("superadmin")
-def api_platform_public_settings_get() -> Any:
-    return json_ok(settings=PUBLIC.settings())
-
-
-@app.put("/api/platform/public-settings")
-@platform_roles_required("superadmin")
-def api_platform_public_settings_put() -> Any:
     try:
-        settings=PUBLIC.update_settings(json_payload(),int((current_user() or {})["id"]))
-        record_event("platform_public_settings_updated","platform_settings","public_product")
-        return json_ok(settings=settings)
-    except ValueError as exc: return json_error(str(exc))
+        detail = SAAS.tenant_detail_with_profile(tenant_id)
+        detail["users"] = AUTH.list_users(tenant_id)
+        detail["integration_catalog"] = SAAS.public_integrations()
+        detail["subscription"] = subscription_service().tenant_snapshot(tenant_id)
+        return json_ok(**detail)
+    except ValueError as exc: return json_error(str(exc),404)
 
 
 @app.put("/api/platform/tenants/<int:tenant_id>")
 @platform_roles_required("superadmin")
 def api_platform_tenant_update(tenant_id: int) -> Any:
+    payload = json_payload()
     try:
-        return json_ok(tenant=SAAS.update_tenant(tenant_id, json_payload(), int((current_user() or {})["id"])))
+        actor_id = int((current_user() or {})["id"])
+        if any(
+            key in payload
+            for key in ("name", "registration_number", "contact_email", "contact_phone")
+        ):
+            SAAS.update_tenant_profile(tenant_id, payload, actor_id)
+        tenant = SAAS.update_tenant(tenant_id, payload, actor_id)
+        return json_ok(tenant=tenant)
     except ValueError as exc:
-        return json_error(str(exc), 404)
+        return json_error(str(exc))
+
+
+@app.put("/api/platform/tenants/<int:tenant_id>/marketplaces")
+@platform_roles_required("superadmin")
+def api_platform_tenant_marketplaces_update(tenant_id: int) -> Any:
+    payload = json_payload()
+    values = payload.get("marketplaces")
+    if not isinstance(values, (dict, list)):
+        return json_error("Передайте marketplaces в виде списка или объекта.")
+    try:
+        result = SAAS.set_marketplace_access(
+            tenant_id, values, int((current_user() or {})["id"])
+        )
+        return json_ok(marketplace_access=result)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/marketplaces/<marketplace_code>/<decision>")
+@platform_roles_required("superadmin")
+def api_platform_tenant_marketplace_review(
+    tenant_id: int, marketplace_code: str, decision: str
+) -> Any:
+    try:
+        result = SAAS.review_marketplace_connection(
+            tenant_id,
+            marketplace_code,
+            decision,
+            int((current_user() or {})["id"]),
+            str(json_payload().get("review_note") or ""),
+        )
+        return json_ok(integration=result)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.put("/api/platform/tenants/<int:tenant_id>/users/<int:user_id>")
+@platform_roles_required("superadmin")
+def api_platform_tenant_user_update(tenant_id: int, user_id: int) -> Any:
+    target = AUTH.get_user(user_id)
+    if not target:
+        return json_error("Пользователь не найден.", 404)
+    if target.get("tenant_id") is None or int(target["tenant_id"]) != int(tenant_id):
+        return json_error("Пользователь не относится к выбранной компании.", 404)
+    try:
+        return json_ok(
+            user=AUTH.update_user(
+                user_id, json_payload(), int((current_user() or {})["id"])
+            )
+        )
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/users/<int:user_id>/recovery")
+@platform_roles_required("superadmin")
+def api_platform_tenant_user_recovery(tenant_id: int, user_id: int) -> Any:
+    target = AUTH.get_user(user_id)
+    if not target or target.get("tenant_id") is None or int(target["tenant_id"]) != int(tenant_id):
+        return json_error("Пользователь не найден в выбранной компании.", 404)
+    try:
+        recovery_code = AUTH.regenerate_recovery(
+            user_id, int((current_user() or {})["id"])
+        )
+        return json_ok(recovery_code=recovery_code)
+    except ValueError as exc:
+        return json_error(str(exc))
 
 
 @app.post("/api/platform/tenants/<int:tenant_id>/admin")
@@ -1884,7 +2926,7 @@ def api_platform_tenant_admin_create(tenant_id: int) -> Any:
 @platform_roles_required("superadmin")
 def api_platform_registration_review(request_id: int, decision: str) -> Any:
     try:
-        return json_ok(request=SAAS.review_registration(request_id,decision,int((current_user() or {})["id"])))
+        return json_ok(request=SAAS.review_registration_v2(request_id,decision,int((current_user() or {})["id"])))
     except ValueError as exc:
         return json_error(str(exc),409)
 
@@ -1951,10 +2993,6 @@ if __name__ == "__main__":
     print("=" * 72)
     print(f" SPYON {VERSION}")
     print(f" Local: http://127.0.0.1:{port}")
-    for address in local_ipv4_addresses():
-        print(f" Wi-Fi/LAN: http://{address}:{port}")
-    if host in {"0.0.0.0", "::"}:
-        print(" LAN access: ENABLED. Authentication is still required.")
     print("=" * 72)
     serve(
         app,

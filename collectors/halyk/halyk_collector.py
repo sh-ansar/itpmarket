@@ -21,6 +21,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
+from catalog_configuration_service import CatalogConfigurationService
+from storage.postgres_compat import connect_database
 
 BASE_URL = "https://halykmarket.kz"
 SHOP_ID = "693ff081028570920fd8a6b971eb5e"
@@ -207,6 +209,16 @@ def catalog_category_id(args: argparse.Namespace) -> str:
 
 
 def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
+    if clean_text(getattr(args, "merchant_id", "")):
+        return {
+            "did": args.device_id,
+            "sid": "",
+            "shop_id": args.shop_id,
+            "merchant_ids": clean_text(args.merchant_id),
+            "filters[merchantName][0]": args.seller_name,
+            "limit": str(args.page_size),
+            "page": str(page),
+        }
     category_id = catalog_category_id(args)
     if category_id:
         return {
@@ -231,7 +243,7 @@ def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
 
 
 def catalog_path(args: argparse.Namespace) -> str:
-    return "/search-api/products" if catalog_category_id(args) else "/search-api/search"
+    return "/search-api/products" if clean_text(getattr(args, "merchant_id", "")) or catalog_category_id(args) else "/search-api/search"
 
 
 def search_params(args: argparse.Namespace, product_id: str) -> dict[str, Any]:
@@ -249,7 +261,7 @@ def search_params(args: argparse.Namespace, product_id: str) -> dict[str, Any]:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = connect_database(db_path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=60000")
     return conn
@@ -426,7 +438,10 @@ def sync_catalog(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str
     total_reported = 0
     offers_seen = 0
     stamp = now_iso()
-    conn.execute("UPDATE halyk_products SET active=0")
+    conn.execute(
+        "UPDATE halyk_products SET active=0 WHERE lower(seller_name)=lower(?)",
+        (str(args.seller_name),),
+    )
     while True:
         data = halyk_get_json(catalog_path(args), catalog_params(args, page), args.timeout)
         products = data.get("products") if isinstance(data.get("products"), list) else []
@@ -505,6 +520,42 @@ def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, ru
     return len(product_ids), offers_seen
 
 
+def materialize_tenant_catalog(
+    conn: sqlite3.Connection, db_path: Path, args: argparse.Namespace
+) -> int:
+    if int(args.tenant_id or 0) <= 0:
+        return 0
+    rows = conn.execute(
+        """SELECT product_id,name,brand,product_url,image_url,price_kzt,currency,
+                  categories_json,specs_json,last_seen_at
+           FROM halyk_products WHERE active=1 AND lower(seller_name)=lower(?)
+           ORDER BY product_id""",
+        (str(args.seller_name),),
+    ).fetchall()
+    products: list[dict[str, Any]] = []
+    for row in rows:
+        value = dict(row)
+        try:
+            attributes = json.loads(str(value.get("specs_json") or "[]"))
+        except json.JSONDecodeError:
+            attributes = []
+        try:
+            categories = json.loads(str(value.get("categories_json") or "[]"))
+        except json.JSONDecodeError:
+            categories = []
+        products.append({
+            "product_id": value["product_id"], "title": value.get("name") or "",
+            "brand": value.get("brand") or "", "url": value.get("product_url") or "",
+            "image_url": value.get("image_url") or "", "price": value.get("price_kzt"),
+            "currency": value.get("currency") or "KZT",
+            "category": categories[-1] if isinstance(categories, list) and categories else "",
+            "attributes": attributes, "updated_at": value.get("last_seen_at"),
+        })
+    return CatalogConfigurationService(db_path).replace_catalog_products(
+        int(args.tenant_id), "halyk_market", products
+    )
+
+
 def run(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     ensure_database(db_path)
@@ -524,6 +575,7 @@ def run(args: argparse.Namespace) -> int:
             refreshed, market_offers = refresh_market_offers(conn, args, run_id)
             products = max(products, refreshed)
             offers += market_offers
+        materialize_tenant_catalog(conn, db_path, args)
         finish_run(conn, run_id, "ok", total, products, offers)
         print(f"Halyk готово: товаров {products}, предложений {offers}", flush=True)
         return 0
@@ -539,7 +591,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect Halyk Market products and exact-card offers.")
     parser.add_argument("action", choices=["sync-catalog", "refresh-offers", "full-sync"])
     parser.add_argument("--db", default=str(ROOT / "data" / "unityre_kaspi.db"))
+    parser.add_argument("--tenant-id", type=int, default=0)
     parser.add_argument("--seller-name", default="Unityre")
+    parser.add_argument("--merchant-id", default="")
+    parser.add_argument("--source-url", default="")
     parser.add_argument("--location-id", default="-2")
     parser.add_argument("--catalog-query", default="shini-i-diski")
     parser.add_argument("--catalog-category-id", default="10038")

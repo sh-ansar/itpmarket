@@ -50,6 +50,7 @@ class TaskManager:
         self.lock = threading.RLock()
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.log_handles: dict[str, Any] = {}
+        self._enrich_cache: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
         self._normalize_state()
 
     def _load(self) -> dict[str, Any]:
@@ -100,7 +101,23 @@ class TaskManager:
         if not path.exists():
             return ""
         try:
-            raw = path.read_bytes()
+            wanted = max(1, min(int(lines), 3000))
+            max_bytes = 512 * 1024
+            chunks: list[bytes] = []
+            total = 0
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                position = handle.tell()
+                while position > 0 and total < max_bytes:
+                    size = min(64 * 1024, position, max_bytes - total)
+                    position -= size
+                    handle.seek(position)
+                    chunk = handle.read(size)
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if b"".join(reversed(chunks)).count(b"\n") > wanted:
+                        break
+            raw = b"".join(reversed(chunks))
             # New processes always write UTF-8. Only use legacy Windows
             # encodings when UTF-8 decoding is genuinely impossible.
             try:
@@ -123,7 +140,7 @@ class TaskManager:
                     else raw.decode("utf-8", errors="replace")
                 )
             content = text.splitlines(keepends=True)
-            return "".join(content[-max(1, min(int(lines), 3000)):])
+            return "".join(content[-wanted:])
         except OSError:
             return ""
 
@@ -134,6 +151,29 @@ class TaskManager:
         result["platform"] = metadata.get("platform") or result.get("platform") or "system"
         raw = result.get("log_file")
         log_path = Path(raw) if raw else None
+        task_id = str(result.get("id") or "")
+        base_cache_key = (
+            result.get("status"), result.get("pid"), result.get("finished_at"),
+            result.get("stop_requested_at"), result.get("message"),
+        )
+        cached = self._enrich_cache.get(task_id)
+        # Finished task logs are immutable. Avoid even stat() calls across the
+        # complete history during every three-second UI poll.
+        if (
+            task_id and result.get("status") != "running" and cached
+            and cached[0][:5] == base_cache_key
+        ):
+            return dict(cached[1])
+        try:
+            log_stat = log_path.stat() if log_path and log_path.exists() else None
+        except OSError:
+            log_stat = None
+        cache_key = (*base_cache_key,
+            log_stat.st_mtime_ns if log_stat else 0,
+            log_stat.st_size if log_stat else 0,
+        )
+        if task_id and cached and cached[0] == cache_key:
+            return dict(cached[1])
         text = self._read_tail(log_path, 220) if log_path else ""
         progress: dict[str, Any] | None = None
         for line in reversed(text.splitlines()):
@@ -168,20 +208,35 @@ class TaskManager:
             (line.strip()[-700:] for line in reversed(text.splitlines()) if line.strip()), ""
         )
         result["running"] = result.get("status") == "running" and self._pid_alive(result.get("pid"))
-        if log_path and log_path.exists():
+        if log_stat:
             try:
                 result["updated_at"] = datetime.fromtimestamp(
-                    log_path.stat().st_mtime
+                    log_stat.st_mtime
                 ).astimezone().isoformat(timespec="seconds")
             except OSError:
                 result["updated_at"] = result.get("finished_at") or result.get("started_at")
         else:
             result["updated_at"] = result.get("finished_at") or result.get("started_at")
+        if task_id:
+            self._enrich_cache[task_id] = (cache_key, dict(result))
+            if len(self._enrich_cache) > 300:
+                current_ids = {
+                    str(item.get("id") or "") for item in self._load().get("tasks", [])
+                }
+                self._enrich_cache = {
+                    key: value for key, value in self._enrich_cache.items()
+                    if key in current_ids
+                }
         return result
 
     def states(self) -> list[dict[str, Any]]:
         self._normalize_state()
         return [self._enrich(task) for task in self._load().get("tasks", [])]
+
+    def raw_states(self) -> list[dict[str, Any]]:
+        """Task state without log parsing, for notifications and access checks."""
+        self._normalize_state()
+        return [dict(task) for task in self._load().get("tasks", [])]
 
     def running(self) -> list[dict[str, Any]]:
         return [task for task in self.states() if task.get("running")]

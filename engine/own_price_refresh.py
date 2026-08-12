@@ -15,6 +15,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
+from catalog_configuration_service import CatalogConfigurationService
+from storage.postgres_compat import connect_database
 try:
     from . import kaspi_search_compare_v8_2 as core
 except ImportError:
@@ -39,6 +41,31 @@ def safe_json(text: Any, default: Any) -> Any:
 def chunks(items: list[dict[str, Any]], size: int):
     for index in range(0, len(items), size):
         yield items[index:index + size]
+
+
+def tenant_catalog_rows(conn: sqlite3.Connection, tenant_id: int) -> list[dict[str, Any]]:
+    """Return only Kaspi staging rows that belong to one company snapshot."""
+    tenant_join = ""
+    query_params: list[Any] = []
+    if int(tenant_id or 0) > 0:
+        tenant_join = """JOIN tenant_catalog_products tcp
+                              ON tcp.source_product_code=c.product_code
+                             AND tcp.marketplace_code='kaspi'
+                             AND tcp.tenant_id=? AND tcp.active=1"""
+        query_params.append(int(tenant_id))
+    return [dict(row) for row in conn.execute(
+        f"""
+        SELECT c.product_code,c.title_catalog,c.catalog_price_kzt,
+               m.brand,m.category_codes_json,m.base_product_codes_json,
+               m.groups_json,m.has_variants
+        FROM catalog_products c
+        {tenant_join}
+        LEFT JOIN catalog_product_meta m ON m.product_code=c.product_code
+        WHERE COALESCE(m.active,1)=1
+        ORDER BY c.page_number,c.position_on_page,c.product_code
+        """,
+        query_params,
+    ).fetchall()]
 
 
 async def post_batch(context: Any, page: Any, payload: dict[str, Any], retries: int, timeout: int) -> list[dict[str, Any]]:
@@ -77,21 +104,11 @@ async def post_batch(context: Any, page: Any, payload: dict[str, Any], retries: 
 async def run(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     ensure_database(db_path)
-    conn = sqlite3.connect(db_path, timeout=60)
+    conn = connect_database(db_path, timeout=60)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=60000")
-    rows = [dict(row) for row in conn.execute(
-        """
-        SELECT c.product_code,c.title_catalog,c.catalog_price_kzt,
-               m.brand,m.category_codes_json,m.base_product_codes_json,
-               m.groups_json,m.has_variants
-        FROM catalog_products c
-        LEFT JOIN catalog_product_meta m ON m.product_code=c.product_code
-        WHERE COALESCE(m.active,1)=1
-        ORDER BY c.page_number,c.position_on_page,c.product_code
-        """
-    ).fetchall()]
+    rows = tenant_catalog_rows(conn, int(args.tenant_id or 0))
     selected_codes = [core.clean_text(value) for value in str(args.codes or "").split(",") if core.clean_text(value)]
     if selected_codes:
         selected_set = set(selected_codes)
@@ -218,6 +235,11 @@ async def run(args: argparse.Namespace) -> int:
             await context.close()
             conn.close()
 
+    if int(args.tenant_id or 0) > 0:
+        refreshed_codes = [str(row["product_code"]) for row in rows]
+        CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
+            int(args.tenant_id), refreshed_codes, replace=False
+        )
     print(f"[Быстрые цены] Завершено: обновлено={updated}; missing={missing}; errors={errors}")
     return 0 if errors == 0 else 2
 
@@ -227,6 +249,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", default="data/kaspi_market.db")
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
+    parser.add_argument("--tenant-id", type=int, default=0)
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--zone-id", default="Magnum_ZONE1")
     parser.add_argument("--batch-size", type=int, default=12)
