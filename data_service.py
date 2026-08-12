@@ -12,6 +12,7 @@ import re
 import statistics
 from typing import Any
 from urllib.parse import urlencode, urljoin
+from storage.database_backend import DatabaseBackend, DatabaseSettings
 from storage.postgres_compat import connect_database, database_error_types
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
@@ -93,8 +94,12 @@ class DataService:
         self._rows_cached_at = 0.0
         self._rows_signature: tuple[int, ...] | None = None
         ensure_database(self.db_path)
-        db = Database(self.db_path)
-        db.conn.close()
+        # The legacy Kaspi Database wrapper validates a local SQLite file.
+        # PostgreSQL deployments deliberately have no such file in a clean
+        # Git clone, and all runtime access is routed through connect_database.
+        if DatabaseSettings.from_environment().backend is DatabaseBackend.SQLITE:
+            db = Database(self.db_path)
+            db.conn.close()
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_database(self.db_path, timeout=30)

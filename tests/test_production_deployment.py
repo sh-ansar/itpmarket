@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -53,6 +54,19 @@ class ProductionDeploymentTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("requirements.txt", installer)
         self.assertIn("requirements-postgres.txt", installer)
+
+    def test_postgres_manifest_covers_every_runtime_schema(self) -> None:
+        manifest = json.loads(
+            (ROOT / "engine" / "postgres_schema_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        schemas = manifest["schemas"]
+        self.assertEqual({"app", "ozon_ru", "ozon_kz"}, set(schemas))
+        self.assertEqual(98, sum(len(tables) for tables in schemas.values()))
+        self.assertIn("tenants", schemas["app"])
+        self.assertIn("products", schemas["ozon_ru"])
+        self.assertIn("ozon_kz_products", schemas["ozon_kz"])
 
 
 if __name__ == "__main__":

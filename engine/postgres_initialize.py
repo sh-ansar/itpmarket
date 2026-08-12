@@ -18,16 +18,39 @@ from engine.postgres_migration import (
     prepare_target_schema,
 )
 
+SCHEMA_MANIFEST_PATH = Path(__file__).with_name("postgres_schema_manifest.json")
+
+
+def expected_schema_tables(root: Path) -> dict[str, set[str]]:
+    try:
+        raw_manifest = json.loads(SCHEMA_MANIFEST_PATH.read_text(encoding="utf-8"))
+        manifest = raw_manifest.get("schemas") if isinstance(raw_manifest, dict) else None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("PostgreSQL schema manifest is missing or invalid.") from exc
+    if not isinstance(manifest, dict) or not manifest:
+        raise RuntimeError("PostgreSQL schema manifest is empty.")
+    expected = {
+        str(schema): {str(table) for table in tables}
+        for schema, tables in manifest.items()
+        if isinstance(tables, list) and tables
+    }
+    if not expected:
+        raise RuntimeError("PostgreSQL schema manifest has no tables.")
+    # A migration source may contain tables introduced after the checked-in
+    # manifest. Include them so upgrades remain append-only and explicit.
+    for schema, path in sources(root):
+        expected.setdefault(schema, set()).update(
+            item.table for item in inventory(path, schema)
+        )
+    return expected
+
 
 def initialization_state(root: Path, database_url: str) -> dict[str, Any]:
     try:
         import psycopg
     except ImportError as exc:
         raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
-    expected = {
-        schema: {item.table for item in inventory(path, schema)}
-        for schema, path in sources(root)
-    }
+    expected = expected_schema_tables(root)
     existing: dict[str, set[str]] = {}
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
@@ -62,7 +85,19 @@ def initialize(root: Path, database_url: str) -> dict[str, Any]:
         source_map = dict(sources(root))
         populated_missing: dict[str, list[str]] = {}
         for schema, names in state["missing"].items():
+            if schema not in source_map:
+                raise RuntimeError(
+                    f"PostgreSQL schema {schema} is incomplete and this clean clone "
+                    "has no SQLite migration source. Restore a verified PostgreSQL "
+                    "backup or run migration from the source installation."
+                )
             plans = {item.table: item for item in inventory(source_map[schema], schema)}
+            unsupported = [name for name in names if name not in plans]
+            if unsupported:
+                raise RuntimeError(
+                    f"PostgreSQL schema {schema} misses tables that are absent from "
+                    f"the migration source: {unsupported}"
+                )
             populated = [name for name in names if plans[name].rows > 0]
             if populated:
                 populated_missing[schema] = populated
