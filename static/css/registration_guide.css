@@ -1,0 +1,144 @@
+.registration-fields label {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.registration-fields input,
+.registration-fields textarea,
+.registration-fields select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+
+.registration-fields textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.registration-fields input::placeholder,
+.registration-fields textarea::placeholder {
+  color: var(--muted);
+  opacity: .78;
+}
+
+.registration-fields input:focus,
+.registration-fields textarea:focus,
+.registration-fields select:focus {
+  border-color: color-mix(in srgb, var(--blue) 55%, var(--line));
+  background: var(--surface);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.registration-fields input:user-invalid,
+.registration-fields textarea:user-invalid {
+  border-color: #d75a6c;
+  box-shadow: 0 0 0 3px rgba(215, 90, 108, .1);
+}
+
+.wizard-section.is-current-step {
+  border-color: color-mix(in srgb, var(--blue) 34%, var(--line));
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--blue) 9%, transparent);
+}
+
+.registration-guide {
+  position: sticky;
+  z-index: 8;
+  bottom: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--blue) 25%, var(--line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 18px 46px rgba(7, 43, 60, .18);
+  backdrop-filter: blur(14px);
+}
+
+.registration-guide-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.registration-guide-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.registration-guide-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.registration-progress {
+  display: block;
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.registration-progress i {
+  display: block;
+  width: 20%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  transition: width .2s ease;
+}
+
+.registration-guide-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.registration-guide-actions .site-button {
+  min-width: 92px;
+}
+
+.registration-guide-actions button:disabled {
+  cursor: default;
+  opacity: .48;
+}
+
+@media (max-width: 620px) {
+  .registration-guide {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    bottom: 6px;
+  }
+
+  .registration-guide-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .registration-guide-actions .site-button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .registration-progress i {
+    transition: none;
+  }
+}

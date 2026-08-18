@@ -53,6 +53,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 До approval подготовьте diff, список тестов, известные блокеры и рекомендуемый commit message. Production deployment начинается только после отдельного подтверждения.
 
+Если release включает multi-seller и единый складской товар, код нельзя перезапускать поверх старой схемы. После backup и успешной staging-репетиции уполномоченный оператор применяет PostgreSQL-миграции строго по порядку:
+
+1. `migrations/20260818_multi_seller_v1.sql`.
+2. `migrations/20260818_inventory_matching_v1.sql`.
+
+Обе миграции аддитивны. Вторая не переносит и не объединяет карточки автоматически; она добавляет отсутствующие default-права системных ролей (`admin` и `operator`) без удаления персональных overrides. После применения `engine/postgres_initialize.py --check` должен увидеть новые таблицы; только затем разрешён restart приложения. В рамках локальной feature-разработки эти миграции к production не применяются.
+
 После явного approval локальное продвижение выполняется только fast-forward:
 
 ```powershell

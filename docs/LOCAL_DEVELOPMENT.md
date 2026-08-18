@@ -41,6 +41,8 @@ $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path (Get-Location) '.playwright')
 
 SQLite хранится по пути из `config.json`/`config.local.json` (по умолчанию `data\unityre_kaspi.db`). `config.local.json`, БД, секрет сессии, runtime, профили и браузеры игнорируются Git. Не используйте рабочую или production-БД в тестах.
 
+`ensure_database()` аддитивно создаёт локальные таблицы `tenant_inventory_products`, `tenant_product_listings`, `tenant_product_match_decisions` и `tenant_inventory_events`. Остаток и закупочная цена принадлежат единому физическому товару; карточки площадок связываются с ним отдельно. Для проверки используйте только новую dev-БД или копию без реальных данных.
+
 ## Опциональный PostgreSQL для разработки
 
 Используйте отдельную локальную БД, никогда production URL:
@@ -52,6 +54,8 @@ $env:DATABASE_URL = 'postgresql://spyon:LOCAL_PASSWORD@127.0.0.1:55433/spyon_dev
 ```
 
 `--check` только читает состояние и завершится ошибкой, если схемы не готовы. Инициализация без `--check` и миграционные команды меняют БД; запускайте их только для явно выбранной новой dev-БД после просмотра плана в `docs/POSTGRESQL_MIGRATION_RU.md`.
+
+Для существующей dev PostgreSQL миграции применяются явно и по порядку: сначала `migrations/20260818_multi_seller_v1.sql`, затем `migrations/20260818_inventory_matching_v1.sql`. Вторая миграция добавляет таблицы/индексы и отсутствующие default-права системных ролей; она не объединяет существующие карточки автоматически и не удаляет персональные overrides.
 
 ## Проверки
 

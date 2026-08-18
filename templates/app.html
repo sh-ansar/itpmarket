@@ -130,6 +130,14 @@
           <div><label data-i18n="scope">Область</label><select id="operationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option><option value="filtered">По текущему фильтру</option></select></div>
           <button class="primary launch" id="launchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
         </section>
+        {% if current_user.platform_role == 'superadmin' or current_user.permissions.view_inventory %}
+        <section class="inventory-summary" id="inventorySummary" aria-label="Сводка по остаткам">
+          <article><small>Физических товаров</small><b id="inventoryItems">—</b><span>считаются один раз</span></article>
+          <article><small>Остаток</small><b id="inventoryQuantity">—</b><span>единиц на складе</span></article>
+          <article><small>Вложено в товар</small><b id="inventoryValue">—</b><span id="inventoryValueNote">по закупочной цене</span></article>
+          <article><small>Без складской связи</small><b id="inventoryUnmatched">—</b><span>листингов площадок</span></article>
+        </section>
+        {% endif %}
         <div class="filters" id="productFilters">
           <label class="search"><img src="{{ url_for('static', filename='icons/search.svg') }}" alt=""><input id="productSearch" data-i18n-placeholder="search_placeholder" placeholder="Название, код, бренд, размер или продавец"></label>
           <select id="platformFilter" multiple data-multi-select data-placeholder="Все площадки">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}</select>
@@ -371,6 +379,7 @@
 <div class="toast-stack" id="toasts"></div>
 <script>window.ITP_USER={{ current_user|tojson }};window.ITP_VERSION={{ version|tojson }};</script>
 <script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>
+<script src="{{ url_for('static', filename='js/help_content.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/marketplace_settings.js') }}?v={{ version }}"></script>

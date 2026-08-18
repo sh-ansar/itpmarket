@@ -43,6 +43,7 @@ from config import (
     save_config,
 )
 from data_service import DataService
+from inventory_service import InventoryService
 from catalog_configuration_service import CatalogConfigurationService
 from schema import ensure_database
 from task_manager import TaskManager
@@ -69,7 +70,7 @@ from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import seller_scope
 
-VERSION = "3.6.0"
+VERSION = "3.7.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -110,6 +111,7 @@ DATA = DataService(
 CATALOG = CatalogConfigurationService(
     DB_PATH, ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db"
 )
+INVENTORY = InventoryService(DB_PATH)
 TASKS = TaskManager(
     ROOT,
     resolve_path(CFG, "logs"),
@@ -138,6 +140,14 @@ def notification_service() -> NotificationService:
     if Path(NOTIFICATIONS.db_path).resolve() != Path(DB_PATH).resolve():
         NOTIFICATIONS = NotificationService(DB_PATH)
     return NOTIFICATIONS
+
+
+def inventory_service() -> InventoryService:
+    """Return inventory storage bound to the active application database."""
+    global INVENTORY
+    if Path(INVENTORY.db_path).resolve() != Path(DB_PATH).resolve():
+        INVENTORY = InventoryService(DB_PATH)
+    return INVENTORY
 
 
 def warm_data_cache() -> None:
@@ -347,6 +357,8 @@ def is_superadmin(user: dict[str, Any] | None = None) -> bool:
 
 SUBSCRIPTION_PERMISSION_FEATURES = {
     "view_products": "products", "manage_products": "products",
+    "view_inventory": "products", "manage_inventory": "products",
+    "manage_product_matching": "products",
     "view_operations": "operations", "run_operations": "operations",
     "manage_operations": "operations", "view_reports": "reports",
     "create_reports": "reports", "manage_filters": "dynamic_filters",
@@ -713,7 +725,7 @@ def record_event(event_type: str, entity_type: str | None = None, entity_id: str
 
 
 def reload_services() -> None:
-    global CFG, DB_PATH, AUTH, DATA, CATALOG, TASKS
+    global CFG, DB_PATH, AUTH, DATA, CATALOG, INVENTORY, TASKS
     CFG = ensure_directories(load_config())
     DB_PATH = resolve_path(CFG, "database")
     ensure_database(DB_PATH)
@@ -730,6 +742,7 @@ def reload_services() -> None:
     CATALOG = CatalogConfigurationService(
         DB_PATH, ROOT / "collectors" / "ozon" / "data" / "ozon_registry.db"
     )
+    INVENTORY = InventoryService(DB_PATH)
     TASKS.max_parallel = max(1, int(CFG["app"].get("max_parallel_tasks", 3)))
     threading.Thread(target=warm_data_cache, daemon=True).start()
 
@@ -2006,11 +2019,121 @@ def api_product_codes() -> Any:
 @app.get("/api/products/<code>")
 @permission_required("view_products")
 def api_product(code: str) -> Any:
+    user = current_user() or {}
+    if user.get("tenant_id") is None:
+        return json_error("Складской контур доступен только внутри компании.", 403)
     platform = marketplace_for_product_code(code)
-    if platform not in allowed_marketplaces():
+    if platform not in allowed_marketplaces(user):
         return json_error("Нет доступа к выбранной площадке.", 403)
-    product = DATA.product(code, int((current_user() or {})["id"]))
-    return json_ok(product=product) if product else json_error("Товар не найден.", 404)
+    product = DATA.product(code, int(user["id"]))
+    if not product:
+        return json_error("Товар не найден.", 404)
+    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
+    try:
+        context = inventory_service().context(
+            int(user["tenant_id"]), code, rows,
+            include_inventory=has_permission(user, "view_inventory"),
+        )
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    context["can_manage_inventory"] = has_permission(user, "manage_inventory")
+    context["can_manage_matching"] = has_permission(user, "manage_product_matching")
+    product["inventory_context"] = context
+    return json_ok(product=product)
+
+
+@app.get("/api/inventory/summary")
+@permission_required("view_inventory")
+def api_inventory_summary() -> Any:
+    user = current_user() or {}
+    if user.get("tenant_id") is None:
+        return json_error("Складской контур доступен только внутри компании.", 403)
+    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
+    visible_codes = {
+        str(row.get("product_code") or "") for row in rows
+        if row.get("product_code")
+    }
+    return json_ok(summary=inventory_service().summary(
+        int(user["tenant_id"]), visible_codes
+    ))
+
+
+@app.put("/api/products/<code>/inventory")
+@permission_required("manage_inventory")
+def api_product_inventory(code: str) -> Any:
+    user = current_user() or {}
+    if user.get("tenant_id") is None:
+        return json_error("Складской контур доступен только внутри компании.", 403)
+    if marketplace_for_product_code(code) not in allowed_marketplaces(user):
+        return json_error("Нет доступа к выбранной площадке.", 403)
+    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
+    source = next((row for row in rows if str(row.get("product_code")) == code), None)
+    if not source:
+        return json_error("Товар не найден в каталоге компании.", 404)
+    try:
+        inventory_service().save_inventory(
+            int(user["tenant_id"]), code, source, json_payload(), int(user["id"])
+        )
+        context = inventory_service().context(
+            int(user["tenant_id"]), code, rows, include_inventory=True
+        )
+        context["can_manage_inventory"] = True
+        context["can_manage_matching"] = has_permission(user, "manage_product_matching")
+        return json_ok(inventory_context=context)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    except ValueError as exc:
+        return json_error(str(exc))
+
+
+@app.post("/api/products/<code>/match")
+@permission_required("manage_product_matching")
+def api_product_match(code: str) -> Any:
+    user = current_user() or {}
+    if user.get("tenant_id") is None:
+        return json_error("Сопоставление доступно только внутри компании.", 403)
+    payload = json_payload()
+    candidate_code = str(payload.get("candidate_code") or "").strip()
+    decision = str(payload.get("decision") or "").strip().casefold()
+    if not candidate_code or decision not in {"confirmed", "rejected"}:
+        return json_error("Выберите карточку и корректное решение по сопоставлению.")
+    if product_codes_access_error([code, candidate_code], user):
+        return json_error("Нет доступа к одной из выбранных площадок.", 403)
+    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
+    by_code = {str(row.get("product_code") or ""): row for row in rows}
+    source, candidate = by_code.get(code), by_code.get(candidate_code)
+    if not source or not candidate:
+        return json_error("Одна из товарных позиций не найдена в каталоге компании.", 404)
+    try:
+        current_context = inventory_service().context(
+            int(user["tenant_id"]), code, rows,
+            include_inventory=has_permission(user, "view_inventory"),
+        )
+        suggestion = next((
+            item for item in current_context["matching"]["suggestions"]
+            if str(item.get("listing_code")) == candidate_code
+        ), None)
+        if not suggestion:
+            return json_error(
+                "Система не нашла безопасного основания для этого сопоставления.", 409
+            )
+        inventory_service().decide_match(
+            int(user["tenant_id"]), source, candidate, decision, int(user["id"]),
+            match_method=str(suggestion.get("match_method") or "MANUAL_CONFIRMATION"),
+            match_score=float(suggestion.get("match_score") or 0),
+            reason=str(suggestion.get("match_reason") or ""),
+        )
+        context = inventory_service().context(
+            int(user["tenant_id"]), code, rows,
+            include_inventory=has_permission(user, "view_inventory"),
+        )
+        context["can_manage_inventory"] = has_permission(user, "manage_inventory")
+        context["can_manage_matching"] = True
+        return json_ok(inventory_context=context)
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
 
 
 @app.put("/api/products/state")

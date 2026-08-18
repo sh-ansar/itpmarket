@@ -31,11 +31,13 @@ ECONOMY_BRANDS = {
 STATUS_INFO: dict[str, dict[str, str]] = {
     "NOT_ANALYZED": {"label": "Точные предложения не проверены", "tone": "neutral"},
     "NO_OTHER_SELLERS": {"label": "Других продавцов не найдено", "tone": "neutral"},
-    "EXACT_LOWEST": {"label": "Самая низкая цена среди продавцов", "tone": "success"},
+    "EXACT_LOWEST": {"label": "Единственная минимальная цена среди продавцов", "tone": "success"},
+    "EXACT_TIED_LOWEST": {"label": "Делит минимальную цену с другими продавцами", "tone": "info"},
     "EXACT_BELOW": {"label": "Ниже медианы продавцов", "tone": "success"},
     "EXACT_IN_MARKET": {"label": "В рыночном диапазоне", "tone": "info"},
     "EXACT_ABOVE": {"label": "Выше медианы продавцов", "tone": "warning"},
-    "EXACT_HIGHEST": {"label": "Самая высокая цена среди продавцов", "tone": "danger"},
+    "EXACT_HIGHEST": {"label": "Единственная максимальная цена среди продавцов", "tone": "danger"},
+    "EXACT_TIED_HIGHEST": {"label": "Делит максимальную цену с другими продавцами", "tone": "warning"},
     "INSUFFICIENT_DATA": {"label": "Недостаточно точных предложений", "tone": "neutral"},
     "REVIEW_REQUIRED": {"label": "Требует ручной проверки", "tone": "warning"},
     "DATA_COLLECTED": {"label": "Данные собраны", "tone": "info"},
@@ -344,8 +346,13 @@ def exact_offer_position(
         "potential_margin_per_unit_kzt": 0.0,
         "price_rank": None,
         "price_rank_total": None,
+        "price_rank_tie_count": 0,
+        "lowest_tie_count": 0,
+        "highest_tie_count": 0,
         "is_lowest": False,
+        "is_unique_lowest": False,
         "is_highest": False,
+        "is_unique_highest": False,
         "lowest_product_code": None,
         "lowest_product_title": None,
         "lowest_product_url": None,
@@ -387,10 +394,26 @@ def exact_offer_position(
     highest = max(reference, key=lambda item: item.price)
     tolerance = max(500.0, median * 0.02)
 
-    if own <= minimum:
+    price_epsilon = 0.01
+    same_as_minimum = math.isclose(own, minimum, rel_tol=0.0, abs_tol=price_epsilon)
+    same_as_maximum = math.isclose(own, maximum, rel_tol=0.0, abs_tol=price_epsilon)
+    lowest_tie_count = 1 + sum(
+        math.isclose(price, own, rel_tol=0.0, abs_tol=price_epsilon)
+        for price in prices
+    ) if same_as_minimum else 1 if own < minimum else 0
+    highest_tie_count = 1 + sum(
+        math.isclose(price, own, rel_tol=0.0, abs_tol=price_epsilon)
+        for price in prices
+    ) if same_as_maximum else 1 if own > maximum else 0
+
+    if own < minimum - price_epsilon:
         status = "EXACT_LOWEST"
-    elif own >= maximum:
+    elif same_as_minimum:
+        status = "EXACT_TIED_LOWEST"
+    elif own > maximum + price_epsilon:
         status = "EXACT_HIGHEST"
+    elif same_as_maximum:
+        status = "EXACT_TIED_HIGHEST"
     elif own < median - tolerance:
         status = "EXACT_BELOW"
     elif own > median + tolerance:
@@ -402,7 +425,11 @@ def exact_offer_position(
     difference_pct = difference / median * 100 if median else None
     potential_per_unit = max(0.0, q1 - own) if status in {"EXACT_LOWEST", "EXACT_BELOW"} else 0.0
     prices_with_own = sorted(prices + [own])
-    rank = prices_with_own.index(own) + 1
+    rank = 1 + sum(price < own - price_epsilon for price in prices)
+    rank_tie_count = sum(
+        math.isclose(price, own, rel_tol=0.0, abs_tol=price_epsilon)
+        for price in prices_with_own
+    )
     return {
         "price_status": status,
         "reference_type": "KASPI_SAME_CARD",
@@ -419,8 +446,13 @@ def exact_offer_position(
         "potential_margin_per_unit_kzt": potential_per_unit,
         "price_rank": rank,
         "price_rank_total": len(prices_with_own),
-        "is_lowest": status == "EXACT_LOWEST",
-        "is_highest": status == "EXACT_HIGHEST",
+        "price_rank_tie_count": rank_tie_count,
+        "lowest_tie_count": lowest_tie_count,
+        "highest_tie_count": highest_tie_count,
+        "is_lowest": status in {"EXACT_LOWEST", "EXACT_TIED_LOWEST"},
+        "is_unique_lowest": status == "EXACT_LOWEST",
+        "is_highest": status in {"EXACT_HIGHEST", "EXACT_TIED_HIGHEST"},
+        "is_unique_highest": status == "EXACT_HIGHEST",
         "lowest_product_code": lowest.code,
         "lowest_product_title": lowest.title,
         "lowest_product_url": lowest.url,
@@ -446,7 +478,10 @@ def price_position(
         "market_q3_price_kzt": None, "market_price_kzt": None,
         "difference_kzt": None, "difference_pct": None,
         "potential_margin_per_unit_kzt": 0.0, "price_rank": None,
-        "price_rank_total": None, "is_lowest": False, "is_highest": False,
+        "price_rank_total": None, "price_rank_tie_count": 0,
+        "lowest_tie_count": 0, "highest_tie_count": 0,
+        "is_lowest": False, "is_unique_lowest": False,
+        "is_highest": False, "is_unique_highest": False,
         "lowest_product_code": None, "lowest_product_title": None,
         "lowest_product_url": None, "lowest_product_price_kzt": None,
         "highest_product_code": None, "highest_product_title": None,
@@ -488,13 +523,24 @@ def price_position(
     highest = max(reference, key=lambda item: item.price)
     tolerance = max(500.0, median * 0.02)
 
+    price_epsilon = 0.01
+    same_as_minimum = math.isclose(own, minimum, rel_tol=0.0, abs_tol=price_epsilon)
+    same_as_maximum = math.isclose(own, maximum, rel_tol=0.0, abs_tol=price_epsilon)
     if reference_type == "EXACT":
-        if own <= minimum + tolerance:
+        if own < minimum - price_epsilon:
             status = "EXACT_LOWEST"
-        elif own >= maximum - tolerance:
+        elif same_as_minimum:
+            status = "EXACT_TIED_LOWEST"
+        elif own > maximum + price_epsilon:
             status = "EXACT_HIGHEST"
+        elif same_as_maximum:
+            status = "EXACT_TIED_HIGHEST"
+        elif own < median - tolerance:
+            status = "EXACT_BELOW"
+        elif own > median + tolerance:
+            status = "EXACT_ABOVE"
         else:
-            status = "EXACT_COMPETITIVE"
+            status = "EXACT_IN_MARKET"
     else:
         if own <= minimum + tolerance:
             status = "SEGMENT_LOWEST"
@@ -513,7 +559,13 @@ def price_position(
     # positions use the lower market quartile as a possible target.
     potential_per_unit = max(0.0, q1 - own) if status in {"EXACT_LOWEST", "SEGMENT_LOWEST", "SEGMENT_BELOW"} else 0.0
     prices_with_own = sorted(prices + [own])
-    rank = prices_with_own.index(own) + 1
+    rank = 1 + sum(price < own - price_epsilon for price in prices)
+    rank_tie_count = sum(
+        math.isclose(price, own, rel_tol=0.0, abs_tol=price_epsilon)
+        for price in prices_with_own
+    )
+    lowest_tie_count = rank_tie_count if same_as_minimum else 1 if own < minimum else 0
+    highest_tie_count = rank_tie_count if same_as_maximum else 1 if own > maximum else 0
     return {
         "price_status": status,
         "reference_type": reference_type,
@@ -529,8 +581,13 @@ def price_position(
         "potential_margin_per_unit_kzt": potential_per_unit,
         "price_rank": rank,
         "price_rank_total": len(prices_with_own),
-        "is_lowest": status in {"EXACT_LOWEST", "SEGMENT_LOWEST"},
-        "is_highest": status in {"EXACT_HIGHEST", "SEGMENT_HIGHEST"},
+        "price_rank_tie_count": rank_tie_count,
+        "lowest_tie_count": lowest_tie_count,
+        "highest_tie_count": highest_tie_count,
+        "is_lowest": status in {"EXACT_LOWEST", "EXACT_TIED_LOWEST", "SEGMENT_LOWEST"},
+        "is_unique_lowest": status in {"EXACT_LOWEST", "SEGMENT_LOWEST"},
+        "is_highest": status in {"EXACT_HIGHEST", "EXACT_TIED_HIGHEST", "SEGMENT_HIGHEST"},
+        "is_unique_highest": status in {"EXACT_HIGHEST", "SEGMENT_HIGHEST"},
         "lowest_product_code": lowest.code,
         "lowest_product_title": lowest.title,
         "lowest_product_url": lowest.url,

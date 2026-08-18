@@ -30,6 +30,9 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
     "view_dashboard": "Просмотр обзора",
     "view_products": "Просмотр товаров",
     "manage_products": "Изменение состояния товаров",
+    "view_inventory": "Просмотр остатков и закупочных цен",
+    "manage_inventory": "Изменение остатков и закупочных цен",
+    "manage_product_matching": "Подтверждение сопоставления товаров",
     "view_operations": "Просмотр операций и расписаний",
     "run_operations": "Запуск marketplace-операций",
     "manage_operations": "Остановка и удаление операций",
@@ -50,7 +53,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, frozenset[str]] = {
     "operator": frozenset({
         "view_dashboard", "view_products", "manage_products", "view_operations",
         "run_operations", "manage_operations", "view_reports", "create_reports",
-        "view_settings", "view_help",
+        "view_settings", "view_help", "view_inventory", "manage_inventory",
     }),
     "admin": frozenset(PERMISSION_DEFINITIONS),
 }

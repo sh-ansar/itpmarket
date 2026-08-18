@@ -593,6 +593,86 @@ CREATE TABLE IF NOT EXISTS tenant_product_state (
 CREATE INDEX IF NOT EXISTS idx_tenant_product_state_watch
 ON tenant_product_state(tenant_id,watched,priority,updated_at);
 
+CREATE TABLE IF NOT EXISTS tenant_inventory_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    internal_sku TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    quantity_on_hand INTEGER NOT NULL DEFAULT 0 CHECK(quantity_on_hand >= 0),
+    purchase_price_kzt REAL CHECK(purchase_price_kzt IS NULL OR purchase_price_kzt >= 0),
+    target_markup_percent REAL NOT NULL DEFAULT 20
+        CHECK(target_markup_percent >= 0 AND target_markup_percent <= 1000),
+    notes TEXT NOT NULL DEFAULT '',
+    created_by INTEGER,
+    updated_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id,id),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(updated_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_inventory_internal_sku
+ON tenant_inventory_products(tenant_id,internal_sku)
+WHERE internal_sku<>'';
+CREATE INDEX IF NOT EXISTS idx_tenant_inventory_updated
+ON tenant_inventory_products(tenant_id,updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_product_listings (
+    tenant_id INTEGER NOT NULL,
+    listing_code TEXT NOT NULL,
+    inventory_product_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER,
+    source_product_code TEXT NOT NULL,
+    match_method TEXT NOT NULL DEFAULT 'MANUAL',
+    match_score REAL,
+    confirmed_by INTEGER,
+    confirmed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,listing_code),
+    FOREIGN KEY(tenant_id,inventory_product_id)
+        REFERENCES tenant_inventory_products(tenant_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(confirmed_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_product_listings_inventory
+ON tenant_product_listings(tenant_id,inventory_product_id,marketplace_code);
+CREATE INDEX IF NOT EXISTS idx_tenant_product_listings_source
+ON tenant_product_listings(tenant_id,marketplace_code,tenant_seller_id,source_product_code);
+
+CREATE TABLE IF NOT EXISTS tenant_product_match_decisions (
+    tenant_id INTEGER NOT NULL,
+    source_listing_code TEXT NOT NULL,
+    candidate_listing_code TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('confirmed','rejected')),
+    match_method TEXT NOT NULL DEFAULT '',
+    match_score REAL,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_by INTEGER,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(tenant_id,source_listing_code,candidate_listing_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(updated_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_match_decisions_candidate
+ON tenant_product_match_decisions(tenant_id,candidate_listing_code,decision);
+
+CREATE TABLE IF NOT EXISTS tenant_inventory_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    inventory_product_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id,inventory_product_id)
+        REFERENCES tenant_inventory_products(tenant_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_inventory_events_item
+ON tenant_inventory_events(tenant_id,inventory_product_id,created_at DESC);
+
 CREATE TABLE IF NOT EXISTS encrypted_credentials (
     credential_ref TEXT PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

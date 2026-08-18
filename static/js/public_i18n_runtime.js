@@ -18,6 +18,27 @@
       public_cap_sales_title:'Онлайн-сатылымды автоматтандыру', public_cap_sales_text:'Қолмен тұрақты іске қоспай орындалатын операциялар.', public_cap_market_title:'Нарықтық аналитика', public_cap_market_text:'Расталған сәйкестіктер бойынша баға диапазонын бақылау.', public_cap_assortment_title:'Ассортиментті бақылау', public_cap_assortment_text:'Бірыңғай каталог және деректердің өзектілігі.', public_cap_recommend_title:'Позициялар бойынша ұсынымдар', public_cap_recommend_text:'Назарды қажет ететін тауарларды анықтау.', public_cap_automation_title:'Жоспарлы операциялар', public_cap_automation_text:'Жаңартулар кестесі және іске қосу тарихы.', public_cap_channels_title:'Бірнеше сату арнасы', public_cap_channels_text:'Бірыңғай модельдегі көздердің бөлек логикасы.', public_process_1_title:'Деректерді қосамыз', public_process_1_text:'Көздер мен жұмыс кеңістігін баптаймыз.', public_process_2_title:'Қалыпқа келтіреміз', public_process_2_text:'Тауарларды бірыңғай модельге келтіреміз.', public_process_3_title:'Талдаймыз', public_process_3_text:'Позиция мен дерек сапасын бағалаймыз.', public_process_4_title:'Ұсынамыз', public_process_4_text:'Назар қажет позицияларды бөлеміз.', public_results_text:'Өзгерістерді ертерек көріп, маңызды позицияларға назар аударыңыз.', public_result_1:'Ассортимент өзектілігін бақылау', public_result_2:'Сату арналарына бірыңғай шолу', public_result_3:'Тұрақты операцияларды жоспарлау', public_result_4:'Проблемалы позициялар бойынша ұсынымдар', public_decision_1_value:'Баға жұмыс диапазонынан жоғары', public_decision_2_value:'Деректер расталды', public_decision_3_value:'Позицияны тексеру'
     }
   };
+  Object.assign(extra.ru, {
+    register_step_plan:'ПАКЕТ', register_plan_title:'Выберите пакет',
+    register_plan_hint:'Оплата пока не выполняется. Выбранный пакет, цена и срок начнут действовать только после подтверждения супер-администратором.',
+    register_consents_title:'Согласия и отправка', register_guide_step:'Шаг {current} из {total}',
+    register_guide_fill:'заполните текущий блок', register_guide_review:'проверьте согласия и отправьте форму',
+    register_guide_next:'Далее', register_guide_submit:'К отправке'
+  });
+  Object.assign(extra.kk, {
+    register_step_plan:'ПАКЕТ', register_plan_title:'Пакетті таңдаңыз',
+    register_plan_hint:'Қазір төлем алынбайды. Таңдалған пакет, баға және мерзім супер-әкімші растағаннан кейін ғана басталады.',
+    register_consents_title:'Келісімдер және жіберу', register_guide_step:'{current} / {total} қадам',
+    register_guide_fill:'ағымдағы бөлімді толтырыңыз', register_guide_review:'келісімдерді тексеріп, нысанды жіберіңіз',
+    register_guide_next:'Келесі', register_guide_submit:'Жіберуге өту'
+  });
+  Object.assign(extra.en, {
+    register_step_plan:'PLAN', register_plan_title:'Choose a plan',
+    register_plan_hint:'No payment is taken now. The selected plan, price, and term start only after super-administrator approval.',
+    register_consents_title:'Consents and submission', register_guide_step:'Step {current} of {total}',
+    register_guide_fill:'complete the current section', register_guide_review:'review consents and submit the form',
+    register_guide_next:'Next', register_guide_submit:'Go to submission'
+  });
   const locales=window.ITP_PUBLIC_LOCALES=window.ITP_PUBLIC_LOCALES||{};
   Object.entries(extra).forEach(([lang,values])=>Object.assign(locales[lang]=locales[lang]||{},values));
   const valid=lang=>['ru','kk','en'].includes(lang)?lang:'ru';

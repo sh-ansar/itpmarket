@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/public_onboarding.css') }}?v={{ version }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/registration_marketplaces.css') }}?v={{ version }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/registration_guide.css') }}?v={{ version }}">
 </head>
 <body class="registration-page">
 <header class="site-header compact">
@@ -49,7 +50,7 @@
         {% for category, message in messages %}<div class="form-alert {{ category }}">{{ message }}</div>{% endfor %}
       {% endwith %}
 
-      <section class="wizard-section">
+      <section class="wizard-section" data-registration-step data-step-title-key="register_company_data">
         <div class="section-head">
           <div><span class="eyebrow" data-pi18n="register_step_company">КОМПАНИЯ</span><h2 data-pi18n="register_company_data">Данные компании</h2></div>
           <p data-pi18n="register_required_hint">Заполните реальные данные — они нужны для подтверждения.</p>
@@ -65,10 +66,10 @@
         </div>
       </section>
 
-      <section class="wizard-section">
+      <section class="wizard-section" data-registration-step data-step-title-key="register_plan_title">
         <div class="section-head">
-          <div><span class="eyebrow">ПАКЕТ</span><h2>Выберите пакет</h2></div>
-          <p>Оплата пока не выполняется. Выбранный пакет, цена и срок начнут действовать только после подтверждения супер-администратором.</p>
+          <div><span class="eyebrow" data-pi18n="register_step_plan">ПАКЕТ</span><h2 data-pi18n="register_plan_title">Выберите пакет</h2></div>
+          <p data-pi18n="register_plan_hint">Оплата пока не выполняется. Выбранный пакет, цена и срок начнут действовать только после подтверждения супер-администратором.</p>
         </div>
         <fieldset class="integration-selector subscription-plan-selector">
           <legend class="sr-only">Пакет подписки</legend>
@@ -87,7 +88,7 @@
         </fieldset>
       </section>
 
-      <section class="wizard-section">
+      <section class="wizard-section" data-registration-step data-step-title-key="register_marketplaces_title">
         <div class="section-head">
           <div><span class="eyebrow" data-pi18n="register_step_marketplaces">ПЛОЩАДКИ</span><h2 data-pi18n="register_marketplaces_title">Какие маркетплейсы нужны</h2></div>
           <p data-pi18n="register_marketplaces_hint">Выберите минимум одну площадку. После проверки супер-администратор подтвердит доступ компании.</p>
@@ -109,7 +110,7 @@
         </fieldset>
       </section>
 
-      <section class="wizard-section">
+      <section class="wizard-section" data-registration-step data-step-title-key="register_account">
         <div class="section-head">
           <div><span class="eyebrow" data-pi18n="register_step_access">ДОСТУП</span><h2 data-pi18n="register_account">Учётная запись администратора</h2></div>
           <p data-pi18n="register_password_hint">Пароль: не менее 12 символов, с буквами разного регистра, цифрой и специальным символом.</p>
@@ -120,12 +121,24 @@
         </div>
       </section>
 
-      <section class="wizard-section">
+      <section class="wizard-section" data-registration-step data-step-title-key="register_consents_title">
         <div class="consent-stack">
           <label><input type="checkbox" name="privacy_consent" value="1" required><span data-pi18n="register_privacy">Я согласен на обработку персональных данных и ознакомился с политикой конфиденциальности.</span></label>
           <label><input type="checkbox" name="terms_consent" value="1" required><span data-pi18n="register_terms">Я принимаю условия использования.</span></label>
         </div>
       </section>
+
+      <nav class="registration-guide" id="registrationGuide" aria-label="Шаги регистрации">
+        <div class="registration-guide-copy" aria-live="polite">
+          <small><span id="registrationStepNumber">Шаг 1 из 5</span> · <span id="registrationStepStatus" data-pi18n="register_guide_fill">заполните текущий блок</span></small>
+          <strong id="registrationStepTitle">Данные компании</strong>
+          <span class="registration-progress" aria-hidden="true"><i id="registrationProgressBar"></i></span>
+        </div>
+        <div class="registration-guide-actions">
+          <button class="site-button secondary" type="button" id="registrationPrevious" data-pi18n="back">Назад</button>
+          <button class="site-button primary" type="button" id="registrationNext">Далее</button>
+        </div>
+      </nav>
 
       <div class="form-actions">
         <a class="site-button secondary" href="{{ url_for('landing') }}" data-pi18n="back">Назад</a>
@@ -141,6 +154,36 @@
 <script>
 document.addEventListener('click',function(event){var button=event.target.closest('[data-public-lang]');if(button){var input=document.getElementById('registrationLocale');if(input)input.value=button.dataset.publicLang||'ru';}});
 (function(){var form=document.getElementById('registrationForm'),box=document.getElementById('registrationMarketplaces'),error=document.getElementById('marketplaceSelectionError');if(!form||!box)return;function validate(){var ok=!!box.querySelector('input[name="marketplaces"]:checked');box.classList.toggle('invalid',!ok);if(error)error.hidden=ok;return ok;}box.addEventListener('change',validate);form.addEventListener('submit',function(event){if(!validate()){event.preventDefault();box.querySelector('input[name="marketplaces"]')?.focus();}});validate();}());
+(function(){
+  var form=document.getElementById('registrationForm'),sections=Array.from(document.querySelectorAll('[data-registration-step]'));
+  var previous=document.getElementById('registrationPrevious'),next=document.getElementById('registrationNext');
+  var number=document.getElementById('registrationStepNumber'),title=document.getElementById('registrationStepTitle'),status=document.getElementById('registrationStepStatus'),progress=document.getElementById('registrationProgressBar');
+  if(!form||!sections.length||!previous||!next)return;
+  var current=0;
+  function tr(key,fallback){var lang=localStorage.getItem('itp_lang')||'ru';return window.ITP_PUBLIC_LOCALES?.[lang]?.[key]||window.ITP_PUBLIC_LOCALES?.ru?.[key]||fallback;}
+  function sectionTitle(section){return tr(section.dataset.stepTitleKey,section.querySelector('.section-head h2')?.textContent.trim()||'');}
+  function update(){
+    sections.forEach(function(section,index){section.classList.toggle('is-current-step',index===current);});
+    if(number)number.textContent=tr('register_guide_step','Шаг {current} из {total}').replace('{current}',current+1).replace('{total}',sections.length);
+    if(title)title.textContent=sectionTitle(sections[current]);
+    if(status)status.textContent=current===sections.length-1?tr('register_guide_review','проверьте согласия и отправьте форму'):tr('register_guide_fill','заполните текущий блок');
+    if(progress)progress.style.width=((current+1)/sections.length*100)+'%';
+    previous.disabled=current===0;next.textContent=current===sections.length-1?tr('register_guide_submit','К отправке'):tr('register_guide_next','Далее');
+  }
+  function valid(section){
+    var marketplace=section.querySelector('#registrationMarketplaces');
+    if(marketplace&&!marketplace.querySelector('input[name="marketplaces"]:checked')){marketplace.classList.add('invalid');marketplace.querySelector('input[name="marketplaces"]')?.focus();return false;}
+    var controls=Array.from(section.querySelectorAll('input:not([type="hidden"]),select,textarea'));
+    var invalid=controls.find(function(control){return !control.checkValidity();});
+    if(invalid){invalid.reportValidity();invalid.focus();return false;}return true;
+  }
+  function go(index,check){if(check&&!valid(sections[current]))return;current=Math.max(0,Math.min(index,sections.length-1));update();sections[current].scrollIntoView({behavior:'smooth',block:'center'});}
+  previous.addEventListener('click',function(){go(current-1,false);});
+  next.addEventListener('click',function(){if(current===sections.length-1){if(valid(sections[current]))document.querySelector('.form-actions')?.scrollIntoView({behavior:'smooth',block:'center'});return;}go(current+1,true);});
+  document.addEventListener('itp:public-locale',update);
+  if('IntersectionObserver' in window){var observer=new IntersectionObserver(function(entries){var visible=entries.filter(function(entry){return entry.isIntersecting;}).sort(function(a,b){return b.intersectionRatio-a.intersectionRatio;})[0];if(visible){current=sections.indexOf(visible.target);update();}},{threshold:[.45,.7]});sections.forEach(function(section){observer.observe(section);});}
+  update();
+}());
 </script>
 </body>
 </html>

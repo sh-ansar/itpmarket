@@ -47,7 +47,8 @@ OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_BELOW"}
 UNSCANNED_STATUSES = {"NOT_ANALYZED", "INSUFFICIENT_DATA", "REVIEW_REQUIRED"}
 OZON_READY_STATUSES = {
     "DATA_COLLECTED", "NO_OTHER_SELLERS", "EXACT_LOWEST", "EXACT_BELOW",
-    "EXACT_IN_MARKET", "EXACT_ABOVE", "EXACT_HIGHEST", "NO_OTHER_SELLERS",
+    "EXACT_TIED_LOWEST", "EXACT_IN_MARKET", "EXACT_ABOVE", "EXACT_HIGHEST",
+    "EXACT_TIED_HIGHEST", "NO_OTHER_SELLERS",
     "COMPARABLE_LOWEST", "COMPARABLE_BELOW", "COMPARABLE_IN_MARKET",
     "COMPARABLE_ABOVE", "COMPARABLE_HIGHEST",
 }
@@ -950,11 +951,12 @@ class DataService:
                 market_median=float(statistics.median(prices)) if prices else None
                 difference_pct=round((own_price-market_median)/market_median*100,2) if own_price and market_median else None
                 rank_values=sorted([*prices,own_price]) if prices and own_price else []
-                price_rank=rank_values.index(own_price)+1 if rank_values else None
+                price_rank=(1+sum(price<own_price for price in prices)) if rank_values else None
+                price_rank_tie_count=(1+sum(price==own_price for price in prices)) if rank_values else 0
                 if value.get('detail_status')!='COMPLETE': status='DATA_ERROR' if value.get('last_error') else 'NOT_ANALYZED'
                 elif not prices: status='NO_OTHER_SELLERS'
                 elif basis=='EXACT':
-                    status='EXACT_LOWEST' if own_price<=market_min else 'EXACT_HIGHEST' if own_price>=market_max else 'EXACT_IN_MARKET' if abs(float(difference_pct or 0))<=2 else 'EXACT_BELOW' if float(difference_pct or 0)<0 else 'EXACT_ABOVE'
+                    status='EXACT_LOWEST' if own_price<market_min else 'EXACT_TIED_LOWEST' if own_price==market_min else 'EXACT_HIGHEST' if own_price>market_max else 'EXACT_TIED_HIGHEST' if own_price==market_max else 'EXACT_IN_MARKET' if abs(float(difference_pct or 0))<=2 else 'EXACT_BELOW' if float(difference_pct or 0)<0 else 'EXACT_ABOVE'
                 else:
                     status='COMPARABLE_LOWEST' if own_price<=market_min else 'COMPARABLE_HIGHEST' if own_price>=market_max else 'COMPARABLE_IN_MARKET' if abs(float(difference_pct or 0))<=2 else 'COMPARABLE_BELOW' if float(difference_pct or 0)<0 else 'COMPARABLE_ABOVE'
                 info=STATUS_INFO.get(status,STATUS_INFO['NOT_ANALYZED'])
@@ -995,6 +997,13 @@ class DataService:
                     'comparable_candidate_count':len(comparable_candidates),'reference_type':'OZON_EXACT_PRODUCT' if basis=='EXACT' else 'OZON_BRAND_SIZE' if basis=='COMPARABLE' else '',
                     'market_basis':basis,'match_method':primary,'match_method_label':primary_label,'exact_candidates':exact_candidates,'comparable_candidates':comparable_candidates,
                     'difference_pct':difference_pct,'price_rank':price_rank,'price_rank_total':len(rank_values) if rank_values else None,
+                    'price_rank_tie_count':price_rank_tie_count,
+                    'lowest_tie_count':price_rank_tie_count if prices and own_price==market_min else 1 if prices and own_price<market_min else 0,
+                    'highest_tie_count':price_rank_tie_count if prices and own_price==market_max else 1 if prices and own_price>market_max else 0,
+                    'is_lowest':status in {'EXACT_LOWEST','EXACT_TIED_LOWEST','COMPARABLE_LOWEST'},
+                    'is_unique_lowest':status=='EXACT_LOWEST',
+                    'is_highest':status in {'EXACT_HIGHEST','EXACT_TIED_HIGHEST','COMPARABLE_HIGHEST'},
+                    'is_unique_highest':status=='EXACT_HIGHEST',
                     'lowest_product_url':min(pool,key=lambda x:x['price_rub'])['product_url'] if pool else '',
                     'highest_product_url':max(pool,key=lambda x:x['price_rub'])['product_url'] if pool else '',
                     'updated_at':own_updated,'freshness_status':freshness_status,'freshness_label':freshness_label,
@@ -2279,7 +2288,9 @@ class DataService:
             "market_max_price_kzt", "market_median_price_kzt", "market_min_price_original", "market_median_price_original", "market_max_price_original",
             "lowest_product_title", "lowest_product_price_kzt", "lowest_product_url",
             "highest_product_title", "highest_product_price_kzt", "highest_product_url",
-            "price_rank", "price_rank_total", "potential_margin_per_unit_kzt", "potential_margin_monthly_kzt",
+            "price_rank", "price_rank_total", "price_rank_tie_count", "lowest_tie_count",
+            "highest_tie_count", "is_lowest", "is_unique_lowest", "is_highest",
+            "is_unique_highest", "potential_margin_per_unit_kzt", "potential_margin_monthly_kzt",
             "expected_monthly_units", "watched", "priority", "note", "catalog_rating", "catalog_reviews",
             "image_url", "seller_name", "seller_url", "identity_completeness_percent", "candidate_count",
             "match_method", "match_method_label", "exact_offer_status", "exact_offer_checked_at",

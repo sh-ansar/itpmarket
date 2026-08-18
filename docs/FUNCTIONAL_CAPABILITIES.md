@@ -1,6 +1,6 @@
 # Spyon: функциональные возможности
 
-Документ описывает состояние ветки `feature/runtime-audit-and-startup` после runtime-аудита 18 августа 2026 года. Источники истины — исполняемый код, схема данных и автоматические тесты; наличие элемента в интерфейсе само по себе не считается подтверждением backend-функции.
+Документ описывает состояние ветки `feature/catalog-intelligence-guidance` после аудита 18 августа 2026 года. Источники истины — исполняемый код, схема данных и автоматические тесты; наличие элемента в интерфейсе само по себе не считается подтверждением backend-функции.
 
 ## Multi-user and Multi-seller Architecture
 
@@ -14,6 +14,8 @@
 | Две операции одного seller | `SUPPORTED` | Безопасная модель C: второй Full Sync/Price job отклоняется как conflict, очередь не реализована. |
 | Browser/session isolation | `PARTIALLY SUPPORTED` | Путь `.runtime/browser_profiles/t<tenant>/<marketplace>/s<seller>` и передача его collectors проверены; live cookies нескольких аккаунтов не инспектировались. |
 | Seller-scoped catalog и Kaspi analytics | `SUPPORTED` | Catalog, own-price и exact-offer snapshots имеют tenant/marketplace/seller keys. |
+| Cross-marketplace product identity | `SUPPORTED WITH CONFIRMATION` | Динамические предложения по артикулу/строгим характеристикам, журнал решений и ручное подтверждение; автоматического слияния нет. |
+| Единый остаток для связанных listings | `SUPPORTED` | Физический товар хранит количество/закупочную цену один раз; tenant summary не удваивает их по числу площадок. |
 | Multi-seller detailed Ozon/Halyk/Forte analytics | `PARTIALLY SUPPORTED` | Seller catalog безопасен; legacy detailed offer enrichment при >1 seller не используется до seller-native analytics migration. |
 | Scheduler multi-seller и duplicate claim | `SUPPORTED` | Schedule/run хранит seller; atomic claim и scheduler/manual conflict tests PASS. |
 | Subscription limits under concurrency | `SUPPORTED` | Capacity считается суммарно на tenant + marketplace и проверяется внутри serialized transaction. |
@@ -58,6 +60,9 @@ SQLite является локальным backend по умолчанию. Prod
 ## Каталог, аналитика и операции
 
 - Компания задаёт собственный набор товаров и привязки к площадкам. Поддерживаются категории, характеристики, алиасы атрибутов, статические и динамические фильтры, выбор всех/отфильтрованных/отмеченных товаров.
+- Для точных предложений различаются строго уникальный минимум и равная минимальная цена. Равенство получает статус `EXACT_TIED_LOWEST`, показывает размер ничьей и не создаёт фиктивный ценовой потенциал.
+- В карточке можно вести внутренний SKU, фактический остаток, закупочную цену и целевую наценку. Закупочная сумма и валовая сценарная рекомендация доступны только по отдельным правам. Расчёт не включает комиссии, логистику, налоги и возвраты.
+- Межплощадочный matching формирует предложения динамически: бренд + артикул производителя, затем строгий ключ характеристик, затем требующая проверки похожая модель того же бренда/типа/размера. Объединение выполняется только вручную и записывается в audit events. Подробности: [CATALOG_MATCHING_AND_INVENTORY_RU.md](CATALOG_MATCHING_AND_INVENTORY_RU.md).
 - Операции включают сбор каталога, актуализацию собственных цен, получение точных предложений продавцов, поиск рыночных совпадений, повтор ошибок, полный sync, аудит каталога, экспорт и резервное копирование.
 - Для Ozon.ru есть отдельный реестр обнаружения, нормализация характеристик, оценка качества карточки, очередь повторов, история цен, market matching и HTML/табличный экспорт.
 - Фоновое задание считается успешным только при нулевом exit code. Состояния `PARTIAL`, `BLOCKED`, `FAILED` и `INTERRUPTED` теперь завершают Ozon-задачу ошибкой; частичные ошибки точных предложений Kaspi, Halyk и Forte также возвращают ненулевой код.
@@ -72,6 +77,8 @@ SQLite является локальным backend по умолчанию. Prod
 | Super Admin | Рассмотрение компаний, grants площадок, source rules, тарифы | `saas_service.py`, `subscription_service.py` | отдельные platform routes/pages | нет | `PASS` unit |
 | Пользователи/RBAC | Роли, персональные права и marketplace overrides | `tenant_security.py`, `auth_service.py` | company settings/API | нет | `PASS` unit |
 | Каталог компании | Tenant-снимок, категории, атрибуты, алиасы и фильтры | `catalog_configuration_service.py`, `data_service.py` | товары, фильтры и API | данные площадок | `PASS` unit |
+| Единый товар и остатки | Tenant-scoped physical product, purchase cost, linked marketplace listings и сводка без дублей | `inventory_service.py`, `app.py` | product drawer, `/api/inventory/summary` | заполнение пользователем | `PASS` unit/HTTP |
+| Межплощадочный matching | Динамические предложения, confirm/reject, защита уже заполненных складских товаров | `inventory_service.py` | product drawer и product match API | качество артикулов/характеристик | `PASS` unit/HTTP; только с ручным подтверждением |
 | Подписки | Планы, оплаты, feature/position/daily limits, add-ons | `subscription_service.py` | публичные тарифы и settings/platform API | ручное подтверждение оплаты | `PASS` unit |
 | Jobs | Subprocess lifecycle, concurrency, stop, logs и status cache | `task_manager.py`, `app.py` | operations API/UI | Python/Chrome/сеть по типу job | `PASS` unit и local runtime |
 | Scheduler | Запуск due schedules с повторной авторизацией и лимитами | `scheduler_service.py`, `saas_service.py` | operations/settings API/UI | процесс приложения | `PASS` unit; production task не проверялась локально |
@@ -98,13 +105,13 @@ Live-пробы были только публичными и ограничен
 
 ## UI и backend
 
-Публичная часть содержит регистрацию, вход, описание продукта и тарифы; `/api/public/plans` доступен и до первичной настройки пользователей. Рабочая панель показывает обзор, товары, операции, отчёты, настройки, подписку, уведомления и справку согласно эффективным правам. Платформенный интерфейс отделён от company-admin и включает рассмотрение компаний, выдачу площадок, правила source URL и подписки.
+Публичная часть содержит регистрацию, вход, описание продукта и тарифы; `/api/public/plans` доступен и до первичной настройки пользователей. Регистрация использует единый стиль полей и нижний проводник по пяти блокам. Рабочая панель показывает обзор, товары, операции, отчёты, настройки, подписку, уведомления и подключаемую контекстную справку для каждого раздела согласно эффективным правам. Платформенный интерфейс отделён от company-admin и включает рассмотрение компаний, выдачу площадок, правила source URL и подписки.
 
 Backend предоставляет отдельные проверки прав на маршрутах и не полагается на скрытие кнопок. Каталог и операции поддерживают server-side фильтрацию и пагинацию. Health-контракты разделены: `/health` проверяет процесс, `/ready` — доступность основной БД, `/` — реальный HTTP/UI путь.
 
 ## Что подтверждено и что остаётся ограничением
 
-Подтверждено: 108 автоматических тестов, Python compile, JavaScript syntax, PowerShell parse, согласованность Python-пакетов, локальный Waitress startup и HTTP 200 для `/health`, `/ready`, `/`, `/api/public/plans`; локальные Chromium и Chrome обнаружены.
+Подтверждено: 121 автоматический тест, Python compile, 12 JavaScript syntax checks, PowerShell parse, согласованность Python-пакетов, read-only runtime diagnostic без `FAIL` и локальный HTTP 200 для `/health`, `/ready`, `/`, `/register`, `/api/public/plans` и новых static assets. Отдельно покрыты равные минимальные цены, tenant-scoped остатки, отсутствие двойного подсчёта, match confirm/reject, RBAC и direct API marketplace boundary.
 
 Не подтверждено из этой рабочей станции: соединение с реальной production PostgreSQL, состояние `C:\Spyon\current`, Scheduled Tasks и Caddy на сервере, production ACL, live-сессии Kaspi/Ozon и полный сетевой сбор. Это не дефекты кода, а проверки, требующие доступа к соответствующей машине/учётной сессии. PostgreSQL-совместимость проверена unit-тестами и анализом SQL, но локального сервера PostgreSQL в среде аудита не было.
 
