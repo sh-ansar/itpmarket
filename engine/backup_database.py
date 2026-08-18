@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -24,17 +25,53 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _postgres_binary(name: str) -> str:
+def _postgres_binary_major(executable: str | Path) -> int | None:
+    try:
+        output = subprocess.run(
+            [str(executable), "--version"],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"PostgreSQL\)\s+(\d+)(?:\.\d+)?", output)
+    return int(match.group(1)) if match else None
+
+
+def _postgres_binary(name: str, *, server_major: int | None = None) -> str:
+    candidates: list[Path] = []
     found = shutil.which(name)
     if found:
-        return found
-    roots = sorted(
+        candidates.append(Path(found))
+    candidates.extend(sorted(
         Path("C:/Program Files/PostgreSQL").glob(f"*/bin/{name}.exe"),
         reverse=True,
-    )
-    if roots:
-        return str(roots[0])
+    ))
+    unique = list(dict.fromkeys(path.resolve() for path in candidates))
+    if server_major is not None:
+        for candidate in unique:
+            if _postgres_binary_major(candidate) == server_major:
+                return str(candidate)
+        raise RuntimeError(
+            f"Не найден {name} версии PostgreSQL {server_major}. "
+            "Установите клиентские инструменты той же основной версии, что и сервер."
+        )
+    if unique:
+        return str(unique[0])
     raise RuntimeError(f"Не найден {name}. Установите клиентские инструменты PostgreSQL.")
+
+
+def _postgres_server_major(database_url: str) -> int:
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    with psycopg.connect(database_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW server_version_num")
+            version_number = int(cursor.fetchone()[0])
+    return version_number // 10000
 
 
 def _backup_postgres(output: Path, database_url: str) -> Path:
@@ -42,12 +79,15 @@ def _backup_postgres(output: Path, database_url: str) -> Path:
     database = unquote(parsed.path.lstrip("/"))
     if not parsed.hostname or not database:
         raise RuntimeError("Некорректный DATABASE_URL для резервной копии.")
+    server_major = _postgres_server_major(database_url)
+    pg_dump = _postgres_binary("pg_dump", server_major=server_major)
+    pg_restore = _postgres_binary("pg_restore", server_major=server_major)
     target = output / f"spyon_postgresql_{datetime.now().strftime('%Y%m%d_%H%M%S')}.dump"
     environment = os.environ.copy()
     if parsed.password:
         environment["PGPASSWORD"] = unquote(parsed.password)
     command = [
-        _postgres_binary("pg_dump"), "--format=custom", "--no-owner", "--no-acl",
+        pg_dump, "--format=custom", "--no-owner", "--no-acl",
         "--host", parsed.hostname, "--port", str(parsed.port or 5432),
         "--username", unquote(parsed.username or "postgres"), "--dbname", database,
         "--schema", "app", "--schema", "ozon_ru", "--schema", "ozon_kz",
@@ -59,7 +99,7 @@ def _backup_postgres(output: Path, database_url: str) -> Path:
         raise RuntimeError("pg_dump не создал резервную копию.")
     print("[Резервная копия] 2/2 Проверка архива")
     subprocess.run(
-        [_postgres_binary("pg_restore"), "--list", str(target)],
+        [pg_restore, "--list", str(target)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         check=True,

@@ -53,7 +53,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 До approval подготовьте diff, список тестов, известные блокеры и рекомендуемый commit message. Production deployment начинается только после отдельного подтверждения.
 
-Если release включает multi-seller и единый складской товар, код нельзя перезапускать поверх старой схемы. После backup и успешной staging-репетиции уполномоченный оператор применяет PostgreSQL-миграции строго по порядку:
+Если release включает multi-seller и единый складской товар, код нельзя перезапускать поверх старой схемы. Сначала создайте и проверьте custom-format backup:
+
+```powershell
+Set-Location C:\Spyon\current
+. .\deploy\windows\environment.ps1
+Import-SpyonEnvironment -Path .\.runtime\production.env
+.\.venv\Scripts\python.exe engine\backup_database.py `
+  --db .\data\unityre_kaspi.db --output C:\Spyon\backups
+```
+
+Backup-helper определяет major-версию PostgreSQL-сервера и использует `pg_dump`/`pg_restore` той же версии. Отсутствие подходящих клиентских утилит блокирует rollout: архив от более нового клиента может содержать параметры, которые старый сервер не сможет восстановить.
+
+После backup и успешной staging-репетиции уполномоченный оператор применяет PostgreSQL-миграции строго по порядку:
 
 1. `migrations/20260818_multi_seller_v1.sql`.
 2. `migrations/20260818_inventory_matching_v1.sql`.
