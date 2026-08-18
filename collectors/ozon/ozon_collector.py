@@ -51,6 +51,31 @@ def portable_storage_path(path: Path) -> str:
     return str(resolved)
 
 
+STATUS_PRIORITY = {
+    "PASSED": 0,
+    "PARTIAL": 1,
+    "BLOCKED": 2,
+    "FAILED": 3,
+    "INTERRUPTED": 4,
+}
+
+
+def combined_status(*results: dict[str, Any]) -> str:
+    statuses = [
+        str(result.get("status") or "PASSED").upper()
+        for result in results
+        if isinstance(result, dict)
+    ]
+    return max(statuses or ["PASSED"], key=lambda value: STATUS_PRIORITY.get(value, 3))
+
+
+def result_exit_code(result: dict[str, Any] | None) -> int:
+    if not isinstance(result, dict):
+        return 0
+    status = str(result.get("status") or "PASSED").upper()
+    return 0 if status in {"OK", "PASSED", "READY"} else 2
+
+
 class Collector:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -242,7 +267,7 @@ class Collector:
             f"\nDiscovery завершён: источников {metrics['sources_completed']}/{metrics['sources_total']}; "
             f"товаров {len(seen)}; новых {new_count}; изменили цену {changed_count}"
         )
-        return {"run_id": run_id, "run_dir": str(run_dir), **metrics}
+        return {"run_id": run_id, "run_dir": str(run_dir), "status": status, **metrics}
 
     @staticmethod
     def task_type_for_mode(mode: str) -> str:
@@ -541,7 +566,11 @@ class Collector:
             details = self.process("refresh-prices", limit)
         else:
             details = self.process("enrich-new", limit)
-        return {"discovery": discovery, "details": details}
+        return {
+            "status": combined_status(discovery, details),
+            "discovery": discovery,
+            "details": details,
+        }
 
     def full_sync(self, limit: int | None = None) -> dict[str, Any]:
         # Keep the same Selenium attachment alive for every stage.  Separate
@@ -550,7 +579,12 @@ class Collector:
         catalog = self.sync_catalog(limit)
         prices = self.process("refresh-prices", limit)
         market = self.market_search(limit)
-        return {"catalog": catalog, "prices": prices, "market": market}
+        return {
+            "status": combined_status(catalog, prices, market),
+            "catalog": catalog,
+            "prices": prices,
+            "market": market,
+        }
 
     def generate_outputs(self) -> None:
         self.registry.export_current(
@@ -706,19 +740,20 @@ def main() -> int:
     settings = settings_for_args(load_settings(), args)
     collector = Collector(settings)
     article_filter = load_article_filter(getattr(args, "articles_file", ""))
+    result: dict[str, Any] | None = None
     try:
         if args.command == "open-browser":
-            collector.open_browser()
+            result = collector.open_browser()
         elif args.command == "discover":
-            collector.discover(args.limit, args.pages)
+            result = collector.discover(args.limit, args.pages)
         elif args.command == "sync-catalog":
-            collector.sync_catalog(args.limit)
+            result = collector.sync_catalog(args.limit)
         elif args.command in {"enrich-new", "refresh-prices", "refresh-stale", "retry-failed", "stress-test"}:
-            collector.process(args.command, args.limit, article_filter)
+            result = collector.process(args.command, args.limit, article_filter)
         elif args.command == "market-search":
-            collector.market_search(args.limit, article_filter)
+            result = collector.market_search(args.limit, article_filter)
         elif args.command == "full-sync":
-            collector.full_sync(args.limit)
+            result = collector.full_sync(args.limit)
         elif args.command == "report":
             collector.generate_outputs()
             print(settings.reports_dir / "index.html")
@@ -731,7 +766,7 @@ def main() -> int:
             materialize_tenant_catalog(
                 settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon"
             )
-        return 0
+        return result_exit_code(result)
     finally:
         collector.close()
 

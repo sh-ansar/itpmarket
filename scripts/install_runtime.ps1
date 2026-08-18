@@ -53,7 +53,7 @@ function Stop-ProjectProcesses {
 function Test-Venv {
     if (-not (Test-Path $Python)) { return $false }
     try {
-        $output = & $Python -c "import sys, pip, setuptools; assert sys.prefix" 2>&1
+        $output = & $Python -c "import sys, pip, setuptools; assert sys.prefix; assert sys.version_info[:2] in {(3,10),(3,11)}" 2>&1
         if ($LASTEXITCODE -eq 0) { return $true }
         if (-not $Silent) {
             Write-Warning "Existing runtime failed validation and will be recreated."
@@ -81,6 +81,12 @@ function New-Venv {
         if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { continue }
         $args = @()
         if ($launcher.Count -gt 1) { $args += $launcher[1] }
+        $probeArgs = @($args) + @(
+            "-c",
+            "import sys; raise SystemExit(0 if sys.version_info[:2] in {(3,10),(3,11)} else 1)"
+        )
+        & $command @probeArgs *> $null
+        if ($LASTEXITCODE -ne 0) { continue }
         $args += @("-m", "venv", $Venv)
         Write-Host "Creating runtime with: $command $($args -join ' ')"
         & $command @args

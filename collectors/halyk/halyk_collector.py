@@ -487,9 +487,12 @@ def product_ids_for_market(conn: sqlite3.Connection, args: argparse.Namespace) -
     return ids
 
 
-def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> tuple[int, int]:
+def refresh_market_offers(
+    conn: sqlite3.Connection, args: argparse.Namespace, run_id: str
+) -> tuple[int, int, int]:
     product_ids = product_ids_for_market(conn, args)
     offers_seen = 0
+    errors = 0
     stamp = now_iso()
     for index, product_id in enumerate(product_ids, 1):
         try:
@@ -514,6 +517,7 @@ def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, ru
                     (stamp, product_id),
                 )
         except Exception as exc:
+            errors += 1
             conn.execute(
                 "UPDATE halyk_products SET last_error=? WHERE product_id=?",
                 (clean_text(exc), product_id),
@@ -521,7 +525,7 @@ def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, ru
             conn.commit()
         print(f"Halyk предложения: {index}/{len(product_ids)}", flush=True)
         time.sleep(max(0.0, args.sleep))
-    return len(product_ids), offers_seen
+    return len(product_ids), offers_seen, errors
 
 
 def materialize_tenant_catalog(
@@ -568,6 +572,7 @@ def run(args: argparse.Namespace) -> int:
     action = args.action
     mark_run(conn, run_id, action, args, "running")
     total = products = offers = 0
+    errors = 0
     try:
         print(
             f"Halyk старт: {action}; продавец={args.seller_name}; город={args.location_id}; запрос={args.catalog_query}",
@@ -576,13 +581,18 @@ def run(args: argparse.Namespace) -> int:
         if action in {"sync-catalog", "full-sync"}:
             total, products, offers = sync_catalog(conn, args, run_id)
         if action in {"refresh-offers", "full-sync"}:
-            refreshed, market_offers = refresh_market_offers(conn, args, run_id)
+            refreshed, market_offers, errors = refresh_market_offers(conn, args, run_id)
             products = max(products, refreshed)
             offers += market_offers
         materialize_tenant_catalog(conn, db_path, args)
-        finish_run(conn, run_id, "ok", total, products, offers)
-        print(f"Halyk готово: товаров {products}, предложений {offers}", flush=True)
-        return 0
+        status = "partial" if errors else "ok"
+        error_text = f"Ошибок обновления карточек: {errors}" if errors else ""
+        finish_run(conn, run_id, status, total, products, offers, error_text)
+        print(
+            f"Halyk готово: товаров {products}, предложений {offers}, ошибок {errors}",
+            flush=True,
+        )
+        return 2 if errors else 0
     except Exception as exc:
         finish_run(conn, run_id, "error", total, products, offers, str(exc))
         print(f"Halyk ошибка: {exc}", flush=True)

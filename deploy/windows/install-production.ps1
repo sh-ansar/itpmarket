@@ -23,6 +23,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $runtime = Join-Path $root '.runtime'
 $venv = Join-Path $root '.venv'
 $python = Join-Path $venv 'Scripts\python.exe'
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $root '.playwright'
 
 if ($DatabaseUrl -match "[`r`n]") {
     throw 'DATABASE_URL must be a single line.'
@@ -35,11 +36,39 @@ New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $runtime 'logs') -Force | Out-Null
 
 if (-not (Test-Path -LiteralPath $python)) {
-    $systemPython = (Get-Command python -ErrorAction Stop).Source
-    & $systemPython -m venv $venv
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Could not create the Python virtual environment.'
+    $launchers = @(
+        @('py', '-3.11'),
+        @('py', '-3.10'),
+        @('python')
+    )
+    $created = $false
+    foreach ($launcher in $launchers) {
+        $command = $launcher[0]
+        if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
+            continue
+        }
+        $arguments = @()
+        if ($launcher.Count -gt 1) {
+            $arguments += $launcher[1]
+        }
+        & $command @arguments -c "import sys; raise SystemExit(0 if sys.version_info[:2] in {(3,10),(3,11)} else 1)"
+        if ($LASTEXITCODE -ne 0) {
+            continue
+        }
+        & $command @arguments -m venv $venv
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $python)) {
+            $created = $true
+            break
+        }
     }
+    if (-not $created) {
+        throw 'Python 3.10 or 3.11 could not create the production virtual environment.'
+    }
+}
+
+& $python -c "import sys; raise SystemExit(0 if sys.version_info[:2] in {(3,10),(3,11)} else 1)"
+if ($LASTEXITCODE -ne 0) {
+    throw 'The existing production virtual environment must use Python 3.10 or 3.11.'
 }
 
 & $python -m pip install --disable-pip-version-check `

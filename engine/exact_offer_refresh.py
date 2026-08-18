@@ -35,6 +35,11 @@ def normalized(value: Any) -> str:
     return core.normalize(core.clean_text(value))
 
 
+def result_exit_code(stats: dict[str, int]) -> int:
+    completed = int(stats.get("ok") or 0) + int(stats.get("no_competitors") or 0)
+    return 0 if int(stats.get("error") or 0) == 0 and completed > 0 else 2
+
+
 def is_own_offer(offer: dict[str, Any], seller_id: str, seller_name: str) -> bool:
     merchant_id = normalized(offer.get("merchantId"))
     merchant_name = normalized(offer.get("merchantName"))
@@ -349,7 +354,7 @@ async def run(args: argparse.Namespace) -> int:
         CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
             int(args.tenant_id), [str(item["product_code"]) for item in jobs], replace=False
         )
-    return 0 if (stats["ok"] + stats["no_competitors"]) > 0 else 2
+    return result_exit_code(stats)
 
 
 def parse_args() -> argparse.Namespace:

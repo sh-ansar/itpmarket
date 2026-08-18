@@ -1401,7 +1401,8 @@ def before_request() -> Any:
 
     if not AUTH.has_users() and request.endpoint not in {
         "setup", "setup_complete", "static", "health", "ready", "landing",
-        "registration", "registration_complete", "legal_document"
+        "registration", "registration_complete", "legal_document",
+        "api_public_plans",
     }:
         if is_api_request():
             return json_error("Требуется первичная настройка.", 428)

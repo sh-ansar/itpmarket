@@ -762,9 +762,12 @@ def product_ids_for_market(conn: sqlite3.Connection, args: argparse.Namespace) -
     return result[: int(args.max_products)] if args.max_products else result
 
 
-def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> tuple[int, int]:
+def refresh_market_offers(
+    conn: sqlite3.Connection, args: argparse.Namespace, run_id: str
+) -> tuple[int, int, int]:
     product_ids = product_ids_for_market(conn, args)
     offers_seen = 0
+    errors = 0
     for index, product_id in enumerate(product_ids, 1):
         stamp = now_iso()
         try:
@@ -779,11 +782,12 @@ def refresh_market_offers(conn: sqlite3.Connection, args: argparse.Namespace, ru
                     (stamp, product_id),
                 )
         except Exception as exc:
+            errors += 1
             conn.execute("UPDATE forte_products SET last_error=? WHERE product_id=?", (clean_text(exc), product_id))
             conn.commit()
         print(f"Forte Market предложения: {index}/{len(product_ids)}", flush=True)
         time.sleep(max(0.0, args.sleep))
-    return len(product_ids), offers_seen
+    return len(product_ids), offers_seen, errors
 
 
 def probe(args: argparse.Namespace) -> dict[str, Any]:
@@ -888,6 +892,7 @@ def run(args: argparse.Namespace) -> int:
     run_id = f"forte_{args.action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     mark_run(conn, run_id, args.action, args)
     total = products = offers = 0
+    errors = 0
     try:
         print(
             f"Forte Market старт: {args.action}; продавец={args.seller_name}; merchant_id={args.merchant_id or 'не задан'}; город={args.city_id}",
@@ -896,12 +901,17 @@ def run(args: argparse.Namespace) -> int:
         if args.action in {"sync-catalog", "full-sync"}:
             total, products, offers = sync_catalog(conn, args, run_id)
         if args.action in {"refresh-offers", "full-sync"}:
-            refreshed, offers = refresh_market_offers(conn, args, run_id)
+            refreshed, offers, errors = refresh_market_offers(conn, args, run_id)
             products = max(products, refreshed)
         materialize_tenant_catalog(conn, db_path, args)
-        finish_run(conn, run_id, "ok", total, products, offers)
-        print(f"Forte Market готово: товаров {products}, предложений {offers}", flush=True)
-        return 0
+        status = "partial" if errors else "ok"
+        error_text = f"Ошибок обновления карточек: {errors}" if errors else ""
+        finish_run(conn, run_id, status, total, products, offers, error_text)
+        print(
+            f"Forte Market готово: товаров {products}, предложений {offers}, ошибок {errors}",
+            flush=True,
+        )
+        return 2 if errors else 0
     except Exception as exc:
         finish_run(conn, run_id, "error", total, products, offers, str(exc))
         print(f"Forte Market ошибка: {exc}", flush=True)

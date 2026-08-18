@@ -1,5 +1,11 @@
 # Spyon
 
+Актуальная документация:
+
+- [`docs/FUNCTIONAL_CAPABILITIES.md`](docs/FUNCTIONAL_CAPABILITIES.md) — функции и ограничения;
+- [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md) — локальное окружение и проверки;
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — действующая схема production в `C:\Spyon\current`.
+
 Локальная многопользовательская панель для каталогов и цен маркетплейсов. Поддерживаются Kaspi, Ozon.ru, Ozon.kz, Halyk Market, Forte Market и Wildberries.
 
 ## Запуск

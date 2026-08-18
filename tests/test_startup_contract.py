@@ -12,6 +12,9 @@ class StartupContractTests(unittest.TestCase):
         app_source = (root / "app.py").read_text(encoding="utf-8")
         self.assertIn("cryptography", check_env)
         self.assertIn('"cryptography"', environment_check)
+        self.assertIn('"certifi"', environment_check)
+        self.assertIn('"psycopg"', environment_check)
+        self.assertIn("SUPPORTED_PYTHON", environment_check)
         self.assertNotIn("from credential_vault import", app_source)
 
     def test_startup_is_local_only_and_lan_helpers_are_removed(self) -> None:

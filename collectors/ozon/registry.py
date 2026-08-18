@@ -676,11 +676,13 @@ class Registry:
         sql = """
             SELECT p.*,j.last_search_at,j.exact_found,j.comparable_found
             FROM products p
-            JOIN product_sources ps ON ps.article=p.article AND ps.source_type='CLIENT_CATALOG'
             LEFT JOIN market_search_jobs j ON j.client_article=p.article
             WHERE p.active=1 AND p.detail_status='COMPLETE'
               AND TRIM(p.brand)<>'' AND TRIM(p.tire_size)<>''
-            GROUP BY p.article
+              AND EXISTS(
+                  SELECT 1 FROM product_sources ps
+                  WHERE ps.article=p.article AND ps.source_type='CLIENT_CATALOG'
+              )
             ORDER BY CASE WHEN j.last_search_at IS NULL THEN 0 ELSE 1 END,
                      COALESCE(j.exact_found,0),COALESCE(j.comparable_found,0),
                      COALESCE(j.last_search_at,''),p.article

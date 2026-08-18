@@ -1,12 +1,10 @@
-name: Deploy ITP Market Intelligence
+name: Legacy manual deployment (C:\ITPMarket)
 
 on:
-  push:
-    branches: [production]
   workflow_dispatch:
 
 concurrency:
-  group: itp-market-demo
+  group: itp-market-legacy-manual
   cancel-in-progress: false
 
 jobs:
