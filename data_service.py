@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -179,7 +179,7 @@ class DataService:
                 defaults.update(dict(row))
             else:
                 conn.execute(
-                    "INSERT OR IGNORE INTO app_user_preferences(user_id) VALUES(?)", (int(user_id),)
+                    "INSERT OR IGNORE INTO app_user_preferences(user_id,updated_at) VALUES(?,datetime('now'))", (int(user_id),)
                 )
                 conn.commit()
             return defaults

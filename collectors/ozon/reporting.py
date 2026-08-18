@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -55,12 +55,23 @@ def generate_dashboard(db_path: Path, output_path: Path) -> Path:
 
     sellers = conn.execute(
         """
-        SELECT seller_name, seller_id, COUNT(*) AS offers_count,
-               ROUND(AVG(card_price),0) AS avg_price,
-               MAX(last_checked_at) AS last_checked
-        FROM offers WHERE active=1
-        GROUP BY seller_key
-        ORDER BY offers_count DESC, seller_name
+        SELECT MIN(seller_name) AS seller_name,
+       
+		MIN(seller_id) AS seller_id,
+       
+		COUNT(*) AS offers_count,
+       
+		ROUND(AVG(card_price),0) AS avg_price,
+       
+		MAX(last_checked_at) AS last_checked
+	
+FROM offers
+
+	WHERE active=1
+
+	GROUP BY seller_key
+
+	ORDER BY offers_count DESC, seller_name
         LIMIT 15
         """
     ).fetchall()

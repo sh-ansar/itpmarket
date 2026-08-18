@@ -1,7 +1,10 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+import ssl
 
+import certifi
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 import argparse
 import json
 import re
@@ -131,7 +134,7 @@ def halyk_get_json_once(path: str, params: dict[str, Any], timeout: int) -> dict
     }
     try:
         request = Request(url, headers=headers)
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout, context=SSL_CONTEXT) as response:
             raw = response.read().decode("utf-8")
     except Exception as urllib_error:
         command = [
@@ -209,16 +212,6 @@ def catalog_category_id(args: argparse.Namespace) -> str:
 
 
 def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
-    if clean_text(getattr(args, "merchant_id", "")):
-        return {
-            "did": args.device_id,
-            "sid": "",
-            "shop_id": args.shop_id,
-            "merchant_ids": clean_text(args.merchant_id),
-            "filters[merchantName][0]": args.seller_name,
-            "limit": str(args.page_size),
-            "page": str(page),
-        }
     category_id = catalog_category_id(args)
     if category_id:
         return {
@@ -229,6 +222,17 @@ def catalog_params(args: argparse.Namespace, page: int) -> dict[str, Any]:
             "page": str(page),
             "sort_by": "popular",
             "sort_dir": "desc",
+        }
+
+    if clean_text(getattr(args, "merchant_id", "")):
+        return {
+            "did": args.device_id,
+            "sid": "",
+            "shop_id": args.shop_id,
+            "merchant_ids": clean_text(args.merchant_id),
+            "filters[merchantName][0]": args.seller_name,
+            "limit": str(args.page_size),
+            "page": str(page),
         }
     return {
         "type": "full_search",

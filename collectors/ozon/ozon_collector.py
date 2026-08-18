@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ from urllib.parse import quote_plus
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from collector_config import ROOT, Settings, load_settings, seller_root_url
 from ozon_probe_core import parse_product_json
@@ -21,9 +24,7 @@ from ozon_validation_core import normalize_for_import, seller_match_status
 from registry import Registry, now_iso
 from reporting import generate_dashboard
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+
 from collectors.ozon.market_matching import build_search_queries, evaluate_match
 from catalog_configuration_service import CatalogConfigurationService
 from storage.postgres_compat import connect_database
