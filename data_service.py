@@ -27,6 +27,7 @@ from market_intelligence import (
     canonical_studs,
 )
 from schema import ensure_database
+from marketplace_registry import seller_scoped_product_code, parse_product_code
 
 HALYK_BASE_URL = "https://halykmarket.kz"
 FORTE_BASE_URL = "https://market.forte.kz"
@@ -1482,12 +1483,61 @@ class DataService:
             if requested:
                 where += f" AND marketplace_code IN ({','.join('?' for _ in requested)})"
                 params.extend(sorted(requested))
-            rows = conn.execute(
-                f"""SELECT * FROM tenant_catalog_products
-                    WHERE {where}
-                    ORDER BY marketplace_code,source_product_code""",
-                params,
-            ).fetchall()
+            seller_counts = {
+                str(row["marketplace_code"]): int(row["seller_count"])
+                for row in conn.execute(
+                    """SELECT marketplace_code,COUNT(DISTINCT tenant_seller_id) AS seller_count
+                       FROM tenant_seller_catalog_products
+                       WHERE tenant_id=? AND active=1
+                       GROUP BY marketplace_code""",
+                    (int(tenant_id),),
+                ).fetchall()
+            }
+            # Product identity must become seller-scoped as soon as multiple
+            # accounts are active, not only after the second account has
+            # completed its first catalog sync.  This keeps bookmarks/state
+            # stable and prevents unsafe legacy enrichment during that window.
+            for row in conn.execute(
+                """SELECT marketplace_code,COUNT(*) AS seller_count
+                   FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND status='active'
+                     AND approval_status='approved'
+                   GROUP BY marketplace_code""",
+                (int(tenant_id),),
+            ).fetchall():
+                code = str(row["marketplace_code"])
+                seller_counts[code] = max(
+                    seller_counts.get(code, 0), int(row["seller_count"])
+                )
+            if seller_counts:
+                seller_where = "tsp.tenant_id=? AND tsp.active=1"
+                seller_params: list[Any] = [int(tenant_id)]
+                if requested:
+                    seller_where += (
+                        f" AND tsp.marketplace_code IN ("
+                        f"{','.join('?' for _ in requested)})"
+                    )
+                    seller_params.extend(sorted(requested))
+                rows = conn.execute(
+                    f"""SELECT tsp.*,s.external_seller_id,s.display_name AS seller_name,
+                               s.source_url AS seller_url
+                        FROM tenant_seller_catalog_products tsp
+                        JOIN tenant_marketplace_sellers s
+                          ON s.id=tsp.tenant_seller_id AND s.tenant_id=tsp.tenant_id
+                        WHERE {seller_where}
+                        ORDER BY tsp.marketplace_code,tsp.tenant_seller_id,
+                                 tsp.source_product_code""",
+                    seller_params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""SELECT tcp.*,NULL AS external_seller_id,
+                               NULL AS seller_name,NULL AS seller_url
+                        FROM tenant_catalog_products tcp
+                        WHERE {where}
+                        ORDER BY marketplace_code,source_product_code""",
+                    params,
+                ).fetchall()
             integrations = {
                 str(row["integration_code"]): dict(row)
                 for row in conn.execute(
@@ -1521,13 +1571,21 @@ class DataService:
             value = dict(raw)
             platform = str(value.get("marketplace_code") or "")
             integration = integrations.get(platform, {})
-            integration_seller = str(integration.get("seller_name") or "").strip()
+            integration_seller = str(
+                value.get("seller_name") or integration.get("seller_name") or ""
+            ).strip()
             if (
                 not integration_seller
                 or self._normalized_seller(integration_seller) in legacy_seller_names
             ):
                 integration_seller = tenant_name
             source_code = str(value.get("source_product_code") or "")
+            tenant_seller_id = int(value.get("tenant_seller_id") or 0)
+            public_code = self._catalog_product_code(platform, source_code)
+            if tenant_seller_id and seller_counts.get(platform, 0) > 1:
+                public_code = seller_scoped_product_code(
+                    platform, tenant_seller_id, source_code
+                )
             amount = value.get("price_amount")
             is_rub = str(value.get("currency") or "").upper() == "RUB"
             try:
@@ -1536,8 +1594,9 @@ class DataService:
                 attributes = []
             updated = value.get("source_updated_at") or value.get("last_seen_at")
             result.append({
-                "product_code": self._catalog_product_code(platform, source_code),
+                "product_code": public_code,
                 "source_product_code": source_code,
+                "tenant_seller_id": tenant_seller_id or None,
                 "platform": platform,
                 "platform_label": labels.get(platform, platform),
                 "title": value.get("title") or source_code,
@@ -1565,9 +1624,9 @@ class DataService:
                 "status_tone": STATUS_INFO.get("NOT_ANALYZED", {}).get("tone", "neutral"),
                 "reference_count": 0,
                 "candidate_count": 0,
-                "seller_id": integration.get("seller_identifier") or "",
-                "seller_name": integration_seller or integration.get("seller_identifier") or tenant_name,
-                "seller_url": integration.get("seller_url") or "",
+                "seller_id": value.get("external_seller_id") or integration.get("seller_identifier") or "",
+                "seller_name": integration_seller or value.get("external_seller_id") or integration.get("seller_identifier") or tenant_name,
+                "seller_url": value.get("seller_url") or integration.get("seller_url") or "",
                 "updated_at": updated,
                 "freshness_status": self._freshness(updated)[0],
                 "freshness_label": self._freshness(updated)[1],
@@ -1578,6 +1637,7 @@ class DataService:
                 "_delta_sort": 0.0,
                 "_tenant_attributes": attributes,
                 "_tenant_catalog_only": True,
+                "_multi_seller_marketplace": seller_counts.get(platform, 0) > 1,
             })
         return result
 
@@ -1601,6 +1661,19 @@ class DataService:
             str(row.get("platform") or "") for row in snapshot
             if str(row.get("platform") or "")
         }
+        sellers_by_platform: dict[str, set[int]] = defaultdict(set)
+        for row in snapshot:
+            seller_id = int(row.get("tenant_seller_id") or 0)
+            if seller_id:
+                sellers_by_platform[str(row.get("platform") or "")].add(seller_id)
+        # Legacy collector tables are product-keyed and cannot safely enrich two
+        # accounts that sell the same SKU. Seller-scoped snapshots are the
+        # authoritative response until every legacy analytics table is retired.
+        if (
+            any(len(values) > 1 for values in sellers_by_platform.values())
+            or any(bool(row.get("_multi_seller_marketplace")) for row in snapshot)
+        ):
+            return self._with_tenant_state(snapshot, user_id)
         if requested == {"wildberries"} or (
             snapshot and snapshot_platforms == {"wildberries"}
         ):
@@ -2479,8 +2552,14 @@ class DataService:
             conn.close()
 
     def price_history(self, code: str, limit: int = 120, user_id: int | None = None) -> list[dict[str, Any]]:
+        parsed_platform, parsed_seller_id, parsed_source_code = parse_product_code(code)
+        if parsed_seller_id and parsed_platform != "kaspi":
+            # Seller-scoped collector registries are intentionally not merged
+            # into the old global registry. Returning no history is safer than
+            # exposing another account's price series.
+            return []
         if str(code).startswith("ozon_kz:"):
-            product_id = str(code).split(":", 1)[1]
+            product_id = parsed_source_code
             if not self.ozon_kz_db_path or not self.ozon_kz_db_path.exists():
                 return []
             conn = self._connect_path(self.ozon_kz_db_path)
@@ -2498,7 +2577,7 @@ class DataService:
             finally:
                 conn.close()
         if str(code).startswith("forte:"):
-            product_id = str(code).split(":", 1)[1]
+            product_id = parsed_source_code
             conn = self._connect()
             try:
                 own = conn.execute(
@@ -2523,7 +2602,7 @@ class DataService:
             finally:
                 conn.close()
         if str(code).startswith("halyk:"):
-            product_id = str(code).split(":", 1)[1]
+            product_id = parsed_source_code
             conn = self._connect()
             try:
                 own = conn.execute(
@@ -2548,7 +2627,7 @@ class DataService:
             finally:
                 conn.close()
         if str(code).startswith("ozon:"):
-            article = str(code).split(":", 1)[1]
+            article = parsed_source_code
             if not self.ozon_db_path or not self.ozon_db_path.exists():
                 return []
             rate = float(self.preferences(user_id).get("rub_to_kzt") or 5.5)
@@ -2561,9 +2640,33 @@ class DataService:
                 return sorted([{**dict(row), "price_kzt": round(float(row["price"] or 0) * rate, 2)} for row in rows], key=lambda x: x.get("at") or "")
             finally:
                 conn.close()
-        raw_code = str(code).removeprefix("kaspi:")
+        tenant_seller_id, raw_code = parsed_seller_id, parsed_source_code
         conn = self._connect()
         try:
+            if tenant_seller_id:
+                own = conn.execute(
+                    """SELECT captured_at AS at,price_amount AS price,'own' AS series
+                       FROM tenant_seller_price_snapshots
+                       WHERE tenant_seller_id=? AND marketplace_code='kaspi'
+                         AND source_product_code=? AND status='ok'
+                         AND price_amount IS NOT NULL
+                       ORDER BY id DESC LIMIT ?""",
+                    (int(tenant_seller_id), raw_code, int(limit)),
+                ).fetchall()
+                market = conn.execute(
+                    """SELECT captured_at AS at,MIN(price_amount) AS price,
+                              'market' AS series
+                       FROM tenant_seller_offer_snapshots
+                       WHERE tenant_seller_id=? AND marketplace_code='kaspi'
+                         AND source_product_code=? AND is_own=0
+                         AND price_amount IS NOT NULL
+                       GROUP BY run_id,captured_at ORDER BY captured_at DESC LIMIT ?""",
+                    (int(tenant_seller_id), raw_code, int(limit)),
+                ).fetchall()
+                return sorted(
+                    [dict(row) for row in own] + [dict(row) for row in market],
+                    key=lambda item: item.get("at") or "",
+                )
             own = conn.execute(
                 "SELECT captured_at AS at,price_kzt AS price,'own' AS series FROM own_price_snapshots "
                 "WHERE product_code=? AND status='ok' AND price_kzt IS NOT NULL ORDER BY id DESC LIMIT ?",
@@ -2601,7 +2704,10 @@ class DataService:
         conn = self._connect()
         try:
             for code in clean_codes:
-                raw_code = code.removeprefix("kaspi:")
+                platform, seller_id, source_code = parse_product_code(code)
+                raw_code = (
+                    code if seller_id or platform != "kaspi" else source_code
+                )
                 current = conn.execute(
                     """SELECT watched,priority,note,expected_monthly_units
                        FROM tenant_product_state WHERE tenant_id=? AND product_code=?""",

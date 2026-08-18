@@ -7,6 +7,7 @@ import signal
 import subprocess
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -48,10 +49,54 @@ class TaskManager:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self._guard_local = threading.local()
+        self._state_lock_path = self.state_path.with_suffix(
+            self.state_path.suffix + ".lock"
+        )
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.log_handles: dict[str, Any] = {}
         self._enrich_cache: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
         self._normalize_state()
+        self._recover_running_tasks()
+
+    @contextmanager
+    def _state_guard(self):
+        """Serialize task-state read/modify/write across threads and processes."""
+        with self.lock:
+            depth = int(getattr(self._guard_local, "depth", 0))
+            handle = None
+            if depth == 0:
+                self._state_lock_path.parent.mkdir(parents=True, exist_ok=True)
+                handle = self._state_lock_path.open("a+b")
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                else:  # pragma: no cover - production target is Windows
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            self._guard_local.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._guard_local.depth = depth
+                if handle is not None:
+                    handle.seek(0)
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:  # pragma: no cover
+                        import fcntl
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    handle.close()
 
     def _load(self) -> dict[str, Any]:
         if not self.state_path.exists():
@@ -65,14 +110,44 @@ class TaskManager:
         return {"tasks": []}
 
     def _save(self, state: dict[str, Any]) -> None:
-        temporary = self.state_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(self.state_path)
+        temporary = self.state_path.with_suffix(
+            self.state_path.suffix + f".{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            temporary.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            temporary.replace(self.state_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _pid_alive(pid: int | None) -> bool:
         if not pid:
             return False
+
+    @staticmethod
+    def _process_identity_alive(
+        pid: int | None, expected_create_time: float | int | None
+    ) -> bool:
+        if not pid:
+            return False
+        try:
+            process = psutil.Process(int(pid))
+            if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+                return False
+            if expected_create_time not in (None, ""):
+                return abs(
+                    float(process.create_time()) - float(expected_create_time)
+                ) < 0.01
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, TypeError):
+            return False
+
+    def _task_process_alive(self, task: dict[str, Any]) -> bool:
+        return self._process_identity_alive(
+            task.get("pid"), task.get("process_create_time")
+        )
         try:
             process = psutil.Process(int(pid))
             return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
@@ -80,21 +155,67 @@ class TaskManager:
             return False
 
     def _normalize_state(self) -> None:
-        with self.lock:
+        with self._state_guard():
             state = self._load()
             changed = False
             for task in state.get("tasks", []):
-                if task.get("status") == "running" and not self._pid_alive(task.get("pid")):
+                if (
+                    task.get("status") == "running"
+                    and not self._task_process_alive(task)
+                ):
+                    # A live owner process still has a watcher responsible for
+                    # persisting the exact exit code.  Another web worker must
+                    # not race that watcher and downgrade a completed/failed
+                    # task to "interrupted" in the tiny post-exit window.
+                    if self._process_identity_alive(
+                        task.get("manager_pid"), task.get("manager_create_time")
+                    ):
+                        continue
                     task["status"] = "interrupted"
                     task["running"] = False
                     task["finished_at"] = now_iso()
-                    task["message"] = "Процесс был прерван при завершении приложения."
+                    task["message"] = "Процесс отсутствует после перезапуска приложения."
                     changed = True
             state["tasks"] = sorted(
                 state.get("tasks", []), key=lambda item: item.get("started_at") or "", reverse=True
             )[:150]
             if changed:
                 self._save(state)
+
+    def _recover_running_tasks(self) -> None:
+        with self._state_guard():
+            tasks = [
+                dict(task) for task in self._load().get("tasks", [])
+                if task.get("status") == "running" and self._task_process_alive(task)
+            ]
+        for task in tasks:
+            threading.Thread(
+                target=self._watch_recovered,
+                args=(str(task.get("id") or ""), int(task.get("pid") or 0)),
+                daemon=True,
+                name=f"task-recovery-{str(task.get('id') or '')[-12:]}",
+            ).start()
+
+    def _watch_recovered(self, task_id: str, pid: int) -> None:
+        try:
+            psutil.Process(pid).wait()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+            pass
+        with self._state_guard():
+            state = self._load()
+            task = next(
+                (item for item in state.get("tasks", []) if item.get("id") == task_id),
+                None,
+            )
+            if not task or task.get("status") != "running":
+                return
+            task["status"] = "interrupted"
+            task["running"] = False
+            task["finished_at"] = now_iso()
+            task["message"] = (
+                "Процесс завершился после перезапуска приложения; код выхода недоступен."
+            )
+            self._save(state)
 
     @staticmethod
     def _read_tail(path: Path, lines: int = 250) -> str:
@@ -207,7 +328,9 @@ class TaskManager:
         result["last_line"] = next(
             (line.strip()[-700:] for line in reversed(text.splitlines()) if line.strip()), ""
         )
-        result["running"] = result.get("status") == "running" and self._pid_alive(result.get("pid"))
+        result["running"] = (
+            result.get("status") == "running" and self._task_process_alive(result)
+        )
         if log_stat:
             try:
                 result["updated_at"] = datetime.fromtimestamp(
@@ -230,13 +353,16 @@ class TaskManager:
         return result
 
     def states(self) -> list[dict[str, Any]]:
-        self._normalize_state()
-        return [self._enrich(task) for task in self._load().get("tasks", [])]
+        with self._state_guard():
+            self._normalize_state()
+            tasks = [dict(task) for task in self._load().get("tasks", [])]
+        return [self._enrich(task) for task in tasks]
 
     def raw_states(self) -> list[dict[str, Any]]:
         """Task state without log parsing, for notifications and access checks."""
-        self._normalize_state()
-        return [dict(task) for task in self._load().get("tasks", [])]
+        with self._state_guard():
+            self._normalize_state()
+            return [dict(task) for task in self._load().get("tasks", [])]
 
     def running(self) -> list[dict[str, Any]]:
         return [task for task in self.states() if task.get("running")]
@@ -256,7 +382,7 @@ class TaskManager:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resources_value = sorted({str(item) for item in (resources or []) if str(item).strip()})
-        with self.lock:
+        with self._state_guard():
             active = self.running()
             if len(active) >= self.max_parallel:
                 raise RuntimeError(f"Одновременно можно выполнять не более {self.max_parallel} операций.")
@@ -268,13 +394,33 @@ class TaskManager:
                 )
                 raise RuntimeError(
                     f"Сейчас выполняется «{(owner or {}).get('label') or 'другая операция'}». "
-                    "Операции, использующие один браузерный профиль площадки, запускаются последовательно."
+                    "Для этого продавца уже есть активная операция; общий профиль и каталог "
+                    "продавца используются последовательно."
                 )
 
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             task_id = f"{name}_{stamp}_{uuid.uuid4().hex[:7]}"
-            log_path = self.logs_dir / f"{stamp}_{name}_{task_id[-7:]}.log"
+            metadata_value = dict(metadata or {})
+            tenant_part = f"_t{int(metadata_value.get('tenant_id') or 0)}"
+            seller_part = f"_s{int(metadata_value.get('tenant_seller_id') or 0)}"
+            log_path = self.logs_dir / (
+                f"{stamp}_{name}{tenant_part}{seller_part}_{task_id[-7:]}.log"
+            )
             log_handle = log_path.open("ab", buffering=0)
+            log_context = {
+                "timestamp": now_iso(),
+                "job_id": task_id,
+                "tenant_id": metadata_value.get("tenant_id"),
+                "tenant_seller_id": metadata_value.get("tenant_seller_id"),
+                "seller_id": metadata_value.get("seller_id"),
+                "marketplace": metadata_value.get("platform"),
+                "operation": name,
+            }
+            log_handle.write(
+                ("[JOB_CONTEXT] " + json.dumps(
+                    log_context, ensure_ascii=False, separators=(",", ":")
+                ) + "\n").encode("utf-8")
+            )
             kwargs: dict[str, Any] = {}
             creationflags = 0
             if os.name == "nt":
@@ -294,6 +440,14 @@ class TaskManager:
                 env=child_env,
                 **kwargs,
             )
+            try:
+                process_create_time = psutil.Process(process.pid).create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                process_create_time = None
+            try:
+                manager_create_time = psutil.Process(os.getpid()).create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                manager_create_time = None
             task = {
                 "id": task_id,
                 "name": name,
@@ -301,9 +455,12 @@ class TaskManager:
                 "status": "running",
                 "running": True,
                 "pid": process.pid,
+                "process_create_time": process_create_time,
+                "manager_pid": os.getpid(),
+                "manager_create_time": manager_create_time,
                 "command": command,
                 "resources": resources_value,
-                "metadata": metadata or {},
+                "metadata": metadata_value,
                 "log_file": str(log_path),
                 "started_at": now_iso(),
                 "finished_at": None,
@@ -321,7 +478,7 @@ class TaskManager:
 
     def _watch(self, task_id: str, process: subprocess.Popen[bytes]) -> None:
         code = process.wait()
-        with self.lock:
+        with self._state_guard():
             state = self._load()
             task = next((item for item in state.get("tasks", []) if item.get("id") == task_id), None)
             if task is None:
@@ -353,7 +510,7 @@ class TaskManager:
                 self.processes.pop(task_id, None)
 
     def stop(self, task_id: str) -> dict[str, Any]:
-        with self.lock:
+        with self._state_guard():
             task = self.state(task_id)
             if not task.get("running") or not task.get("pid"):
                 return task
@@ -398,7 +555,7 @@ class TaskManager:
         except psutil.NoSuchProcess:
             pass
 
-        with self.lock:
+        with self._state_guard():
             state = self._load()
             stored = next((item for item in state.get("tasks", []) if item.get("id") == task_id), None)
             if stored:
@@ -415,7 +572,7 @@ class TaskManager:
 
 
     def delete(self, task_id: str, delete_log: bool = True) -> dict[str, Any]:
-        with self.lock:
+        with self._state_guard():
             current = self.state(task_id)
             if current.get("running"):
                 raise RuntimeError("Сначала остановите выполняемую операцию.")
@@ -433,11 +590,11 @@ class TaskManager:
             return {"id": task_id, "status": "deleted", "running": False}
 
     def clear_finished(self, delete_logs: bool = True) -> int:
-        with self.lock:
+        with self._state_guard():
             state = self._load()
             active, removed = [], []
             for task in state.get("tasks", []):
-                if task.get("status") == "running" and self._pid_alive(task.get("pid")):
+                if task.get("status") == "running" and self._task_process_alive(task):
                     active.append(task)
                 else:
                     removed.append(task)

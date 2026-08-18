@@ -7,6 +7,7 @@ data/*.db*
 data/.session_secret
 data/server.pid
 data/tasks_state.json
+data/tasks_state.json.lock
 data/*.log
 logs/*.log
 output/*

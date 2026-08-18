@@ -475,10 +475,129 @@ class SaaSService:
                 item = dict(row)
                 item["config"] = _json_or_default(item.pop("config_json", "{}"), {})
                 item["discovery"] = _json_or_default(item.pop("discovery_json", "{}"), {})
+                item["sellers"] = self._seller_rows(
+                    conn, int(tenant_id), str(item.get("integration_code") or "")
+                )
                 result.append(item)
             return result
         finally:
             conn.close()
+
+    @staticmethod
+    def _seller_rows(
+        conn: sqlite3.Connection,
+        tenant_id: int,
+        marketplace_code: str = "",
+    ) -> list[dict[str, Any]]:
+        where = "tenant_id=?"
+        params: list[Any] = [int(tenant_id)]
+        if marketplace_code:
+            where += " AND marketplace_code=?"
+            params.append(str(marketplace_code))
+        result: list[dict[str, Any]] = []
+        for row in conn.execute(
+            f"""SELECT * FROM tenant_marketplace_sellers
+                 WHERE {where}
+                 ORDER BY marketplace_code,
+                          CASE WHEN status='active' AND approval_status='approved'
+                               THEN 0 ELSE 1 END,
+                          id""",
+            params,
+        ).fetchall():
+            item = dict(row)
+            item["config"] = _json_or_default(item.pop("config_json", "{}"), {})
+            item["discovery"] = _json_or_default(item.pop("discovery_json", "{}"), {})
+            item["credential_configured"] = bool(item.pop("credential_ref", None))
+            result.append(item)
+        return result
+
+    def sellers(
+        self,
+        tenant_id: int,
+        marketplace_code: str = "",
+        *,
+        active_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        code = str(marketplace_code or "").strip().casefold()
+        if code and code not in MARKETPLACE_BY_CODE:
+            raise ValueError("Неизвестная площадка.")
+        conn = self._connect()
+        try:
+            rows = self._seller_rows(conn, int(tenant_id), code)
+            if active_only:
+                rows = [
+                    item for item in rows
+                    if item.get("status") == "active"
+                    and item.get("approval_status") == "approved"
+                ]
+            return rows
+        finally:
+            conn.close()
+
+    def seller(
+        self, tenant_id: int, tenant_seller_id: int
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            rows = self._seller_rows(conn, int(tenant_id))
+            return next(
+                (item for item in rows if int(item.get("id") or 0) == int(tenant_seller_id)),
+                None,
+            )
+        finally:
+            conn.close()
+
+    def resolve_seller(
+        self,
+        tenant_id: int,
+        marketplace_code: str,
+        tenant_seller_id: int | None = None,
+        *,
+        require_active: bool = True,
+    ) -> dict[str, Any]:
+        code = str(marketplace_code or "").strip().casefold()
+        if code not in MARKETPLACE_BY_CODE:
+            raise ValueError("Неизвестная площадка.")
+        candidates = self.sellers(int(tenant_id), code, active_only=require_active)
+        if tenant_seller_id not in (None, "", 0, "0"):
+            selected = next(
+                (
+                    item for item in candidates
+                    if int(item.get("id") or 0) == int(tenant_seller_id)
+                ),
+                None,
+            )
+            if not selected:
+                raise PermissionError("Продавец не принадлежит компании или недоступен.")
+            return selected
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise ValueError("Выберите продавца для запуска операции.")
+
+        # Compatibility for installations that predate explicit seller rows.
+        connection = next(
+            (
+                item for item in self.integrations(int(tenant_id))
+                if str(item.get("integration_code") or "") == code
+            ),
+            None,
+        )
+        if connection and str(connection.get("seller_identifier") or "").strip():
+            return {
+                "id": None,
+                "tenant_id": int(tenant_id),
+                "marketplace_code": code,
+                "external_seller_id": str(connection.get("seller_identifier") or ""),
+                "display_name": str(connection.get("seller_name") or ""),
+                "source_url": str(connection.get("seller_url") or ""),
+                "status": str(connection.get("status") or ""),
+                "approval_status": str(connection.get("approval_status") or ""),
+                "config": dict(connection.get("config") or {}),
+                "discovery": dict(connection.get("discovery") or {}),
+                "legacy": True,
+            }
+        raise ValueError("Подключите и подтвердите продавца для этой площадки.")
 
     def marketplace_access(
         self, tenant_id: int, include_unavailable: bool = True
@@ -503,16 +622,34 @@ class SaaSService:
             result: list[dict[str, Any]] = []
             for definition in definitions:
                 row = rows.get(str(definition["code"])) or {}
+                sellers = self._seller_rows(
+                    conn, int(tenant_id), str(definition["code"])
+                )
+                active_sellers = [
+                    seller for seller in sellers
+                    if seller.get("status") == "active"
+                    and seller.get("approval_status") == "approved"
+                ]
+                pending_sellers = [
+                    seller for seller in sellers
+                    if seller.get("approval_status") == "pending"
+                ]
                 allowed = bool(row.get("is_allowed"))
                 approval_status = str(row.get("approval_status") or "draft")
                 connected = (
                     allowed
-                    and str(row.get("status") or "") == "active"
-                    and approval_status == "approved"
+                    and (
+                        bool(active_sellers)
+                        or (
+                            not sellers
+                            and str(row.get("status") or "") == "active"
+                            and approval_status == "approved"
+                        )
+                    )
                 )
                 connection_status = (
                     "connected" if connected
-                    else "pending" if approval_status == "pending"
+                    else "pending" if pending_sellers or approval_status == "pending"
                     else "rejected" if approval_status == "rejected"
                     else "available" if allowed
                     else "not_allowed"
@@ -532,6 +669,9 @@ class SaaSService:
                     "last_sync_at": row.get("last_sync_at"),
                     "last_error": str(row.get("last_error") or ""),
                     "granted_at": row.get("granted_at"),
+                    "sellers": sellers,
+                    "seller_count": len(sellers),
+                    "active_seller_count": len(active_sellers),
                 }
                 if include_unavailable or allowed:
                     result.append(item)
@@ -675,6 +815,16 @@ class SaaSService:
     ) -> dict[str, Any]:
         detected = self.detect_marketplace_url(tenant_id, seller_url, marketplace_code)
         stamp = now_iso()
+        discovery = {
+            "evidence": "public_url",
+            "host_verified": True,
+            "verified": True,
+            "source_scope": detected.get("source_scope") or "seller",
+            "product_id": detected.get("product_id") or "",
+            "product_slug": detected.get("product_slug") or "",
+            "input_type": detected.get("input_type") or "url",
+            "source_input": detected.get("source_input") or seller_url,
+        }
         conn = self._connect()
         try:
             tenant = conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
@@ -684,35 +834,47 @@ class SaaSService:
             conn.execute(
                 """INSERT INTO tenant_marketplace_sellers(
                        tenant_id,marketplace_code,external_seller_id,display_name,source_url,
-                       status,created_at,updated_at
-                   ) VALUES(?,?,?,?,?,'pending',?,?)
+                       status,discovery_status,approval_status,discovery_json,
+                       submitted_by,submitted_at,review_note,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,'pending','verified','pending',?,?,?,'',?,?)
                    ON CONFLICT(tenant_id,marketplace_code,external_seller_id) DO UPDATE SET
                        display_name=excluded.display_name,source_url=excluded.source_url,
-                       status='pending',updated_at=excluded.updated_at""",
+                       status='pending',discovery_status='verified',
+                       approval_status='pending',discovery_json=excluded.discovery_json,
+                       submitted_by=excluded.submitted_by,submitted_at=excluded.submitted_at,
+                       reviewed_by=NULL,reviewed_at=NULL,review_note='',
+                       updated_at=excluded.updated_at""",
                 (
                     int(tenant_id), detected["marketplace_code"], detected["seller_identifier"],
-                    detected["seller_name"], detected["seller_url"], stamp, stamp,
+                    detected["seller_name"], detected["seller_url"],
+                    json.dumps(discovery, ensure_ascii=False, separators=(",", ":")),
+                    int(actor_user_id), stamp, stamp, stamp,
                 ),
             )
-            discovery = {
-                "evidence": "public_url",
-                "host_verified": True,
-                "verified": True,
-                "source_scope": detected.get("source_scope") or "seller",
-                "product_id": detected.get("product_id") or "",
-                "product_slug": detected.get("product_slug") or "",
-                "input_type": detected.get("input_type") or "url",
-                "source_input": detected.get("source_input") or seller_url,
-            }
+            seller_row = conn.execute(
+                """SELECT id FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=? AND external_seller_id=?""",
+                (
+                    int(tenant_id), detected["marketplace_code"],
+                    detected["seller_identifier"],
+                ),
+            ).fetchone()
+            active_exists = conn.execute(
+                """SELECT 1 FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=? AND status='active'
+                     AND approval_status='approved' LIMIT 1""",
+                (int(tenant_id), detected["marketplace_code"]),
+            ).fetchone()
             conn.execute(
                 """UPDATE tenant_integrations SET seller_name=?,seller_identifier=?,seller_url=?,
-                       discovery_status='verified',approval_status='pending',discovery_json=?,
-                       status='setup',submitted_by=?,submitted_at=?,reviewed_by=NULL,
-                       reviewed_at=NULL,review_note='',updated_at=?
+                       discovery_status='verified',approval_status=?,discovery_json=?,
+                       status=?,submitted_by=?,submitted_at=?,updated_at=?
                    WHERE tenant_id=? AND integration_code=?""",
                 (
                     detected["seller_name"], detected["seller_identifier"], detected["seller_url"],
+                    "approved" if active_exists else "pending",
                     json.dumps(discovery, ensure_ascii=False, separators=(",", ":")),
+                    "active" if active_exists else "setup",
                     int(actor_user_id), stamp, stamp,
                     int(tenant_id), detected["marketplace_code"],
                 ),
@@ -724,7 +886,11 @@ class SaaSService:
             conn.commit()
         finally:
             conn.close()
-        return detected | {"is_connected": False, "approval_status": "pending"}
+        return detected | {
+            "tenant_seller_id": int(seller_row["id"]) if seller_row else None,
+            "is_connected": False,
+            "approval_status": "pending",
+        }
 
     def review_marketplace_connection(
         self,
@@ -733,6 +899,7 @@ class SaaSService:
         decision: str,
         actor_user_id: int,
         review_note: str = "",
+        tenant_seller_id: int | None = None,
     ) -> dict[str, Any]:
         code = str(marketplace_code or "").strip().casefold()
         target = str(decision or "").strip().casefold()
@@ -743,43 +910,75 @@ class SaaSService:
         stamp = now_iso()
         conn = self._connect()
         try:
-            row = conn.execute(
-                """SELECT * FROM tenant_integrations
-                   WHERE tenant_id=? AND integration_code=?""",
-                (int(tenant_id), code),
-            ).fetchone()
-            if not row:
+            params: list[Any] = [int(tenant_id), code]
+            seller_where = "tenant_id=? AND marketplace_code=? AND approval_status='pending'"
+            if tenant_seller_id not in (None, 0):
+                seller_where += " AND id=?"
+                params.append(int(tenant_seller_id))
+            pending = conn.execute(
+                f"SELECT * FROM tenant_marketplace_sellers WHERE {seller_where} ORDER BY id",
+                params,
+            ).fetchall()
+            if not pending:
                 raise ValueError("Подключение не найдено.")
-            if str(row["approval_status"] or "") != "pending":
-                raise ValueError("Заявка уже обработана или ещё не отправлена.")
-            status = "active" if target == "approved" else "disabled"
+            if len(pending) > 1:
+                raise ValueError("Укажите tenant_seller_id заявки продавца.")
+            seller_row = pending[0]
+            status = "active" if target == "approved" else "rejected"
             conn.execute(
-                """UPDATE tenant_integrations
+                """UPDATE tenant_marketplace_sellers
                    SET approval_status=?,status=?,reviewed_by=?,reviewed_at=?,
-                       review_note=?,updated_at=?
-                   WHERE tenant_id=? AND integration_code=?""",
+                       review_note=?,updated_at=? WHERE id=? AND tenant_id=?""",
                 (
                     target, status, int(actor_user_id), stamp,
-                    str(review_note or "").strip(), stamp, int(tenant_id), code,
+                    str(review_note or "").strip(), stamp,
+                    int(seller_row["id"]), int(tenant_id),
                 ),
             )
+            summary = conn.execute(
+                """SELECT * FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=?
+                   ORDER BY CASE
+                       WHEN status='active' AND approval_status='approved' THEN 0
+                       WHEN approval_status='pending' THEN 1 ELSE 2 END,
+                       COALESCE(reviewed_at,submitted_at,updated_at) DESC,id DESC LIMIT 1""",
+                (int(tenant_id), code),
+            ).fetchone()
+            active_count = int(conn.execute(
+                """SELECT COUNT(*) FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=? AND status='active'
+                     AND approval_status='approved'""",
+                (int(tenant_id), code),
+            ).fetchone()[0])
+            pending_count = int(conn.execute(
+                """SELECT COUNT(*) FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=? AND approval_status='pending'""",
+                (int(tenant_id), code),
+            ).fetchone()[0])
+            summary_status = "active" if active_count else "setup" if pending_count else "disabled"
+            summary_approval = "approved" if active_count else "pending" if pending_count else target
             conn.execute(
-                """UPDATE tenant_marketplace_sellers SET status=?,updated_at=?
-                   WHERE tenant_id=? AND marketplace_code=?""",
+                """UPDATE tenant_integrations
+                   SET seller_name=?,seller_identifier=?,seller_url=?,approval_status=?,
+                       status=?,reviewed_by=?,reviewed_at=?,review_note=?,updated_at=?
+                   WHERE tenant_id=? AND integration_code=?""",
                 (
-                    "active" if target == "approved" else "rejected",
-                    stamp, int(tenant_id), code,
+                    str(summary["display_name"] if summary else ""),
+                    str(summary["external_seller_id"] if summary else ""),
+                    str(summary["source_url"] if summary else ""),
+                    summary_approval, summary_status, int(actor_user_id), stamp,
+                    str(review_note or "").strip(), stamp, int(tenant_id), code,
                 ),
             )
             self._audit(
                 conn, actor_user_id, f"tenant_marketplace_{target}", int(tenant_id),
-                "tenant_integration", code, {"review_note": review_note},
+                "tenant_marketplace_seller", str(seller_row["id"]),
+                {"review_note": review_note, "marketplace_code": code},
             )
             conn.commit()
             result = conn.execute(
-                """SELECT * FROM tenant_integrations
-                   WHERE tenant_id=? AND integration_code=?""",
-                (int(tenant_id), code),
+                "SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?",
+                (int(seller_row["id"]), int(tenant_id)),
             ).fetchone()
             return dict(result) if result else {}
         finally:
@@ -1540,7 +1739,15 @@ class SaaSService:
         conn=self._connect()
         try:
             out=[]
-            for row in conn.execute("SELECT * FROM operation_schedules WHERE tenant_id=? ORDER BY is_enabled DESC,next_run_at,name",(int(tenant_id),)).fetchall():
+            for row in conn.execute(
+                """SELECT os.*,s.external_seller_id,s.display_name AS seller_name
+                   FROM operation_schedules os
+                   LEFT JOIN tenant_marketplace_sellers s
+                     ON s.id=os.tenant_seller_id AND s.tenant_id=os.tenant_id
+                   WHERE os.tenant_id=?
+                   ORDER BY os.is_enabled DESC,os.next_run_at,os.name""",
+                (int(tenant_id),),
+            ).fetchall():
                 item=dict(row)
                 try:item["weekdays"]=json.loads(item.pop("weekdays_json") or "[]")
                 except json.JSONDecodeError:item["weekdays"]=[]
@@ -1551,8 +1758,11 @@ class SaaSService:
     def schedule(self,schedule_id:int,tenant_id:int|None=None)->dict[str,Any]|None:
         conn=self._connect()
         try:
-            q="SELECT * FROM operation_schedules WHERE id=?"; params=[int(schedule_id)]
-            if tenant_id is not None:q+=" AND tenant_id=?"; params.append(int(tenant_id))
+            q=("SELECT os.*,s.external_seller_id,s.display_name AS seller_name "
+               "FROM operation_schedules os LEFT JOIN tenant_marketplace_sellers s "
+               "ON s.id=os.tenant_seller_id AND s.tenant_id=os.tenant_id WHERE os.id=?")
+            params=[int(schedule_id)]
+            if tenant_id is not None:q+=" AND os.tenant_id=?"; params.append(int(tenant_id))
             row=conn.execute(q,params).fetchone()
             if not row:return None
             item=dict(row)
@@ -1594,20 +1804,32 @@ class SaaSService:
             raise ValueError("Для однократного запуска выберите будущую дату и время.")
 
         platform = marketplace_for_action(action)
+        requested_seller_id = int(payload.get("tenant_seller_id") or 0)
+        selected_seller_id: int | None = None
+        if platform in MARKETPLACE_BY_CODE:
+            active_sellers = self.sellers(
+                int(tenant_id), platform, active_only=True
+            )
+            if requested_seller_id or active_sellers:
+                selected = self.resolve_seller(
+                    int(tenant_id), platform, requested_seller_id or None
+                )
+                selected_seller_id = int(selected.get("id") or 0) or None
         stamp = now_iso()
         conn = self._connect()
         try:
             cur = conn.execute(
                 """
                 INSERT INTO operation_schedules(
-                    tenant_id,name,action,platform,scope,recurrence_type,time_of_day,
+                    tenant_id,name,action,platform,tenant_seller_id,scope,recurrence_type,time_of_day,
                     run_date,weekdays_json,interval_minutes,is_enabled,retry_count,
                     max_duration_minutes,next_run_at,created_by,created_at,updated_at
                 )
-                VALUES(?,?,?,?, 'all',?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,'all',?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
-                    int(tenant_id), name, action, platform, recurrence, tod,
+                    int(tenant_id), name, action, platform, selected_seller_id,
+                    recurrence, tod,
                     run_date, json.dumps(weekdays), interval,
                     1 if enabled else 0,
                     max(0, min(int(payload.get("retry_count") or 1), 5)),
@@ -1656,6 +1878,19 @@ class SaaSService:
         if recurrence == "once" and enabled and next_run is None:
             raise ValueError("Для однократного запуска выберите будущую дату и время.")
 
+        platform = str(current.get("platform") or marketplace_for_action(current["action"]))
+        requested_seller_id = int(merged.get("tenant_seller_id") or 0)
+        selected_seller_id: int | None = None
+        if platform in MARKETPLACE_BY_CODE:
+            active_sellers = self.sellers(
+                int(tenant_id), platform, active_only=True
+            )
+            if requested_seller_id or active_sellers:
+                selected = self.resolve_seller(
+                    int(tenant_id), platform, requested_seller_id or None
+                )
+                selected_seller_id = int(selected.get("id") or 0) or None
+
         conn = self._connect()
         try:
             conn.execute(
@@ -1663,7 +1898,7 @@ class SaaSService:
                 UPDATE operation_schedules
                 SET name=?,recurrence_type=?,time_of_day=?,run_date=?,
                     weekdays_json=?,interval_minutes=?,is_enabled=?,retry_count=?,
-                    max_duration_minutes=?,next_run_at=?,updated_at=?
+                    max_duration_minutes=?,next_run_at=?,tenant_seller_id=?,updated_at=?
                 WHERE id=? AND tenant_id=?
                 """,
                 (
@@ -1672,7 +1907,8 @@ class SaaSService:
                     1 if enabled else 0,
                     max(0, min(int(merged.get("retry_count") or 1), 5)),
                     max(10, min(int(merged.get("max_duration_minutes") or 180), 1440)),
-                    next_run, now_iso(), int(schedule_id), int(tenant_id),
+                    next_run, selected_seller_id, now_iso(),
+                    int(schedule_id), int(tenant_id),
                 ),
             )
             self._audit(
@@ -1696,6 +1932,19 @@ class SaaSService:
         try:return [dict(r) for r in conn.execute("SELECT r.*,s.name schedule_name,s.action,s.platform FROM schedule_runs r JOIN operation_schedules s ON s.id=r.schedule_id WHERE r.tenant_id=? ORDER BY r.started_at DESC LIMIT ?",(int(tenant_id),max(1,min(int(limit),200)))).fetchall()]
         finally:conn.close()
 
+    def active_schedule_runs(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            return [dict(row) for row in conn.execute(
+                """SELECT r.*,s.action,s.platform,s.created_by
+                   FROM schedule_runs r
+                   JOIN operation_schedules s ON s.id=r.schedule_id
+                   WHERE r.status IN ('queued','running')
+                   ORDER BY r.started_at"""
+            ).fetchall()]
+        finally:
+            conn.close()
+
     def due_schedules(self)->list[dict[str,Any]]:
         conn=self._connect()
         try:return [dict(r) for r in conn.execute("""
@@ -1710,7 +1959,7 @@ class SaaSService:
             """).fetchall()]
         finally:conn.close()
 
-    def begin_schedule_run(self, schedule: dict[str, Any]) -> int:
+    def begin_schedule_run(self, schedule: dict[str, Any]) -> int | None:
         try:
             weekdays = json.loads(schedule.get("weekdays_json") or "[]")
         except json.JSONDecodeError:
@@ -1733,13 +1982,35 @@ class SaaSService:
         stamp = now_iso()
         conn = self._connect()
         try:
+            if isinstance(conn, PostgresConnection):
+                current = conn.execute(
+                    "SELECT * FROM operation_schedules WHERE id=? FOR UPDATE",
+                    (int(schedule["id"]),),
+                ).fetchone()
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT * FROM operation_schedules WHERE id=?",
+                    (int(schedule["id"]),),
+                ).fetchone()
+            if (
+                not current
+                or not bool(current["is_enabled"])
+                or not current["next_run_at"]
+                or str(current["next_run_at"]) != str(schedule.get("next_run_at") or "")
+            ):
+                conn.rollback()
+                return None
             cur = conn.execute(
                 """
                 INSERT INTO schedule_runs(
-                    schedule_id,tenant_id,status,message,started_at
-                ) VALUES(?,?,'queued','Ожидает запуска',?)
+                    schedule_id,tenant_id,tenant_seller_id,status,message,started_at
+                ) VALUES(?,?,?,'queued','Ожидает запуска',?)
                 """,
-                (int(schedule["id"]), int(schedule["tenant_id"]), stamp),
+                (
+                    int(schedule["id"]), int(schedule["tenant_id"]),
+                    schedule.get("tenant_seller_id"), stamp,
+                ),
             )
             conn.execute(
                 """

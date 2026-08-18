@@ -18,7 +18,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "port": 8765,
         "open_browser": True,
         "session_hours": 12,
-        "max_parallel_tasks": 3,
+        "max_parallel_tasks": 6,
         "product_page_size": 30,
     },
     "kaspi": {

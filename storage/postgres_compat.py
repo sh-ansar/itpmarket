@@ -20,16 +20,24 @@ _METADATA_CACHE: dict[
 ] = {}
 _METADATA_LOCK = threading.Lock()
 _POOL_LOCK = threading.Lock()
-_CONNECTION_POOLS: dict[tuple[str, str], queue.LifoQueue[Any]] = {}
+class _PostgresPool:
+    """A bounded idle cache plus a hard cap on checked-out connections."""
+
+    def __init__(self, size: int) -> None:
+        self.idle: queue.LifoQueue[Any] = queue.LifoQueue(maxsize=size)
+        self.slots = threading.BoundedSemaphore(value=size)
+
+
+_CONNECTION_POOLS: dict[tuple[str, str], _PostgresPool] = {}
 _POOL_SIZE = max(2, min(int(os.environ.get("ITP_POSTGRES_POOL_SIZE", "8")), 32))
 
 
-def _postgres_pool(database_url: str, schema: str) -> queue.LifoQueue[Any]:
+def _postgres_pool(database_url: str, schema: str) -> _PostgresPool:
     key = (database_url, schema)
     with _POOL_LOCK:
         pool = _CONNECTION_POOLS.get(key)
         if pool is None:
-            pool = queue.LifoQueue(maxsize=_POOL_SIZE)
+            pool = _PostgresPool(_POOL_SIZE)
             _CONNECTION_POOLS[key] = pool
         return pool
 
@@ -174,7 +182,7 @@ class PostgresCursor:
 
 
 class PostgresConnection:
-    def __init__(self, database_url: str, schema: str) -> None:
+    def __init__(self, database_url: str, schema: str, timeout: float = 30) -> None:
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover
@@ -183,41 +191,58 @@ class PostgresConnection:
         self._pool = _postgres_pool(database_url, schema)
         self._closed = False
         self.raw = None
-        while self.raw is None:
-            try:
-                candidate = self._pool.get_nowait()
-            except queue.Empty:
-                candidate = None
-            if candidate is None:
-                self.raw = psycopg.connect(database_url, row_factory=_hybrid_row_factory)
-                self.raw.execute(f'SET search_path TO "{schema}"')
-                # Persist the session setting before any read-only caller can
-                # return the connection with a rollback.
-                self.raw.commit()
-                break
-            if not bool(getattr(candidate, "closed", True)):
+        acquired = self._pool.slots.acquire(timeout=max(0.0, float(timeout)))
+        if not acquired:
+            raise TimeoutError(
+                f"PostgreSQL connection pool exhausted after {float(timeout):g}s."
+            )
+        try:
+            while self.raw is None:
                 try:
-                    candidate.rollback()
-                    self.raw = candidate
-                except Exception:
+                    candidate = self._pool.idle.get_nowait()
+                except queue.Empty:
+                    candidate = None
+                if candidate is None:
+                    self.raw = psycopg.connect(database_url, row_factory=_hybrid_row_factory)
+                    self.raw.execute(f'SET search_path TO "{schema}"')
+                    # Persist the session setting before any read-only caller can
+                    # return the connection with a rollback.
+                    self.raw.commit()
+                    break
+                if not bool(getattr(candidate, "closed", True)):
                     try:
-                        candidate.close()
+                        candidate.rollback()
+                        self.raw = candidate
                     except Exception:
-                        pass
+                        try:
+                            candidate.close()
+                        except Exception:
+                            pass
+        except Exception:
+            self._pool.slots.release()
+            raise
         self._primary_keys: dict[str, tuple[str, ...]] = {}
         self._identity_keys: dict[str, str] = {}
         cache_key = (database_url, schema)
-        with _METADATA_LOCK:
-            cached = _METADATA_CACHE.get(cache_key)
-        if cached is None:
-            self._load_metadata()
+        try:
             with _METADATA_LOCK:
-                _METADATA_CACHE[cache_key] = (
-                    dict(self._primary_keys), dict(self._identity_keys)
-                )
-        else:
-            self._primary_keys = dict(cached[0])
-            self._identity_keys = dict(cached[1])
+                cached = _METADATA_CACHE.get(cache_key)
+            if cached is None:
+                self._load_metadata()
+                with _METADATA_LOCK:
+                    _METADATA_CACHE[cache_key] = (
+                        dict(self._primary_keys), dict(self._identity_keys)
+                    )
+            else:
+                self._primary_keys = dict(cached[0])
+                self._identity_keys = dict(cached[1])
+        except Exception:
+            try:
+                self.raw.close()
+            finally:
+                self._closed = True
+                self._pool.slots.release()
+            raise
 
     @property
     def row_factory(self) -> Any:
@@ -406,17 +431,20 @@ class PostgresConnection:
             return
         self._closed = True
         try:
-            self.raw.rollback()
-        except Exception:
             try:
-                self.raw.close()
+                self.raw.rollback()
             except Exception:
-                pass
-            return
-        try:
-            self._pool.put_nowait(self.raw)
-        except queue.Full:
-            self.raw.close()
+                try:
+                    self.raw.close()
+                except Exception:
+                    pass
+                return
+            try:
+                self._pool.idle.put_nowait(self.raw)
+            except queue.Full:
+                self.raw.close()
+        finally:
+            self._pool.slots.release()
 
     def __enter__(self) -> "PostgresConnection":
         return self
@@ -439,7 +467,9 @@ def connect_database(
     settings = DatabaseSettings.from_environment()
     if settings.backend is DatabaseBackend.SQLITE:
         return sqlite3.connect(path, timeout=timeout, uri=uri)
-    return PostgresConnection(settings.database_url, schema or _schema_for_path(path))
+    return PostgresConnection(
+        settings.database_url, schema or _schema_for_path(path), timeout=timeout
+    )
 
 
 def database_error_types() -> tuple[type[BaseException], ...]:

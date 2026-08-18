@@ -174,8 +174,8 @@
   const taskStatusTone = v=>({running:'info',completed:'success',failed:'danger',stopped:'warning',interrupted:'warning'}[v]||'neutral');
   const durationText = seconds => { const total=Math.max(0, Math.round(Number(seconds||0))); if(total<60) return `${total} сек`; const mins=Math.floor(total/60); const secs=total%60; if(mins<60) return secs?`${mins} мин ${secs} сек`:`${mins} мин`; const hours=Math.floor(mins/60); const rest=mins%60; return rest?`${hours} ч ${rest} мин`:`${hours} ч`; };
   const operationLaunchers = [
-    {platform:'operationPlatform', action:'operationAction', scope:'operationScope', launch:'launchOperation'},
-    {platform:'opsOperationPlatform', action:'opsOperationAction', scope:'opsOperationScope', launch:'opsLaunchOperation'}
+    {platform:'operationPlatform', seller:'operationSeller', action:'operationAction', scope:'operationScope', launch:'launchOperation'},
+    {platform:'opsOperationPlatform', seller:'opsOperationSeller', action:'opsOperationAction', scope:'opsOperationScope', launch:'opsLaunchOperation'}
   ];
   const flatActions = () => Object.entries(ACTIONS).flatMap(([platform,items])=>items.map(([id,label])=>({id,label,platform})));
   const actionInfo = id => flatActions().find(item=>item.id===id) || (LEGACY_ACTIONS[id]?{id,label:LEGACY_ACTIONS[id][0],platform:LEGACY_ACTIONS[id][1]}:{id,label:id,platform:'system'});
@@ -521,6 +521,14 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     const platformNode=$('#'+ids.platform), actionNode=$('#'+ids.action), scopeNode=$('#'+ids.scope);
     if(!platformNode||!actionNode||!scopeNode)return;
     const platform=platformNode.value;
+    const sellerNode=$('#'+ids.seller),sellerField=$('#'+ids.seller+'Field');
+    const sellers=(user.marketplace_sellers?.[platform]||[]);
+    if(sellerNode){
+      const previousSeller=sellerNode.value;
+      sellerNode.innerHTML=sellers.map(item=>`<option value="${Number(item.id)}">${esc(item.display_name||item.external_seller_id||`#${item.id}`)}</option>`).join('');
+      if([...sellerNode.options].some(option=>option.value===previousSeller))sellerNode.value=previousSeller;
+      if(sellerField)sellerField.hidden=!sellers.length||platform==='system';
+    }
     const previous=actionNode.value;
     actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>(id!=='backup_database'||user.platform_role==='superadmin')&&(id!=='full_sync_all'||visibleMarketplaceCodes().length>1)).map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
     if([...actionNode.options].some(option=>option.value===previous))actionNode.value=previous;
@@ -531,6 +539,12 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   async function startTask(action,scope='all',codes=[],filters=null,options={}){
     try{
       const body={action,scope,codes};if(filters)body.filters=filters;
+      const platform=actionInfo(action).platform;
+      const sellers=user.marketplace_sellers?.[platform]||[];
+      const inferred=[...new Set((codes||[]).map(code=>String(code).match(/^[^:]+:s(\d+):/)?.[1]).filter(Boolean))];
+      const sellerId=Number(options.tenantSellerId||((inferred.length===1)&&inferred[0])||(sellers.length===1&&sellers[0].id)||0);
+      if(sellers.length>1&&!sellerId)throw new Error('Выберите продавца для запуска операции.');
+      if(sellerId)body.tenant_seller_id=sellerId;
       const d=await api('/api/tasks/start',{method:'POST',body});
       toast(`Запущено: ${d.task?.label || action}`);
       if(d&&d.task){const idx=state.tasks.findIndex(t=>t.id===d.task.id);if(idx>=0)state.tasks[idx]=d.task;else state.tasks.unshift(d.task);renderTasks();}else{loadTasks();}
@@ -783,7 +797,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
               <h3>${esc(x.name)}</h3>
               <span class="schedule-platform">${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).platform||x.platform||'')}</span>
             </div>
-            <p>${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).name||x.action)}</p>
+            <p>${esc((state.scheduleActions.find(a=>a.code===x.action)||{}).name||x.action)}${x.seller_name?` · ${esc(x.seller_name)}`:''}</p>
             <div class="schedule-rule-row">
               ${scheduleRuleHtml(x)}
               <strong>${esc(recurrenceText(x))}</strong>
@@ -840,6 +854,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       form.elements.recurrence_type.value='weekly';
       form.elements.time_of_day.value='03:00';
     }
+    updateScheduleSeller(item?.tenant_seller_id||null);
     updateScheduleFields();
     showModal('scheduleModal');
   }
@@ -866,6 +881,18 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     $('#scheduleTimeField').hidden=type==='interval';
     $('#scheduleIntervalField').hidden=type!=='interval';
     $('#scheduleWeekdays').hidden=type!=='weekly';
+  }
+
+  function updateScheduleSeller(preferred=null){
+    const action=$('#scheduleAction')?.value||'';
+    const platform=actionInfo(action).platform;
+    const sellers=user.marketplace_sellers?.[platform]||[];
+    const select=$('#scheduleSeller'),field=$('#scheduleSellerField');
+    if(!select||!field)return;
+    select.innerHTML=sellers.map(item=>`<option value="${Number(item.id)}">${esc(item.display_name||item.external_seller_id||`#${item.id}`)}</option>`).join('');
+    if(preferred&&[...select.options].some(option=>Number(option.value)===Number(preferred)))select.value=String(preferred);
+    field.hidden=!sellers.length;
+    select.required=sellers.length>1;
   }
 
   async function createSchedule(e){
@@ -997,7 +1024,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     $$('#scopeTabs button').forEach(b=>b.onclick=()=>{state.products.scope=b.dataset.scope;state.products.page=1;$$('#scopeTabs button').forEach(x=>x.classList.toggle('active',x===b));updateFilterResetVisibility();loadProducts()});
     $('#prevPage').onclick=()=>{if(state.products.page>1){state.products.page--;loadProducts()}};$('#nextPage').onclick=()=>{if(state.products.page<state.products.pages){state.products.page++;loadProducts()}};
     $('#selectPage').onchange=e=>{state.products.items.forEach(p=>e.target.checked?state.selected.add(p.product_code):state.selected.delete(p.product_code));renderProducts(state.products.items)};$('#clearSelection').onclick=()=>{state.selected.clear();renderProducts(state.products.items)};$('#watchSelected').onclick=setWatch;$('#analyzeSelected').onclick=analyzeSelectedProducts;$('#exportSelected').onclick=()=>startTask('export_report','selected',[...state.selected]);$('#selectedReport').onclick=()=>exportVisibleProducts();
-    operationLaunchers.forEach(ids=>{const platformNode=$('#'+ids.platform),launchNode=$('#'+ids.launch);if(platformNode)platformNode.onchange=updateOperationActions;if(launchNode)launchNode.onclick=()=>{const scope=$('#'+ids.scope).value,codes=scope==='selected'?[...state.selected]:[],filters=scope==='filtered'?productFiltersPayload():null;startTask($('#'+ids.action).value,scope,codes,filters)}});
+    operationLaunchers.forEach(ids=>{const platformNode=$('#'+ids.platform),launchNode=$('#'+ids.launch);if(platformNode)platformNode.onchange=updateOperationActions;if(launchNode)launchNode.onclick=()=>{const scope=$('#'+ids.scope).value,codes=scope==='selected'?[...state.selected]:[],filters=scope==='filtered'?productFiltersPayload():null;startTask($('#'+ids.action).value,scope,codes,filters,{tenantSellerId:Number($('#'+ids.seller)?.value||0)})}});
     if($('#clearOperations'))$('#clearOperations').onclick=async()=>{if(!confirm('Удалить историю завершённых операций и журналы?'))return;try{await api('/api/tasks',{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}};$('#refreshLog').onclick=refreshLog;$('#stopTask').onclick=()=>stopTask(state.currentTask);
     $('#generateReport').onclick=generateFilteredReport;if($('#refreshReportPreview'))$('#refreshReportPreview').onclick=loadReports;
     ['reportPlatforms','reportScope','reportBrand','reportFreshness','reportProductType','reportSize','reportSeason','reportCharacteristicGroup'].forEach(id=>{if($('#'+id))$('#'+id).onchange=queueReportLoad});
@@ -1006,7 +1033,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#enableVisibleCatalogFilters'))$('#enableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=true);queueCatalogFilterSave()};
     if($('#disableVisibleCatalogFilters'))$('#disableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=false);queueCatalogFilterSave()};
     if($('#refreshCatalogAttributes'))$('#refreshCatalogAttributes').onclick=async()=>{try{await api('/api/catalog/attributes/refresh',{method:'POST',timeoutMs:120000});await loadCatalogConfiguration({settings:true});toast('Характеристики обновлены');}catch(e){toast(e.message,true)}};
-    $('#saveSettings').onclick=saveSettings;if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
+    $('#saveSettings').onclick=saveSettings;if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleAction'))$('#scheduleAction').onchange=()=>updateScheduleSeller();if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
     $('#passwordForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));try{await api('/api/account/password',{method:'POST',body:f});toast(t('password_changed','Пароль изменён'));hideModals();e.target.reset();}catch(err){toast(err.message,true)}};
     if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};
     document.addEventListener('click',e=>{closeMultiSelects();const menu=$('#profileMenu'),button=$('#profileButton');if(menu&&!menu.hidden&&!menu.contains(e.target)&&!button.contains(e.target))menu.hidden=true;const nav=$('#sidebar'),mobile=$('#mobileMenu');if(nav?.classList.contains('open')&&!nav.contains(e.target)&&!mobile?.contains(e.target)){nav.classList.remove('open');mobile?.setAttribute('aria-expanded','false')};$$('.modal:not([hidden])').forEach(modal=>{if(e.target===modal)modal.hidden=true});});

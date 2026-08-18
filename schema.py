@@ -370,13 +370,125 @@ CREATE TABLE IF NOT EXISTS tenant_marketplace_sellers (
     source_url TEXT NOT NULL DEFAULT '',
     credential_ref TEXT,
     status TEXT NOT NULL DEFAULT 'setup',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    discovery_status TEXT NOT NULL DEFAULT 'idle',
+    approval_status TEXT NOT NULL DEFAULT 'draft',
+    discovery_json TEXT NOT NULL DEFAULT '{}',
+    submitted_by INTEGER,
+    submitted_at TEXT,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    review_note TEXT NOT NULL DEFAULT '',
+    product_count INTEGER NOT NULL DEFAULT 0,
+    last_sync_at TEXT,
+    last_status TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(tenant_id,marketplace_code,external_seller_id),
-    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(submitted_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_sellers_marketplace
 ON tenant_marketplace_sellers(tenant_id,marketplace_code,status);
+CREATE TABLE IF NOT EXISTS tenant_seller_catalog_products (
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER NOT NULL,
+    source_product_code TEXT NOT NULL,
+    catalog_id INTEGER,
+    seller_sku TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    brand TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    image_url TEXT NOT NULL DEFAULT '',
+    category_name TEXT NOT NULL DEFAULT '',
+    price_amount REAL,
+    currency TEXT NOT NULL DEFAULT '',
+    availability_status TEXT NOT NULL DEFAULT '',
+    attributes_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    source_updated_at TEXT,
+    PRIMARY KEY(tenant_id,marketplace_code,tenant_seller_id,source_product_code),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE,
+    FOREIGN KEY(catalog_id) REFERENCES tenant_catalogs(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_seller_products_visible
+ON tenant_seller_catalog_products(
+    tenant_id,marketplace_code,tenant_seller_id,active,last_seen_at
+);
+
+CREATE TABLE IF NOT EXISTS tenant_seller_price_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER NOT NULL,
+    source_product_code TEXT NOT NULL,
+    seller_sku TEXT NOT NULL DEFAULT '',
+    price_amount REAL,
+    price_before_discount REAL,
+    discount_percent REAL,
+    currency TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    captured_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_seller_price_history
+ON tenant_seller_price_snapshots(
+    tenant_id,marketplace_code,tenant_seller_id,source_product_code,captured_at DESC
+);
+
+CREATE TABLE IF NOT EXISTS tenant_seller_offer_scans (
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER NOT NULL,
+    source_product_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    offers_count INTEGER NOT NULL DEFAULT 0,
+    competitor_count INTEGER NOT NULL DEFAULT 0,
+    min_price REAL,
+    max_price REAL,
+    duration_seconds REAL,
+    error TEXT NOT NULL DEFAULT '',
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY(
+        tenant_id,marketplace_code,tenant_seller_id,source_product_code
+    ),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tenant_seller_offer_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    tenant_seller_id INTEGER NOT NULL,
+    source_product_code TEXT NOT NULL,
+    merchant_id TEXT NOT NULL DEFAULT '',
+    merchant_name TEXT NOT NULL DEFAULT '',
+    merchant_sku TEXT NOT NULL DEFAULT '',
+    price_amount REAL,
+    currency TEXT NOT NULL DEFAULT '',
+    merchant_rating REAL,
+    merchant_reviews INTEGER,
+    is_own INTEGER NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_seller_offer_history
+ON tenant_seller_offer_snapshots(
+    tenant_id,marketplace_code,tenant_seller_id,source_product_code,captured_at DESC
+);
 
 CREATE TABLE IF NOT EXISTS tenant_catalogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -498,6 +610,25 @@ CREATE TABLE IF NOT EXISTS encrypted_credentials (
 CREATE INDEX IF NOT EXISTS idx_encrypted_credentials_tenant
 ON encrypted_credentials(tenant_id,marketplace_code,credential_name);
 
+CREATE TABLE IF NOT EXISTS seller_encrypted_credentials (
+    credential_ref TEXT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    tenant_seller_id INTEGER NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    credential_name TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id,tenant_seller_id,marketplace_code,credential_name),
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seller_encrypted_credentials_tenant
+ON seller_encrypted_credentials(tenant_id,tenant_seller_id,marketplace_code,credential_name);
+
 CREATE TABLE IF NOT EXISTS registration_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_name TEXT NOT NULL,
@@ -595,6 +726,7 @@ CREATE TABLE IF NOT EXISTS operation_schedules (
     name TEXT NOT NULL,
     action TEXT NOT NULL,
     platform TEXT NOT NULL,
+    tenant_seller_id INTEGER,
     scope TEXT NOT NULL DEFAULT 'all',
     recurrence_type TEXT NOT NULL DEFAULT 'daily',
     time_of_day TEXT,
@@ -612,6 +744,7 @@ CREATE TABLE IF NOT EXISTS operation_schedules (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE CASCADE,
     FOREIGN KEY(created_by) REFERENCES app_users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_operation_schedules_due ON operation_schedules(is_enabled, next_run_at, tenant_id);
@@ -620,13 +753,15 @@ CREATE TABLE IF NOT EXISTS schedule_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     schedule_id INTEGER NOT NULL,
     tenant_id INTEGER NOT NULL,
+    tenant_seller_id INTEGER,
     task_id TEXT,
     status TEXT NOT NULL,
     message TEXT,
     started_at TEXT NOT NULL,
     finished_at TEXT,
     FOREIGN KEY(schedule_id) REFERENCES operation_schedules(id) ON DELETE CASCADE,
-    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_seller_id) REFERENCES tenant_marketplace_sellers(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_runs_time ON schedule_runs(schedule_id, started_at DESC);
 
@@ -1041,6 +1176,10 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE registration_requests ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
         if "run_date" not in _columns(conn, "operation_schedules"):
             conn.execute("ALTER TABLE operation_schedules ADD COLUMN run_date TEXT")
+        if "tenant_seller_id" not in _columns(conn, "operation_schedules"):
+            conn.execute("ALTER TABLE operation_schedules ADD COLUMN tenant_seller_id INTEGER")
+        if "tenant_seller_id" not in _columns(conn, "schedule_runs"):
+            conn.execute("ALTER TABLE schedule_runs ADD COLUMN tenant_seller_id INTEGER")
         if "platform_role" not in _columns(conn, "app_users"):
             conn.execute("ALTER TABLE app_users ADD COLUMN platform_role TEXT NOT NULL DEFAULT ''")
         if "tenant_id" not in _columns(conn, "app_events"):
@@ -1073,6 +1212,33 @@ def ensure_database(path: Path) -> None:
                 conn.execute(
                     f"ALTER TABLE tenant_integrations ADD COLUMN {column} {declaration}"
                 )
+        seller_columns = _columns(conn, "tenant_marketplace_sellers")
+        seller_migrations = (
+            ("config_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("discovery_status", "TEXT NOT NULL DEFAULT 'idle'"),
+            ("approval_status", "TEXT NOT NULL DEFAULT 'draft'"),
+            ("discovery_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("submitted_by", "INTEGER"),
+            ("submitted_at", "TEXT"),
+            ("reviewed_by", "INTEGER"),
+            ("reviewed_at", "TEXT"),
+            ("review_note", "TEXT NOT NULL DEFAULT ''"),
+            ("product_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_sync_at", "TEXT"),
+            ("last_status", "TEXT"),
+            ("last_error", "TEXT NOT NULL DEFAULT ''"),
+        )
+        for column, declaration in seller_migrations:
+            if column not in seller_columns:
+                conn.execute(
+                    f"ALTER TABLE tenant_marketplace_sellers ADD COLUMN {column} {declaration}"
+                )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_tenant_sellers_approval
+               ON tenant_marketplace_sellers(
+                   tenant_id,marketplace_code,approval_status,status
+               )"""
+        )
         conn.execute(
             """CREATE INDEX IF NOT EXISTS idx_tenant_integrations_approval
                ON tenant_integrations(approval_status,submitted_at,tenant_id,integration_code)"""
@@ -1315,6 +1481,115 @@ def ensure_database(path: Path) -> None:
             """,
             (default_tenant_id,),
         )
+
+        # One-time, non-destructive multi-seller compatibility backfill.  The
+        # historic marketplace integration remains as a summary card; every
+        # concrete account and listing now receives an unambiguous seller key.
+        migration_done = conn.execute(
+            "SELECT 1 FROM metadata WHERE key='schema_multi_seller_v1_backfilled'"
+        ).fetchone()
+        if migration_done is None:
+            conn.execute(
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,source_url,
+                       status,config_json,discovery_status,approval_status,discovery_json,
+                       submitted_by,submitted_at,reviewed_by,reviewed_at,review_note,
+                       product_count,last_sync_at,last_status,last_error,created_at,updated_at
+                   )
+                   SELECT ti.tenant_id,ti.integration_code,ti.seller_identifier,
+                          ti.seller_name,ti.seller_url,
+                          CASE WHEN ti.status='active' AND ti.approval_status='approved'
+                               THEN 'active' ELSE ti.status END,
+                          ti.config_json,ti.discovery_status,ti.approval_status,
+                          ti.discovery_json,ti.submitted_by,ti.submitted_at,
+                          ti.reviewed_by,ti.reviewed_at,ti.review_note,ti.product_count,
+                          ti.last_sync_at,ti.last_status,COALESCE(ti.last_error,''),
+                          ti.created_at,ti.updated_at
+                   FROM tenant_integrations ti
+                   WHERE TRIM(COALESCE(ti.seller_identifier,''))<>''
+                     AND ti.seller_identifier NOT LIKE 'candidate:%'
+                   ON CONFLICT(tenant_id,marketplace_code,external_seller_id) DO NOTHING"""
+            )
+            conn.execute(
+                """UPDATE tenant_marketplace_sellers
+                   SET config_json=COALESCE((
+                           SELECT ti.config_json FROM tenant_integrations ti
+                           WHERE ti.tenant_id=tenant_marketplace_sellers.tenant_id
+                             AND ti.integration_code=tenant_marketplace_sellers.marketplace_code
+                             AND ti.seller_identifier=tenant_marketplace_sellers.external_seller_id
+                       ),config_json),
+                       discovery_status=COALESCE((
+                           SELECT ti.discovery_status FROM tenant_integrations ti
+                           WHERE ti.tenant_id=tenant_marketplace_sellers.tenant_id
+                             AND ti.integration_code=tenant_marketplace_sellers.marketplace_code
+                             AND ti.seller_identifier=tenant_marketplace_sellers.external_seller_id
+                       ),discovery_status),
+                       approval_status=CASE
+                           WHEN status='active' THEN 'approved'
+                           WHEN status='pending' THEN 'pending'
+                           WHEN status='rejected' THEN 'rejected'
+                           ELSE approval_status END"""
+            )
+
+            product_columns = (
+                "tenant_id", "marketplace_code", "tenant_seller_id",
+                "source_product_code", "catalog_id", "seller_sku", "title",
+                "brand", "model", "source_url", "image_url", "category_name",
+                "price_amount", "currency", "availability_status",
+                "attributes_json", "metadata_json", "active", "first_seen_at",
+                "last_seen_at", "source_updated_at",
+            )
+            placeholders = ",".join("?" for _ in product_columns)
+            legacy_product_columns = [
+                str(item[1])
+                for item in conn.execute(
+                    "PRAGMA table_info(tenant_catalog_products)"
+                ).fetchall()
+            ]
+            for raw in conn.execute("SELECT * FROM tenant_catalog_products").fetchall():
+                row = dict(zip(legacy_product_columns, raw))
+                seller_id = row.get("tenant_seller_id")
+                sellers = conn.execute(
+                    """SELECT s.id,s.external_seller_id,s.status,s.approval_status,
+                              ti.seller_identifier AS canonical_identifier
+                       FROM tenant_marketplace_sellers s
+                       LEFT JOIN tenant_integrations ti
+                         ON ti.tenant_id=s.tenant_id
+                        AND ti.integration_code=s.marketplace_code
+                       WHERE s.tenant_id=? AND s.marketplace_code=?
+                       ORDER BY CASE
+                           WHEN s.external_seller_id=ti.seller_identifier THEN 0
+                           WHEN s.status='active' AND s.approval_status='approved' THEN 1
+                           ELSE 2 END,s.id""",
+                    (int(row["tenant_id"]), str(row["marketplace_code"])),
+                ).fetchall()
+                if seller_id is None and sellers:
+                    canonical = [item for item in sellers if item[1] == item[4]]
+                    active = [
+                        item for item in sellers
+                        if item[2] == "active" and item[3] == "approved"
+                    ]
+                    if len(canonical) == 1:
+                        seller_id = int(canonical[0][0])
+                    elif len(active) == 1:
+                        seller_id = int(active[0][0])
+                    elif len(sellers) == 1:
+                        seller_id = int(sellers[0][0])
+                if seller_id is None:
+                    continue
+                values = []
+                for column in product_columns:
+                    values.append(int(seller_id) if column == "tenant_seller_id" else row.get(column))
+                conn.execute(
+                    f"""INSERT OR IGNORE INTO tenant_seller_catalog_products(
+                            {','.join(product_columns)}
+                        ) VALUES({placeholders})""",
+                    values,
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata(key,value) VALUES(?,?)",
+                ("schema_multi_seller_v1_backfilled", stamp),
+            )
         conn.commit()
     finally:
         conn.close()

@@ -125,6 +125,7 @@
         </div>
         <section class="operation-launcher compact" id="productsOperationBar">
           <div><label data-i18n="marketplace">Площадка</label><select id="operationPlatform">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}<option value="system" data-i18n="system">Система</option></select></div>
+          <div id="operationSellerField" hidden><label>Продавец</label><select id="operationSeller"></select></div>
           <div><label data-i18n="operation">Операция</label><select id="operationAction"></select></div>
           <div><label data-i18n="scope">Область</label><select id="operationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option><option value="filtered">По текущему фильтру</option></select></div>
           <button class="primary launch" id="launchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
@@ -164,6 +165,7 @@
         </div>
         <section class="operation-launcher compact operations-launcher" id="operationsOperationBar">
           <div><label data-i18n="marketplace">Площадка</label><select id="opsOperationPlatform">{% for integration in integration_catalog %}<option value="{{ integration.code }}">{{ integration.name }}</option>{% endfor %}<option value="system" data-i18n="system">Система</option></select></div>
+          <div id="opsOperationSellerField" hidden><label>Продавец</label><select id="opsOperationSeller"></select></div>
           <div><label data-i18n="operation">Операция</label><select id="opsOperationAction"></select></div>
           <div><label data-i18n="scope">Область</label><select id="opsOperationScope"><option value="all" data-i18n="whole_catalog">Весь каталог</option><option value="selected" data-i18n="selected_products">Выбранные товары</option><option value="filtered">По текущему фильтру</option></select></div>
           <button class="primary launch" id="opsLaunchOperation"><img class="button-icon" src="{{ url_for('static', filename='icons/play.svg') }}" alt=""><span data-i18n="start">Запустить</span></button>
@@ -299,6 +301,10 @@
       <label>
         <span data-i18n="schedule_operation">Операция</span>
         <select name="action" id="scheduleAction"></select>
+      </label>
+      <label id="scheduleSellerField" hidden>
+        <span>Продавец</span>
+        <select name="tenant_seller_id" id="scheduleSeller"></select>
       </label>
       <label>
         <span data-i18n="schedule_recurrence">Повторение</span>

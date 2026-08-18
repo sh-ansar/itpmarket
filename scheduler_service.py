@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import threading
+import logging
 from typing import Any, Callable
 
 from marketplace_registry import allowed_marketplaces_from_user, marketplace_for_action
 from saas_service import SaaSService
 from tenant_security import company_is_approved, has_permission
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SchedulerService:
@@ -14,7 +18,7 @@ class SchedulerService:
         saas: SaaSService,
         task_manager: Any,
         action_info: dict[str, dict[str, Any]],
-        command_builder: Callable[[str, list[str], int], list[str]],
+        command_builder: Callable[..., list[str]],
         interval_seconds: int = 30,
         user_loader: Callable[[int], dict[str, Any] | None] | None = None,
         subscription_service: Any | None = None,
@@ -32,6 +36,7 @@ class SchedulerService:
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
             return
+        self.reconcile_active_runs()
         self.thread = threading.Thread(
             target=self._loop, daemon=True, name="itp-scheduler"
         )
@@ -45,7 +50,37 @@ class SchedulerService:
             try:
                 self.run_due_once()
             except Exception:
-                pass
+                LOGGER.exception("Scheduler iteration failed")
+
+    def reconcile_active_runs(self) -> None:
+        """Restore watchers or close stale schedule runs after app restart."""
+        active_loader = getattr(self.saas, "active_schedule_runs", None)
+        if not callable(active_loader):
+            return
+        for run in active_loader():
+            run_id = int(run["id"])
+            schedule_id = int(run["schedule_id"])
+            task_id = str(run.get("task_id") or "")
+            if not task_id:
+                self.saas.finish_schedule_run(
+                    run_id, schedule_id, "interrupted",
+                    "Приложение перезапущено до запуска операции.",
+                )
+                continue
+            task = self.task_manager.state(task_id)
+            if task.get("running"):
+                threading.Thread(
+                    target=self._watch,
+                    args=(run_id, schedule_id, task_id),
+                    daemon=True,
+                ).start()
+            else:
+                self.saas.finish_schedule_run(
+                    run_id,
+                    schedule_id,
+                    str(task.get("status") or "interrupted"),
+                    str(task.get("message") or "Операция прервана перезапуском."),
+                )
 
     def _authorization_error(
         self, schedule: dict[str, Any], info: dict[str, Any]
@@ -86,6 +121,8 @@ class SchedulerService:
             action = str(schedule.get("action") or "")
             info = self.action_info.get(action)
             run_id = self.saas.begin_schedule_run(schedule)
+            if run_id is None:
+                continue
             if not info:
                 self.saas.finish_schedule_run(
                     run_id, int(schedule["id"]), "failed",
@@ -110,16 +147,35 @@ class SchedulerService:
                             int(schedule["tenant_id"]), platform
                         )
                         consumed = True
+                seller_id = int(schedule.get("tenant_seller_id") or 0)
+                declared_resources = info.get("resource") or []
+                resources = (
+                    sorted({
+                        *(
+                            str(value) for value in declared_resources
+                            if str(value) in {"reports", "backups"}
+                        ),
+                        (
+                            f"seller:{int(schedule['tenant_id'])}:{platform}:"
+                            f"{seller_id}"
+                        ),
+                    })
+                    if seller_id and platform != "system"
+                    else declared_resources
+                )
                 task = self.task_manager.start(
                     action,
                     f"{info['label']} — по расписанию",
-                    self.command_builder(action, [], user_id),
-                    info.get("resource") or [],
+                    self.command_builder(
+                        action, [], user_id, "all", seller_id or None
+                    ),
+                    resources,
                     metadata={
                         "scope": "all",
                         "scheduled": True,
                         "schedule_id": int(schedule["id"]),
                         "tenant_id": int(schedule["tenant_id"]),
+                        "tenant_seller_id": seller_id or None,
                         "requested_by_id": user_id,
                         "platform": platform,
                         "platforms": (

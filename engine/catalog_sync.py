@@ -366,8 +366,10 @@ def upsert_cards(
     global_start: int,
     catalog_page_url: str,
     seen: set[str],
+    collected_products: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[int, int]:
     stamp = now_iso()
+    product_snapshot = collected_products if collected_products is not None else {}
     new_in_run = 0
     db_new = 0
     for offset, card in enumerate(cards):
@@ -391,6 +393,30 @@ def upsert_cards(
         position = global_start + offset
         page_number = position // 12 + 1
         position_on_page = position % 12 + 1
+        card_brand = clean(
+            card.get("brand")
+            or (source_segment if source_segment.casefold() != "all" else "")
+        )
+        stock = core.parse_int(card.get("stock"))
+        product_snapshot[code] = {
+            "product_id": code,
+            "title": title,
+            "brand": card_brand,
+            "url": product_url,
+            "image_url": image_url,
+            "category": clean(card.get("categoryId")),
+            "price": price,
+            "currency": "KZT",
+            "availability": "in_stock" if (stock or 0) > 0 else "",
+            "attributes": [],
+            "updated_at": stamp,
+            "metadata": {
+                "rating": rating,
+                "reviews": reviews,
+                "stock": stock,
+                "source_segment": source_segment,
+            },
+        }
         conn.execute(
             """
             INSERT INTO catalog_products(
@@ -442,10 +468,7 @@ def upsert_cards(
             """,
             (
                 code,
-                clean(
-                    card.get("brand")
-                    or (source_segment if source_segment.casefold() != "all" else "")
-                ),
+                card_brand,
                 clean(card.get("categoryId")),
                 json_text(card.get("categoryCodes") or []),
                 json_text(card.get("baseProductCodes") or []),
@@ -513,6 +536,7 @@ async def crawl_brand_segment(
     max_delay: float,
     global_index: int,
     seen: set[str],
+    collected_products: dict[str, dict[str, Any]],
 ) -> tuple[int, int, int, str]:
     first_payload, signature = await click_brand_filter(page, seller_url, brand, timeout)
     page_no = 1
@@ -530,7 +554,9 @@ async def crawl_brand_segment(
         if not cards:
             raise RuntimeError(f"страница {page_no}: карточки не найдены")
 
-        new_count, db_new = upsert_cards(conn, cards, brand, global_index, page.url, seen)
+        new_count, db_new = upsert_cards(
+            conn, cards, brand, global_index, page.url, seen, collected_products
+        )
         global_index += len(cards)
         collected_segment = len(seen) - segment_seen_before
         print(
@@ -566,6 +592,7 @@ async def crawl_root_fallback(
     global_index: int,
     seen: set[str],
     available_brands: list[str] | None = None,
+    collected_products: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[int, int]:
     """Проверенный V6 fallback: обычный каталог и реальная кнопка «Следующая».
 
@@ -582,6 +609,7 @@ async def crawl_root_fallback(
     page_no = 1
     before = len(seen)
     no_progress = 0
+    product_snapshot = collected_products if collected_products is not None else {}
     while True:
         cards = await dom_cards(page, "all")
         brand_names = available_brands or []
@@ -589,7 +617,9 @@ async def crawl_root_fallback(
             inferred = infer_card_brand(card.get("title"), brand_names)
             if inferred:
                 card["brand"] = inferred
-        new_count, db_new = upsert_cards(conn, cards, "all", global_index, page.url, seen)
+        new_count, db_new = upsert_cards(
+            conn, cards, "all", global_index, page.url, seen, product_snapshot
+        )
         global_index += len(cards)
         no_progress = no_progress + 1 if new_count == 0 else 0
         print(
@@ -620,6 +650,7 @@ async def run(args: argparse.Namespace) -> int:
     conn.commit()
 
     seen: set[str] = set()
+    collected_products: dict[str, dict[str, Any]] = {}
     warnings: list[str] = []
     segment_success = 0
     global_index = 0
@@ -696,6 +727,7 @@ async def run(args: argparse.Namespace) -> int:
                         collected, global_index = await crawl_root_fallback(
                             conn, page, seller_url, args.timeout, args.min_delay, args.max_delay,
                             global_index, seen, available_brand_names,
+                            collected_products,
                         )
                         pages = max(1, math.ceil(collected / 12))
                         strategy = "dom-pagination-v6"
@@ -703,6 +735,7 @@ async def run(args: argparse.Namespace) -> int:
                         collected, global_index, pages, strategy = await crawl_brand_segment(
                             conn, page, seller_url, name, expected, args.timeout,
                             args.min_delay, args.max_delay, global_index, seen,
+                            collected_products,
                         )
                     tolerance = max(1, int(expected * 0.04)) if expected else 0
                     if expected and collected + tolerance < expected:
@@ -742,6 +775,7 @@ async def run(args: argparse.Namespace) -> int:
                         global_index,
                         seen,
                         available_brand_names,
+                        collected_products,
                     )
                     print(
                         f"[Каталог] Резервный общий проход завершён: "
@@ -781,9 +815,24 @@ async def run(args: argparse.Namespace) -> int:
             # materializer opens its own atomic transaction.
             conn.commit()
             if int(args.tenant_id or 0) > 0:
-                saved = CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
-                    int(args.tenant_id), seen, replace=bool(full_enough)
-                )
+                service = CatalogConfigurationService(db_path)
+                if int(args.tenant_seller_id or 0) > 0:
+                    if full_enough:
+                        saved = service.replace_catalog_products(
+                            int(args.tenant_id), "kaspi",
+                            collected_products.values(),
+                            tenant_seller_id=int(args.tenant_seller_id),
+                        )
+                    else:
+                        saved = service.upsert_catalog_products(
+                            int(args.tenant_id), "kaspi",
+                            collected_products.values(),
+                            tenant_seller_id=int(args.tenant_seller_id),
+                        )
+                else:
+                    saved = service.materialize_legacy_kaspi_catalog(
+                        int(args.tenant_id), seen, replace=bool(full_enough)
+                    )
                 print(
                     f"[Каталог] Каталог компании обновлён: {saved} товаров; "
                     f"режим={'replace' if full_enough else 'merge'}",
@@ -828,6 +877,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--timeout", type=int, default=45)
     parser.add_argument("--retries", type=int, default=3)

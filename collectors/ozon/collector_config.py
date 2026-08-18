@@ -56,6 +56,7 @@ class Settings:
     start_urls: tuple[str, ...]
     expected_seller: str
     debug_port: int
+    browser_profile_path: Path
     catalog_max_pages: int
     catalog_product_limit: int
     batch_limit: int
@@ -129,6 +130,7 @@ def load_settings() -> Settings:
         start_urls=tuple(ordered_urls),
         expected_seller=expected_seller,
         debug_port=int(config.get("debug_port", 9222)),
+        browser_profile_path=ROOT / "chrome_vpn_profile",
         catalog_max_pages=max(1, int(config.get("catalog_max_pages", 100))),
         catalog_product_limit=max(0, int(config.get("catalog_product_limit", 0))),
         batch_limit=max(1, int(config.get("batch_limit", 100))),

@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import time
 import traceback
+import uuid
 from dataclasses import replace
 from urllib.parse import quote_plus
 from datetime import datetime
@@ -32,7 +33,10 @@ from storage.postgres_compat import connect_database
 
 def run_id_for(mode: str) -> str:
     safe = mode.replace("-", "_")
-    return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + safe
+    return (
+        datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        + "_" + safe + "_" + uuid.uuid4().hex[:8]
+    )
 
 
 def sleep_range(pair: tuple[float, float], multiplier: float = 1.0) -> None:
@@ -95,7 +99,9 @@ class Collector:
         if self.browser is None:
             from browser_session import BrowserSession
             self.browser = BrowserSession(
-                self.settings.debug_port, self.settings.start_url
+                self.settings.debug_port,
+                self.settings.start_url,
+                self.settings.browser_profile_path,
             ).connect()
             print(f"Рабочая вкладка: {self.browser.original_url}")
         return self.browser
@@ -114,7 +120,9 @@ class Collector:
     def _run_dir(self, run_id: str) -> Path:
         path = self.settings.runs_dir / run_id
         path.mkdir(parents=True, exist_ok=True)
-        (ROOT / "latest_run.txt").write_text(str(path), encoding="utf-8")
+        (self.settings.runs_dir.parent / "latest_run.txt").write_text(
+            str(path), encoding="utf-8"
+        )
         return path
 
     def _write_trace(self, run_dir: Path, payload: dict[str, Any]) -> None:
@@ -624,6 +632,21 @@ def settings_for_args(settings: Settings, args: argparse.Namespace) -> Settings:
     database_path = str(getattr(args, "database_path", "") or "").strip()
     if database_path:
         updates["database_path"] = Path(database_path).resolve()
+    runtime_dir = str(getattr(args, "runtime_dir", "") or "").strip()
+    if runtime_dir:
+        runtime = Path(runtime_dir).resolve()
+        updates.update({
+            "runs_dir": runtime / "runs",
+            "reports_dir": runtime / "reports",
+            "exports_dir": runtime / "exports",
+            "raw_dir": runtime / "raw",
+        })
+    profile_path = str(getattr(args, "profile_path", "") or "").strip()
+    if profile_path:
+        updates["browser_profile_path"] = Path(profile_path).resolve()
+    debug_port = getattr(args, "debug_port", None)
+    if debug_port is not None:
+        updates["debug_port"] = int(debug_port)
     return replace(settings, **updates) if updates else settings
 
 
@@ -632,6 +655,7 @@ def materialize_tenant_catalog(
     tenant_id: int,
     app_db: str,
     marketplace_code: str = "ozon",
+    tenant_seller_id: int | None = None,
 ) -> int:
     if int(tenant_id or 0) <= 0 or not str(app_db or "").strip():
         return 0
@@ -693,7 +717,8 @@ def materialize_tenant_catalog(
             "updated_at": value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at"),
         })
     return CatalogConfigurationService(Path(app_db)).replace_catalog_products(
-        int(tenant_id), marketplace_code, products
+        int(tenant_id), marketplace_code, products,
+        tenant_seller_id=tenant_seller_id,
     )
 
 
@@ -701,7 +726,11 @@ def add_connection_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source-url", default="")
     parser.add_argument("--expected-seller", default="")
     parser.add_argument("--database-path", default="")
+    parser.add_argument("--runtime-dir", default="")
+    parser.add_argument("--profile-path", default="")
+    parser.add_argument("--debug-port", type=int, default=None)
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--app-db", default="")
 
 
@@ -764,7 +793,8 @@ def main() -> int:
             print(json.dumps(collector.registry.counts(), ensure_ascii=False, indent=2))
         if args.command not in {"open-browser", "stats"}:
             materialize_tenant_catalog(
-                settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon"
+                settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon",
+                tenant_seller_id=int(args.tenant_seller_id or 0) or None,
             )
         return result_exit_code(result)
     finally:

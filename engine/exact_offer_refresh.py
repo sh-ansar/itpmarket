@@ -52,6 +52,7 @@ def get_jobs(
     db_path: Path,
     *,
     tenant_id: int = 0,
+    tenant_seller_id: int = 0,
     codes: list[str],
     limit: int,
     refresh: bool,
@@ -64,12 +65,25 @@ def get_jobs(
     where = ["COALESCE(m.active,1)=1", "c.product_url IS NOT NULL", "TRIM(c.product_url)<>''"]
     params: list[Any] = []
     tenant_join = ""
+    scan_join = "LEFT JOIN exact_offer_scans s ON s.product_code=c.product_code"
     if int(tenant_id or 0) > 0:
-        tenant_join = """JOIN tenant_catalog_products tcp
+        membership_table = (
+            "tenant_seller_catalog_products"
+            if int(tenant_seller_id or 0) > 0 else "tenant_catalog_products"
+        )
+        seller_clause = " AND tcp.tenant_seller_id=?" if int(tenant_seller_id or 0) > 0 else ""
+        tenant_join = f"""JOIN {membership_table} tcp
                               ON tcp.source_product_code=c.product_code
                              AND tcp.marketplace_code='kaspi'
-                             AND tcp.tenant_id=? AND tcp.active=1"""
+                             AND tcp.tenant_id=? AND tcp.active=1{seller_clause}"""
         params.append(int(tenant_id))
+        if int(tenant_seller_id or 0) > 0:
+            params.append(int(tenant_seller_id))
+            scan_join = """LEFT JOIN tenant_seller_offer_scans s
+                                  ON s.source_product_code=c.product_code
+                                 AND s.marketplace_code='kaspi'
+                                 AND s.tenant_id=? AND s.tenant_seller_id=?"""
+            params.extend((int(tenant_id), int(tenant_seller_id)))
     if codes:
         placeholders = ",".join("?" for _ in codes)
         where.append(f"c.product_code IN ({placeholders})")
@@ -91,7 +105,7 @@ def get_jobs(
         {tenant_join}
         LEFT JOIN catalog_product_meta m ON m.product_code=c.product_code
         LEFT JOIN product_details d ON d.product_code=c.product_code
-        LEFT JOIN exact_offer_scans s ON s.product_code=c.product_code
+        {scan_join}
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(s.checked_at,''),c.page_number,c.position_on_page,c.product_code
     """
@@ -110,6 +124,8 @@ def save_success(
     seller_id: str,
     seller_name: str,
     duration: float,
+    tenant_id: int = 0,
+    tenant_seller_id: int = 0,
 ) -> tuple[int, int, float | None, float | None]:
     code = core.clean_text(item.get("product_code"))
     stamp = now_iso()
@@ -198,6 +214,25 @@ def save_success(
                 1 if is_own_offer(offer, seller_id, seller_name) else 0, stamp,
             ),
         )
+        if int(tenant_id or 0) > 0 and int(tenant_seller_id or 0) > 0:
+            db.conn.execute(
+                """INSERT INTO tenant_seller_offer_snapshots(
+                       run_id,tenant_id,marketplace_code,tenant_seller_id,
+                       source_product_code,merchant_id,merchant_name,merchant_sku,
+                       price_amount,currency,merchant_rating,merchant_reviews,is_own,captured_at
+                   ) VALUES(?,?,'kaspi',?,?,?,?,?,?,'KZT',?,?,?,?)""",
+                (
+                    run_id, int(tenant_id), int(tenant_seller_id), code,
+                    core.clean_text(offer.get("merchantId")),
+                    core.clean_text(offer.get("merchantName")),
+                    core.clean_text(offer.get("merchantSku")),
+                    core.parse_float(offer.get("price")),
+                    core.parse_float(offer.get("merchantRating")),
+                    core.parse_int(offer.get("merchantReviewsQuantity")),
+                    1 if is_own_offer(offer, seller_id, seller_name) else 0,
+                    stamp,
+                ),
+            )
 
     status = "ok" if competitors else "no_competitors"
     db.conn.execute(
@@ -219,13 +254,55 @@ def save_success(
             round(duration, 3), None, stamp,
         ),
     )
+    if int(tenant_id or 0) > 0 and int(tenant_seller_id or 0) > 0:
+        db.conn.execute(
+            """INSERT INTO tenant_seller_offer_scans(
+                   tenant_id,marketplace_code,tenant_seller_id,source_product_code,
+                   status,offers_count,competitor_count,min_price,max_price,
+                   duration_seconds,error,checked_at
+               ) VALUES(?,'kaspi',?,?,?,?,?,?,?,?,'',?)
+               ON CONFLICT(
+                   tenant_id,marketplace_code,tenant_seller_id,source_product_code
+               ) DO UPDATE SET
+                   status=excluded.status,offers_count=excluded.offers_count,
+                   competitor_count=excluded.competitor_count,
+                   min_price=excluded.min_price,max_price=excluded.max_price,
+                   duration_seconds=excluded.duration_seconds,error='',
+                   checked_at=excluded.checked_at""",
+            (
+                int(tenant_id), int(tenant_seller_id), code, status,
+                len(valid_offers), len(competitors),
+                min(competitor_prices) if competitor_prices else None,
+                max(competitor_prices) if competitor_prices else None,
+                round(duration, 3), stamp,
+            ),
+        )
+        if own_price is not None:
+            db.conn.execute(
+                """UPDATE tenant_seller_catalog_products
+                   SET price_amount=?,currency='KZT',last_seen_at=?,source_updated_at=?
+                   WHERE tenant_id=? AND marketplace_code='kaspi'
+                     AND tenant_seller_id=? AND source_product_code=?""",
+                (
+                    own_price, stamp, stamp, int(tenant_id),
+                    int(tenant_seller_id), code,
+                ),
+            )
     db.conn.commit()
     return len(valid_offers), len(competitors), (
         min(competitor_prices) if competitor_prices else None
     ), (max(competitor_prices) if competitor_prices else None)
 
 
-def save_error(db: Database, code: str, error: str, duration: float) -> None:
+def save_error(
+    db: Database,
+    code: str,
+    error: str,
+    duration: float,
+    *,
+    tenant_id: int = 0,
+    tenant_seller_id: int = 0,
+) -> None:
     db.conn.execute(
         """
         INSERT INTO exact_offer_scans(
@@ -237,6 +314,22 @@ def save_error(db: Database, code: str, error: str, duration: float) -> None:
         """,
         (code, round(duration, 3), error[:1500], now_iso()),
     )
+    if int(tenant_id or 0) > 0 and int(tenant_seller_id or 0) > 0:
+        db.conn.execute(
+            """INSERT INTO tenant_seller_offer_scans(
+                   tenant_id,marketplace_code,tenant_seller_id,source_product_code,
+                   status,offers_count,competitor_count,duration_seconds,error,checked_at
+               ) VALUES(?,'kaspi',?,?,'error',0,0,?,?,?)
+               ON CONFLICT(
+                   tenant_id,marketplace_code,tenant_seller_id,source_product_code
+               ) DO UPDATE SET status='error',offers_count=0,competitor_count=0,
+                   duration_seconds=excluded.duration_seconds,error=excluded.error,
+                   checked_at=excluded.checked_at""",
+            (
+                int(tenant_id), int(tenant_seller_id), code,
+                round(duration, 3), error[:1500], now_iso(),
+            ),
+        )
     db.conn.execute(
         "INSERT INTO errors(stage,product_code,message,created_at) VALUES('exact_offer_refresh',?,?,?)",
         (code, error[:1500], now_iso()),
@@ -251,6 +344,7 @@ async def run(args: argparse.Namespace) -> int:
     jobs = get_jobs(
         db_path,
         tenant_id=int(args.tenant_id or 0),
+        tenant_seller_id=int(args.tenant_seller_id or 0),
         codes=codes,
         limit=max(0, int(args.limit)),
         refresh=bool(args.refresh),
@@ -315,6 +409,8 @@ async def run(args: argparse.Namespace) -> int:
                                     seller_id=str(args.seller_id),
                                     seller_name=str(args.seller_name),
                                     duration=duration,
+                                    tenant_id=int(args.tenant_id or 0),
+                                    tenant_seller_id=int(args.tenant_seller_id or 0),
                                 )
                             status = "ok" if competitors else "no_competitors"
                             stats[status] += 1
@@ -327,7 +423,11 @@ async def run(args: argparse.Namespace) -> int:
                         except Exception as exc:
                             duration = time.monotonic() - started
                             async with db_lock:
-                                save_error(db, code, str(exc), duration)
+                                save_error(
+                                    db, code, str(exc), duration,
+                                    tenant_id=int(args.tenant_id or 0),
+                                    tenant_seller_id=int(args.tenant_seller_id or 0),
+                                )
                             stats["error"] += 1
                             print(f"ERROR | {exc} | {duration:.1f} сек.")
                         finally:
@@ -350,7 +450,7 @@ async def run(args: argparse.Namespace) -> int:
     )
     print("Старые похожие карточки сохранены в базе как архив и не участвуют в аналитике.")
     print("=" * 78)
-    if int(args.tenant_id or 0) > 0:
+    if int(args.tenant_id or 0) > 0 and int(args.tenant_seller_id or 0) <= 0:
         CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
             int(args.tenant_id), [str(item["product_code"]) for item in jobs], replace=False
         )
@@ -365,6 +465,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--seller-name", default="Unityre")
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--workers", type=int, default=2)

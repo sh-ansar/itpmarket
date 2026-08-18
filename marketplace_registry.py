@@ -118,6 +118,33 @@ def marketplace_for_product_code(code: Any) -> str:
     return "kaspi"
 
 
+def seller_scoped_product_code(
+    marketplace_code: str,
+    tenant_seller_id: int,
+    source_product_code: Any,
+) -> str:
+    definition = MARKETPLACE_BY_CODE[str(marketplace_code)]
+    return (
+        f"{definition.product_prefix}s{int(tenant_seller_id)}:"
+        f"{str(source_product_code or '')}"
+    )
+
+
+def parse_product_code(code: Any) -> tuple[str, int | None, str]:
+    value = str(code or "").strip()
+    platform = marketplace_for_product_code(value)
+    definition = MARKETPLACE_BY_CODE[platform]
+    remainder = (
+        value[len(definition.product_prefix):]
+        if value.startswith(definition.product_prefix) else value
+    )
+    if remainder.startswith("s") and ":" in remainder:
+        candidate, source = remainder.split(":", 1)
+        if candidate[1:].isdigit():
+            return platform, int(candidate[1:]), source
+    return platform, None, remainder
+
+
 def marketplace_for_action(action: Any, action_info: dict[str, dict[str, Any]] | None = None) -> str:
     value = str(action or "").strip()
     if action_info:

@@ -42,21 +42,29 @@ def build_settings(args: argparse.Namespace) -> Settings:
     if not source_url:
         raise ValueError("Укажите ссылку продавца вида https://ozon.kz/seller/name/.")
     base = load_settings()
+    runtime_dir_value = getattr(args, "runtime_dir", "")
+    profile_path_value = getattr(args, "profile_path", "")
+    runtime_dir = Path(runtime_dir_value).resolve() if runtime_dir_value else ROOT
+    profile_path = (
+        Path(profile_path_value).resolve()
+        if profile_path_value else ROOT / "chrome_kz_profile"
+    )
     return replace(
         base,
         start_url=source_url,
         start_urls=(source_url,),
         expected_seller=str(args.expected_seller or "").strip(),
-        debug_port=max(1024, int(args.debug_port)),
+        debug_port=int(args.debug_port),
+        browser_profile_path=profile_path,
         catalog_wait_seconds=min(30, base.catalog_wait_seconds),
         request_wait_seconds=min(30, base.request_wait_seconds),
         page_reloads=min(1, base.page_reloads),
         product_reloads=min(1, base.product_reloads),
         database_path=Path(args.db).resolve(),
-        runs_dir=ROOT / "runs",
-        reports_dir=ROOT / "reports",
-        exports_dir=ROOT / "exports",
-        raw_dir=ROOT / "raw",
+        runs_dir=runtime_dir / "runs",
+        reports_dir=runtime_dir / "reports",
+        exports_dir=runtime_dir / "exports",
+        raw_dir=runtime_dir / "raw",
     )
 
 
@@ -189,9 +197,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--app-db", required=True)
     parser.add_argument("--tenant-id", type=int, required=True)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--source-url", required=True)
     parser.add_argument("--expected-seller", default="")
     parser.add_argument("--debug-port", type=int, default=9333)
+    parser.add_argument("--runtime-dir", default="")
+    parser.add_argument("--profile-path", default="")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--pages", type=int, default=100)
     parser.add_argument("--articles", default="")
@@ -219,7 +230,8 @@ def main() -> int:
             collector.process("refresh-prices", limit, articles)
         mirrored = mirror_public_registry(settings)
         tenant_count = materialize_tenant_catalog(
-            settings, int(args.tenant_id), str(args.app_db), "ozon_kz"
+            settings, int(args.tenant_id), str(getattr(args, "app_db", "") or args.db), "ozon_kz",
+            tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
         )
         print(json.dumps({"ok": True, **mirrored, "tenant_products": tenant_count}, ensure_ascii=False))
         return 0

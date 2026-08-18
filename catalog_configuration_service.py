@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from marketplace_registry import MARKETPLACE_CODES
-from subscription_service import SubscriptionService
+from subscription_service import SubscriptionLimitError, SubscriptionService
 from storage.postgres_compat import connect_database
+from storage.postgres_compat import PostgresConnection
 
 
 ATTRIBUTE_ALIASES = {
@@ -123,8 +124,42 @@ class CatalogConfigurationService:
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
+    def _position_entitlement(self, tenant_id: int, marketplace_code: str) -> dict[str, Any]:
+        """Load the comparatively static plan limit before taking a catalog write lock.
+
+        SubscriptionService performs idempotent seed maintenance when it is
+        constructed.  Doing that through a second connection after SQLite's
+        BEGIN IMMEDIATE would deadlock against our own transaction.  The
+        mutable product count is still calculated and checked while the
+        tenant write lock is held below.
+        """
+        value = SubscriptionService(self.db_path).entitlement(int(tenant_id))
+        if not value["active"]:
+            raise SubscriptionLimitError(
+                "Каталог не сохранён: нет активного подтверждённого пакета."
+            )
+        marketplace = value["marketplaces"].get(str(marketplace_code), {})
+        if not marketplace.get("enabled", False):
+            raise SubscriptionLimitError("Площадка не включена в пакет компании.")
+        return marketplace
+
+    @staticmethod
+    def _assert_position_entitlement(
+        marketplace_code: str, marketplace: dict[str, Any], requested: int
+    ) -> None:
+        limit = marketplace.get("position_limit")
+        if limit is not None and int(requested) > int(limit):
+            missing = int(requested) - int(limit)
+            raise SubscriptionLimitError(
+                f"Недостаточно позиций для {marketplace_code}: доступно {limit}, "
+                f"получено {requested}. Увеличьте лимит минимум на {missing} позиций."
+            )
+
     def catalog_memberships(
-        self, tenant_id: int, marketplaces: Iterable[str] | None = None
+        self,
+        tenant_id: int,
+        marketplaces: Iterable[str] | None = None,
+        tenant_seller_id: int | None = None,
     ) -> set[tuple[str, str]]:
         allowed = {str(value) for value in (marketplaces or MARKETPLACE_CODES)} & set(MARKETPLACE_CODES)
         if not allowed:
@@ -132,6 +167,28 @@ class CatalogConfigurationService:
         placeholders = ",".join("?" for _ in allowed)
         conn = self._connect()
         try:
+            seller_rows_exist = conn.execute(
+                """SELECT 1 FROM tenant_seller_catalog_products
+                   WHERE tenant_id=? AND active=1 LIMIT 1""",
+                (int(tenant_id),),
+            ).fetchone()
+            if seller_rows_exist:
+                seller_where = "tenant_id=? AND active=1"
+                params: list[Any] = [int(tenant_id)]
+                if tenant_seller_id is not None:
+                    seller_where += " AND tenant_seller_id=?"
+                    params.append(int(tenant_seller_id))
+                seller_where += f" AND marketplace_code IN ({placeholders})"
+                params.extend(sorted(allowed))
+                return {
+                    (str(row["marketplace_code"]), str(row["source_product_code"]))
+                    for row in conn.execute(
+                        f"""SELECT marketplace_code,source_product_code
+                            FROM tenant_seller_catalog_products
+                            WHERE {seller_where}""",
+                        params,
+                    ).fetchall()
+                }
             return {
                 (str(row["marketplace_code"]), str(row["source_product_code"]))
                 for row in conn.execute(
@@ -144,6 +201,85 @@ class CatalogConfigurationService:
             }
         finally:
             conn.close()
+
+    @staticmethod
+    def _begin_tenant_write(conn: sqlite3.Connection, tenant_id: int) -> None:
+        """Serialize catalog capacity decisions for one tenant."""
+        if isinstance(conn, PostgresConnection):
+            conn.execute("SELECT id FROM tenants WHERE id=? FOR UPDATE", (int(tenant_id),))
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+
+    @staticmethod
+    def _validated_seller_id(
+        conn: sqlite3.Connection,
+        tenant_id: int,
+        marketplace_code: str,
+        tenant_seller_id: int | None,
+    ) -> int | None:
+        if tenant_seller_id is not None:
+            row = conn.execute(
+                """SELECT id FROM tenant_marketplace_sellers
+                   WHERE id=? AND tenant_id=? AND marketplace_code=?""",
+                (int(tenant_seller_id), int(tenant_id), str(marketplace_code)),
+            ).fetchone()
+            if not row:
+                raise PermissionError("Продавец не принадлежит компании или площадке.")
+            return int(row[0])
+        rows = conn.execute(
+            """SELECT id FROM tenant_marketplace_sellers
+               WHERE tenant_id=? AND marketplace_code=?
+                 AND status='active' AND approval_status='approved'
+               ORDER BY id""",
+            (int(tenant_id), str(marketplace_code)),
+        ).fetchall()
+        if len(rows) == 1:
+            return int(rows[0][0])
+        if len(rows) > 1:
+            raise ValueError("Выберите продавца для сохранения каталога.")
+        return None
+
+    @staticmethod
+    def _active_position_count(
+        conn: sqlite3.Connection, tenant_id: int, marketplace_code: str
+    ) -> int:
+        seller_count = int(conn.execute(
+            """SELECT COUNT(*) FROM tenant_seller_catalog_products
+               WHERE tenant_id=? AND marketplace_code=? AND active=1""",
+            (int(tenant_id), str(marketplace_code)),
+        ).fetchone()[0])
+        if seller_count:
+            return seller_count
+        return int(conn.execute(
+            """SELECT COUNT(*) FROM tenant_catalog_products
+               WHERE tenant_id=? AND marketplace_code=? AND active=1""",
+            (int(tenant_id), str(marketplace_code)),
+        ).fetchone()[0])
+
+    @staticmethod
+    def _seller_product_active(
+        conn: sqlite3.Connection,
+        tenant_id: int,
+        marketplace_code: str,
+        tenant_seller_id: int | None,
+        product_code: str,
+    ) -> bool:
+        if tenant_seller_id is None:
+            return bool(conn.execute(
+                """SELECT 1 FROM tenant_catalog_products
+                   WHERE tenant_id=? AND marketplace_code=?
+                     AND source_product_code=? AND active=1""",
+                (int(tenant_id), str(marketplace_code), str(product_code)),
+            ).fetchone())
+        return bool(conn.execute(
+            """SELECT 1 FROM tenant_seller_catalog_products
+               WHERE tenant_id=? AND marketplace_code=? AND tenant_seller_id=?
+                 AND source_product_code=? AND active=1""",
+            (
+                int(tenant_id), str(marketplace_code), int(tenant_seller_id),
+                str(product_code),
+            ),
+        ).fetchone())
 
     def upsert_catalog_product(
         self,
@@ -167,24 +303,64 @@ class CatalogConfigurationService:
         attributes = product.get("attributes") or product.get("specifications") or []
         stamp = now_iso()
         owns_connection = _conn is None
+        position_entitlement = (
+            self._position_entitlement(int(tenant_id), platform)
+            if owns_connection else None
+        )
         conn = _conn or self._connect()
         try:
             if owns_connection:
-                existing = conn.execute(
-                    """SELECT 1 FROM tenant_catalog_products
-                       WHERE tenant_id=? AND marketplace_code=?
-                         AND source_product_code=? AND active=1""",
-                    (int(tenant_id), platform, product_code),
-                ).fetchone()
-                if not existing:
-                    current = int(conn.execute(
-                        """SELECT COUNT(*) FROM tenant_catalog_products
-                           WHERE tenant_id=? AND marketplace_code=? AND active=1""",
-                        (int(tenant_id), platform),
-                    ).fetchone()[0])
-                    SubscriptionService(self.db_path).assert_position_capacity(
-                        int(tenant_id), platform, current + 1
+                self._begin_tenant_write(conn, int(tenant_id))
+                tenant_seller_id = self._validated_seller_id(
+                    conn, int(tenant_id), platform, tenant_seller_id
+                )
+                if not self._seller_product_active(
+                    conn, int(tenant_id), platform, tenant_seller_id, product_code
+                ):
+                    current = self._active_position_count(conn, int(tenant_id), platform)
+                    self._assert_position_entitlement(
+                        platform, position_entitlement or {}, current + 1
                     )
+            elif tenant_seller_id is not None:
+                tenant_seller_id = self._validated_seller_id(
+                    conn, int(tenant_id), platform, tenant_seller_id
+                )
+            values = (
+                int(tenant_id), platform, product_code, catalog_id, tenant_seller_id,
+                str(product.get("seller_sku") or product.get("offer_id") or "")[:240],
+                str(product.get("title") or product.get("name") or "")[:2000],
+                str(product.get("brand") or "")[:300],
+                str(product.get("model") or "")[:300],
+                str(product.get("url") or product.get("source_url") or "")[:3000],
+                str(product.get("image_url") or "")[:3000],
+                str(product.get("category") or product.get("category_name") or "")[:500],
+                product.get("price"), str(product.get("currency") or "")[:12],
+                str(product.get("availability") or product.get("visibility") or "")[:120],
+                json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(product.get("metadata") or {}, ensure_ascii=False, separators=(",", ":")),
+                stamp, stamp, str(product.get("updated_at") or stamp),
+            )
+            if tenant_seller_id is not None:
+                conn.execute(
+                    """INSERT INTO tenant_seller_catalog_products(
+                           tenant_id,marketplace_code,source_product_code,catalog_id,tenant_seller_id,
+                           seller_sku,title,brand,model,source_url,image_url,category_name,
+                           price_amount,currency,availability_status,attributes_json,metadata_json,
+                           active,first_seen_at,last_seen_at,source_updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)
+                       ON CONFLICT(
+                           tenant_id,marketplace_code,tenant_seller_id,source_product_code
+                       ) DO UPDATE SET
+                           catalog_id=COALESCE(excluded.catalog_id,tenant_seller_catalog_products.catalog_id),
+                           seller_sku=excluded.seller_sku,title=excluded.title,brand=excluded.brand,
+                           model=excluded.model,source_url=excluded.source_url,image_url=excluded.image_url,
+                           category_name=excluded.category_name,price_amount=excluded.price_amount,
+                           currency=excluded.currency,availability_status=excluded.availability_status,
+                           attributes_json=excluded.attributes_json,metadata_json=excluded.metadata_json,
+                           active=1,last_seen_at=excluded.last_seen_at,
+                           source_updated_at=excluded.source_updated_at""",
+                    values,
+                )
             conn.execute(
                 """INSERT INTO tenant_catalog_products(
                        tenant_id,marketplace_code,source_product_code,catalog_id,tenant_seller_id,
@@ -202,21 +378,7 @@ class CatalogConfigurationService:
                        attributes_json=excluded.attributes_json,metadata_json=excluded.metadata_json,
                        active=1,last_seen_at=excluded.last_seen_at,
                        source_updated_at=excluded.source_updated_at""",
-                (
-                    int(tenant_id), platform, product_code, catalog_id, tenant_seller_id,
-                    str(product.get("seller_sku") or product.get("offer_id") or "")[:240],
-                    str(product.get("title") or product.get("name") or "")[:2000],
-                    str(product.get("brand") or "")[:300],
-                    str(product.get("model") or "")[:300],
-                    str(product.get("url") or product.get("source_url") or "")[:3000],
-                    str(product.get("image_url") or "")[:3000],
-                    str(product.get("category") or product.get("category_name") or "")[:500],
-                    product.get("price"), str(product.get("currency") or "")[:12],
-                    str(product.get("availability") or product.get("visibility") or "")[:120],
-                    json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
-                    json.dumps(product.get("metadata") or {}, ensure_ascii=False, separators=(",", ":")),
-                    stamp, stamp, str(product.get("updated_at") or stamp),
-                ),
+                values,
             )
             if not owns_connection:
                 self.ingest_attributes(
@@ -244,6 +406,7 @@ class CatalogConfigurationService:
             raise ValueError("Неизвестная площадка.")
 
         product_rows = list(products)
+        position_entitlement = self._position_entitlement(int(tenant_id), platform)
         incoming_codes = {
             str(
                 product.get("source_product_code")
@@ -256,22 +419,25 @@ class CatalogConfigurationService:
         }
         incoming_codes.discard("")
 
-        current_codes = {
-            code
-            for marketplace, code in self.catalog_memberships(
-                int(tenant_id), [platform]
-            )
-            if marketplace == platform
-        }
-        projected_count = len(current_codes | incoming_codes)
-
-        SubscriptionService(self.db_path).assert_position_capacity(
-            int(tenant_id), platform, projected_count
-        )
-
         conn = self._connect()
         count = 0
         try:
+            self._begin_tenant_write(conn, int(tenant_id))
+            tenant_seller_id = self._validated_seller_id(
+                conn, int(tenant_id), platform, tenant_seller_id
+            )
+            new_codes = {
+                code for code in incoming_codes
+                if not self._seller_product_active(
+                    conn, int(tenant_id), platform, tenant_seller_id, code
+                )
+            }
+            projected_count = self._active_position_count(
+                conn, int(tenant_id), platform
+            ) + len(new_codes)
+            self._assert_position_entitlement(
+                platform, position_entitlement, projected_count
+            )
             for product in product_rows:
                 self.upsert_catalog_product(
                     tenant_id,
@@ -304,17 +470,50 @@ class CatalogConfigurationService:
         if platform not in MARKETPLACE_CODES:
             raise ValueError("Неизвестная площадка.")
         product_rows = list(products)
-        SubscriptionService(self.db_path).assert_position_capacity(
-            int(tenant_id), platform, len(product_rows)
-        )
+        position_entitlement = self._position_entitlement(int(tenant_id), platform)
         conn = self._connect()
         count = 0
         try:
-            conn.execute(
-                """UPDATE tenant_catalog_products SET active=0
-                   WHERE tenant_id=? AND marketplace_code=?""",
-                (int(tenant_id), platform),
+            self._begin_tenant_write(conn, int(tenant_id))
+            tenant_seller_id = self._validated_seller_id(
+                conn, int(tenant_id), platform, tenant_seller_id
             )
+            incoming_codes = {
+                str(
+                    product.get("source_product_code")
+                    or product.get("product_id")
+                    or product.get("sku")
+                    or product.get("offer_id")
+                    or ""
+                ).strip()
+                for product in product_rows
+            }
+            incoming_codes.discard("")
+            if tenant_seller_id is not None:
+                other_count = int(conn.execute(
+                    """SELECT COUNT(*) FROM tenant_seller_catalog_products
+                       WHERE tenant_id=? AND marketplace_code=? AND active=1
+                         AND tenant_seller_id<>?""",
+                    (int(tenant_id), platform, int(tenant_seller_id)),
+                ).fetchone()[0])
+                projected_count = other_count + len(incoming_codes)
+            else:
+                projected_count = len(incoming_codes)
+            self._assert_position_entitlement(
+                platform, position_entitlement, projected_count
+            )
+            if tenant_seller_id is not None:
+                conn.execute(
+                    """UPDATE tenant_seller_catalog_products SET active=0
+                       WHERE tenant_id=? AND marketplace_code=? AND tenant_seller_id=?""",
+                    (int(tenant_id), platform, int(tenant_seller_id)),
+                )
+            else:
+                conn.execute(
+                    """UPDATE tenant_catalog_products SET active=0
+                       WHERE tenant_id=? AND marketplace_code=?""",
+                    (int(tenant_id), platform),
+                )
             for product in product_rows:
                 self.upsert_catalog_product(
                     tenant_id, platform, product,
@@ -322,6 +521,19 @@ class CatalogConfigurationService:
                     _conn=conn,
                 )
                 count += 1
+            if tenant_seller_id is not None:
+                conn.execute(
+                    """UPDATE tenant_catalog_products AS tcp SET active=0
+                       WHERE tcp.tenant_id=? AND tcp.marketplace_code=?
+                         AND NOT EXISTS(
+                             SELECT 1 FROM tenant_seller_catalog_products tsp
+                             WHERE tsp.tenant_id=tcp.tenant_id
+                               AND tsp.marketplace_code=tcp.marketplace_code
+                               AND tsp.source_product_code=tcp.source_product_code
+                               AND tsp.active=1
+                         )""",
+                    (int(tenant_id), platform),
+                )
             stamp = now_iso()
             conn.execute(
                 """UPDATE tenant_integrations SET product_count=?,last_sync_at=?,
@@ -329,6 +541,23 @@ class CatalogConfigurationService:
                    WHERE tenant_id=? AND integration_code=?""",
                 (count,stamp,stamp,int(tenant_id),platform),
             )
+            if tenant_seller_id is not None:
+                seller_count = int(conn.execute(
+                    """SELECT COUNT(*) FROM tenant_seller_catalog_products
+                       WHERE tenant_id=? AND marketplace_code=?
+                         AND tenant_seller_id=? AND active=1""",
+                    (int(tenant_id), platform, int(tenant_seller_id)),
+                ).fetchone()[0])
+                conn.execute(
+                    """UPDATE tenant_marketplace_sellers
+                       SET product_count=?,last_sync_at=?,last_status='completed',
+                           last_error='',updated_at=?
+                       WHERE id=? AND tenant_id=?""",
+                    (
+                        seller_count, stamp, stamp, int(tenant_seller_id),
+                        int(tenant_id),
+                    ),
+                )
             conn.commit()
             return count
         finally:
@@ -340,6 +569,8 @@ class CatalogConfigurationService:
         product_codes: Iterable[str] | None = None,
         *,
         replace: bool = False,
+        tenant_seller_id: int | None = None,
+        source_db_path: Path | None = None,
     ) -> int:
         """Copy the just-collected legacy Kaspi rows into one tenant snapshot.
 
@@ -354,7 +585,9 @@ class CatalogConfigurationService:
         # to the shared legacy catalogue.
         codes_were_supplied = product_codes is not None
         codes = [str(value).strip() for value in (product_codes or []) if str(value).strip()]
-        conn = self._connect()
+        source_path = Path(source_db_path) if source_db_path else self.db_path
+        conn = connect_database(source_path, timeout=30)
+        conn.row_factory = sqlite3.Row
         try:
             if codes_were_supplied and not codes:
                 rows = []
@@ -427,16 +660,20 @@ class CatalogConfigurationService:
                 },
             })
         if replace:
-            return self.replace_catalog_products(int(tenant_id), "kaspi", products)
-        count = self.upsert_catalog_products(int(tenant_id), "kaspi", products)
+            return self.replace_catalog_products(
+                int(tenant_id), "kaspi", products,
+                tenant_seller_id=tenant_seller_id,
+            )
+        count = self.upsert_catalog_products(
+            int(tenant_id), "kaspi", products,
+            tenant_seller_id=tenant_seller_id,
+        )
         stamp = now_iso()
         conn = self._connect()
         try:
-            active_count = int(conn.execute(
-                """SELECT COUNT(*) FROM tenant_catalog_products
-                   WHERE tenant_id=? AND marketplace_code='kaspi' AND active=1""",
-                (int(tenant_id),),
-            ).fetchone()[0])
+            active_count = self._active_position_count(
+                conn, int(tenant_id), "kaspi"
+            )
             conn.execute(
                 """UPDATE tenant_integrations SET product_count=?,last_sync_at=?,
                           last_status='completed',last_error='',updated_at=?

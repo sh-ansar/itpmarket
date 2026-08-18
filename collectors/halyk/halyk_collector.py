@@ -560,12 +560,14 @@ def materialize_tenant_catalog(
             "attributes": attributes, "updated_at": value.get("last_seen_at"),
         })
     return CatalogConfigurationService(db_path).replace_catalog_products(
-        int(args.tenant_id), "halyk_market", products
+        int(args.tenant_id), "halyk_market", products,
+        tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
     )
 
 
 def run(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
+    app_db_path = Path(getattr(args, "app_db", "") or db_path)
     ensure_database(db_path)
     conn = connect(db_path)
     run_id = f"halyk_{args.action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -584,7 +586,7 @@ def run(args: argparse.Namespace) -> int:
             refreshed, market_offers, errors = refresh_market_offers(conn, args, run_id)
             products = max(products, refreshed)
             offers += market_offers
-        materialize_tenant_catalog(conn, db_path, args)
+        materialize_tenant_catalog(conn, app_db_path, args)
         status = "partial" if errors else "ok"
         error_text = f"Ошибок обновления карточек: {errors}" if errors else ""
         finish_run(conn, run_id, status, total, products, offers, error_text)
@@ -605,7 +607,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect Halyk Market products and exact-card offers.")
     parser.add_argument("action", choices=["sync-catalog", "refresh-offers", "full-sync"])
     parser.add_argument("--db", default=str(ROOT / "data" / "unityre_kaspi.db"))
+    parser.add_argument("--app-db", default="")
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--seller-name", default="Unityre")
     parser.add_argument("--merchant-id", default="")
     parser.add_argument("--source-url", default="")

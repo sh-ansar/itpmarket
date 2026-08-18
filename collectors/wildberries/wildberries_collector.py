@@ -275,7 +275,8 @@ def persist(args: argparse.Namespace, products: list[dict[str, Any]], seller_nam
     db_path = Path(args.db)
     ensure_database(db_path)
     saved = CatalogConfigurationService(db_path).replace_catalog_products(
-        int(args.tenant_id), MARKETPLACE_CODE, products
+        int(args.tenant_id), MARKETPLACE_CODE, products,
+        tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
     )
     import sqlite3
 
@@ -350,6 +351,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("action", choices=("probe", "sync-catalog", "refresh-prices", "full-sync"))
     parser.add_argument("--db", default=str(ROOT / "data" / "unityre_kaspi.db"))
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--seller-id", required=True)
     parser.add_argument("--source-url", default="")
     parser.add_argument("--currency", default="kzt")

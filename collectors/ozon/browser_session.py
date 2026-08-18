@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -25,8 +26,10 @@ from ozon_probe_core import article_from_url, normalize_product_url, parse_catal
 
 
 class BrowserSession:
-    def __init__(self, debug_port: int, start_url: str) -> None:
-        self.debug_port = debug_port
+    def __init__(
+        self, debug_port: int, start_url: str, profile_dir: Path | None = None
+    ) -> None:
+        self.debug_port = self._available_port() if int(debug_port) <= 0 else int(debug_port)
         self.start_url = start_url
         parsed_start = urlparse(start_url)
         self.site_host = str(parsed_start.hostname or "www.ozon.ru").casefold()
@@ -34,13 +37,22 @@ class BrowserSession:
         bare_host = self.site_host.removeprefix("www.")
         self.allowed_hosts = {bare_host, f"www.{bare_host}"}
         self.marketplace_label = "Ozon.kz" if bare_host == "ozon.kz" else "Ozon.ru"
-        self.debug_base = f"http://127.0.0.1:{debug_port}"
+        self.debug_base = f"http://127.0.0.1:{self.debug_port}"
         profile_name = "chrome_kz_profile" if bare_host == "ozon.kz" else "chrome_vpn_profile"
-        self.profile_dir = Path(__file__).resolve().parent / profile_name
+        self.profile_dir = (
+            Path(profile_dir).resolve()
+            if profile_dir else Path(__file__).resolve().parent / profile_name
+        )
         self.driver = None
         self.target_id = ""
         self.original_url = ""
         self.launched_browser = False
+
+    @staticmethod
+    def _available_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
 
     def debugger_json(self, path: str, timeout: int = 8) -> Any:
         request = urllib.request.Request(

@@ -43,16 +43,25 @@ def chunks(items: list[dict[str, Any]], size: int):
         yield items[index:index + size]
 
 
-def tenant_catalog_rows(conn: sqlite3.Connection, tenant_id: int) -> list[dict[str, Any]]:
+def tenant_catalog_rows(
+    conn: sqlite3.Connection, tenant_id: int, tenant_seller_id: int = 0
+) -> list[dict[str, Any]]:
     """Return only Kaspi staging rows that belong to one company snapshot."""
     tenant_join = ""
     query_params: list[Any] = []
     if int(tenant_id or 0) > 0:
-        tenant_join = """JOIN tenant_catalog_products tcp
+        membership_table = (
+            "tenant_seller_catalog_products"
+            if int(tenant_seller_id or 0) > 0 else "tenant_catalog_products"
+        )
+        seller_clause = " AND tcp.tenant_seller_id=?" if int(tenant_seller_id or 0) > 0 else ""
+        tenant_join = f"""JOIN {membership_table} tcp
                               ON tcp.source_product_code=c.product_code
                              AND tcp.marketplace_code='kaspi'
-                             AND tcp.tenant_id=? AND tcp.active=1"""
+                             AND tcp.tenant_id=? AND tcp.active=1{seller_clause}"""
         query_params.append(int(tenant_id))
+        if int(tenant_seller_id or 0) > 0:
+            query_params.append(int(tenant_seller_id))
     return [dict(row) for row in conn.execute(
         f"""
         SELECT c.product_code,c.title_catalog,c.catalog_price_kzt,
@@ -108,7 +117,9 @@ async def run(args: argparse.Namespace) -> int:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=60000")
-    rows = tenant_catalog_rows(conn, int(args.tenant_id or 0))
+    rows = tenant_catalog_rows(
+        conn, int(args.tenant_id or 0), int(args.tenant_seller_id or 0)
+    )
     selected_codes = [core.clean_text(value) for value in str(args.codes or "").split(",") if core.clean_text(value)]
     if selected_codes:
         selected_set = set(selected_codes)
@@ -184,6 +195,27 @@ async def run(args: argparse.Namespace) -> int:
                                 """,
                                 (code, args.seller_id, "missing", "оффер Unityre не найден в batch response", stamp),
                             )
+                            if int(args.tenant_seller_id or 0) > 0:
+                                conn.execute(
+                                    """UPDATE tenant_seller_catalog_products
+                                       SET availability_status='out_of_stock',last_seen_at=?
+                                       WHERE tenant_id=? AND marketplace_code='kaspi'
+                                         AND tenant_seller_id=? AND source_product_code=?""",
+                                    (
+                                        stamp, int(args.tenant_id),
+                                        int(args.tenant_seller_id), code,
+                                    ),
+                                )
+                                conn.execute(
+                                    """INSERT INTO tenant_seller_price_snapshots(
+                                           tenant_id,marketplace_code,tenant_seller_id,
+                                           source_product_code,status,error,currency,captured_at
+                                       ) VALUES(?,'kaspi',?,?,? ,?,'KZT',?)""",
+                                    (
+                                        int(args.tenant_id), int(args.tenant_seller_id),
+                                        code, "missing", "own offer not found", stamp,
+                                    ),
+                                )
                             continue
                         price = core.parse_float(offer.get("price"))
                         before = core.parse_float(offer.get("priceBeforeDiscount"))
@@ -210,6 +242,30 @@ async def run(args: argparse.Namespace) -> int:
                             """,
                             (code, args.seller_id, merchant_sku, price, before, discount, "ok", stamp),
                         )
+                        if int(args.tenant_seller_id or 0) > 0:
+                            conn.execute(
+                                """UPDATE tenant_seller_catalog_products
+                                   SET price_amount=?,seller_sku=?,availability_status='in_stock',
+                                       last_seen_at=?,source_updated_at=?
+                                   WHERE tenant_id=? AND marketplace_code='kaspi'
+                                     AND tenant_seller_id=? AND source_product_code=?""",
+                                (
+                                    price, merchant_sku, stamp, stamp,
+                                    int(args.tenant_id), int(args.tenant_seller_id), code,
+                                ),
+                            )
+                            conn.execute(
+                                """INSERT INTO tenant_seller_price_snapshots(
+                                       tenant_id,marketplace_code,tenant_seller_id,
+                                       source_product_code,seller_sku,price_amount,
+                                       price_before_discount,discount_percent,currency,
+                                       status,error,captured_at
+                                   ) VALUES(?,'kaspi',?,?,?,?,?,?,?,'ok','',?)""",
+                                (
+                                    int(args.tenant_id), int(args.tenant_seller_id), code,
+                                    merchant_sku, price, before, discount, "KZT", stamp,
+                                ),
+                            )
                         updated += 1
                     conn.commit()
                     print(
@@ -227,6 +283,17 @@ async def run(args: argparse.Namespace) -> int:
                             """,
                             (code, args.seller_id, "error", str(exc), stamp),
                         )
+                        if int(args.tenant_seller_id or 0) > 0:
+                            conn.execute(
+                                """INSERT INTO tenant_seller_price_snapshots(
+                                       tenant_id,marketplace_code,tenant_seller_id,
+                                       source_product_code,status,error,currency,captured_at
+                                   ) VALUES(?,'kaspi',?,?,? ,?,'KZT',?)""",
+                                (
+                                    int(args.tenant_id), int(args.tenant_seller_id),
+                                    code, "error", str(exc)[:1500], stamp,
+                                ),
+                            )
                     conn.commit()
                     print(f"[Быстрые цены] ОШИБКА пакета {batch_no}: {exc}")
                 await asyncio.sleep(random.uniform(args.min_delay, args.max_delay))
@@ -235,7 +302,7 @@ async def run(args: argparse.Namespace) -> int:
             await context.close()
             conn.close()
 
-    if int(args.tenant_id or 0) > 0:
+    if int(args.tenant_id or 0) > 0 and int(args.tenant_seller_id or 0) <= 0:
         refreshed_codes = [str(row["product_code"]) for row in rows]
         CatalogConfigurationService(db_path).materialize_legacy_kaspi_catalog(
             int(args.tenant_id), refreshed_codes, replace=False
@@ -250,6 +317,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default=".kaspi_profile")
     parser.add_argument("--seller-id", default="Unityre")
     parser.add_argument("--tenant-id", type=int, default=0)
+    parser.add_argument("--tenant-seller-id", type=int, default=0)
     parser.add_argument("--city-id", default="750000000")
     parser.add_argument("--zone-id", default="Magnum_ZONE1")
     parser.add_argument("--batch-size", type=int, default=12)

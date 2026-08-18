@@ -55,6 +55,7 @@ from marketplace_registry import (
     allowed_marketplaces_from_user,
     marketplace_for_action,
     marketplace_for_product_code,
+    parse_product_code,
 )
 from security_hygiene import redact_sensitive
 from tenant_security import company_is_approved, has_permission
@@ -66,6 +67,7 @@ from subscription_service import (
 from notification_service import NotificationService
 from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
+from runtime_scope import seller_scope
 
 VERSION = "3.6.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -903,7 +905,10 @@ def workflow_command(
 
 
 def ozon_article_selection(codes: list[str]) -> Path:
-    articles = [code.removeprefix("ozon:") for code in codes if code.startswith("ozon:")]
+    articles = [
+        parse_product_code(code)[2]
+        for code in codes if marketplace_for_product_code(code) == "ozon"
+    ]
     return temporary_json(ROOT / "data" / "operation_selections", "ozon_articles", {"articles": articles})
 
 
@@ -978,18 +983,41 @@ def build_action_command(
     codes: list[str],
     user_id: int,
     scope: str = "all",
+    tenant_seller_id: int | None = None,
 ) -> list[str]:
     action_user = AUTH.get_user(int(user_id)) or {}
     tenant_id = int(action_user.get("tenant_id") or 0)
     if tenant_id <= 0:
         raise ValueError("Компания пользователя не найдена.")
     default_tenant_id = SAAS.default_tenant_id()
+    action_platform = marketplace_for_action(action, ACTION_INFO)
     integration_by_code = {
         str(item.get("integration_code") or ""): item
         for item in SAAS.integrations(tenant_id)
     }
+    selected_seller: dict[str, Any] | None = None
+    if action_platform in MARKETPLACE_CODES:
+        active_sellers = SAAS.sellers(
+            tenant_id, action_platform, active_only=True
+        )
+        if tenant_seller_id not in (None, 0) or active_sellers:
+            selected_seller = SAAS.resolve_seller(
+                tenant_id, action_platform, tenant_seller_id
+            )
+    runtime = seller_scope(ROOT, tenant_id, action_platform, selected_seller)
+    if runtime:
+        runtime.ensure_directories()
 
     def connection(code: str) -> dict[str, Any]:
+        if selected_seller and code == action_platform:
+            return {
+                "seller_name": selected_seller.get("display_name") or "",
+                "seller_identifier": selected_seller.get("external_seller_id") or "",
+                "seller_url": selected_seller.get("source_url") or "",
+                "config": selected_seller.get("config") or {},
+                "discovery": selected_seller.get("discovery") or {},
+                "tenant_seller_id": selected_seller.get("id"),
+            }
         return integration_by_code.get(code) or {}
 
     def stable_identifier(code: str) -> str:
@@ -1030,7 +1058,6 @@ def build_action_command(
     elif tenant_id != default_tenant_id:
         forte["merchant_id"] = ""
 
-    action_platform = marketplace_for_action(action, ACTION_INFO)
     if (
         action_platform == "kaspi" and tenant_id != default_tenant_id
         and not stable_identifier("kaspi")
@@ -1038,7 +1065,7 @@ def build_action_command(
         raise ValueError("Подключите магазин Kaspi по ссылке в настройках компании.")
     analysis = CFG["analysis"]
     codes_text = ",".join(
-        code.removeprefix("kaspi:")
+        parse_product_code(code)[2]
         for code in codes
         if not code.startswith(("ozon:", "ozon_kz:", "halyk:", "forte:", "wb:"))
     )
@@ -1046,10 +1073,18 @@ def build_action_command(
     ozon_kz_cli = ROOT / "collectors" / "ozon_kz" / "ozon_kz_collector.py"
     ozon_kz_status_cli = ROOT / "collectors" / "ozon_kz" / "ozon_kz_connector.py"
     halyk_cli = ROOT / "collectors" / "halyk" / "halyk_collector.py"
-    halyk_codes_text = ",".join(code.removeprefix("halyk:") for code in codes if code.startswith("halyk:"))
+    halyk_codes_text = ",".join(
+        parse_product_code(code)[2]
+        for code in codes if marketplace_for_product_code(code) == "halyk_market"
+    )
     forte_cli = ROOT / "collectors" / "forte" / "forte_collector.py"
-    forte_codes_text = ",".join(code.removeprefix("forte:") for code in codes if code.startswith("forte:"))
+    forte_codes_text = ",".join(
+        parse_product_code(code)[2]
+        for code in codes if marketplace_for_product_code(code) == "forte_market"
+    )
     wildberries_cli = ROOT / "collectors" / "wildberries" / "wildberries_collector.py"
+    seller_internal_id = int((selected_seller or {}).get("id") or 0)
+    kaspi_profile = runtime.profile_dir if runtime else resolve_path(CFG, "profile")
 
     if action == "full_sync_all":
         full_sync_actions = {
@@ -1077,32 +1112,48 @@ def build_action_command(
             raise ValueError(
                 "Полная синхронизация доступна при подключении минимум двух площадок."
             )
-        return workflow_command([
-            (
-                ACTION_INFO[full_sync_actions[code]]["label"],
-                build_action_command(full_sync_actions[code], [], user_id, "all"),
-            )
-            for code in sorted(connected)
-        ])
+        steps: list[tuple[str, list[str]]] = []
+        for code in sorted(connected):
+            sellers = SAAS.sellers(tenant_id, code, active_only=True)
+            seller_targets: list[dict[str, Any] | None] = sellers or [None]
+            for seller in seller_targets:
+                seller_label = str(
+                    (seller or {}).get("display_name")
+                    or (seller or {}).get("external_seller_id")
+                    or ""
+                )
+                label = ACTION_INFO[full_sync_actions[code]]["label"]
+                if seller_label:
+                    label = f"{label} — {seller_label}"
+                steps.append((
+                    label,
+                    build_action_command(
+                        full_sync_actions[code], [], user_id, "all",
+                        int((seller or {}).get("id") or 0) or None,
+                    ),
+                ))
+        return workflow_command(steps)
 
     if action == "kaspi_catalog_collect":
-        return build_action_command("sync_catalog", [], user_id, "all")
+        return build_action_command(
+            "sync_catalog", [], user_id, "all", tenant_seller_id
+        )
     if action == "kaspi_price_actualize":
         return workflow_command([
-            ("Собственные цены Kaspi", build_action_command("update_own_prices", codes, user_id, scope)),
-            ("Предложения продавцов Kaspi", build_action_command("scan_market", codes, user_id, scope)),
+            ("Собственные цены Kaspi", build_action_command("update_own_prices", codes, user_id, scope, tenant_seller_id)),
+            ("Предложения продавцов Kaspi", build_action_command("scan_market", codes, user_id, scope, tenant_seller_id)),
         ])
     if action == "kaspi_full_sync":
         return workflow_command([
-            ("Каталог Kaspi", build_action_command("sync_catalog", [], user_id, "all")),
-            ("Собственные цены Kaspi", build_action_command("update_own_prices", [], user_id, "all")),
-            ("Предложения продавцов Kaspi", build_action_command("scan_market", [], user_id, "all")),
+            ("Каталог Kaspi", build_action_command("sync_catalog", [], user_id, "all", tenant_seller_id)),
+            ("Собственные цены Kaspi", build_action_command("update_own_prices", [], user_id, "all", tenant_seller_id)),
+            ("Предложения продавцов Kaspi", build_action_command("scan_market", [], user_id, "all", tenant_seller_id)),
         ])
     if action == "ozon_price_actualize":
         selection_path = ozon_article_selection(codes) if codes else None
         operation_limit = str(max(1, len(codes)) if codes else 100000)
-        refresh = command_option(build_action_command("ozon_refresh_prices", [], user_id, scope), "--limit", operation_limit)
-        market = command_option(build_action_command("ozon_market_search", [], user_id, scope), "--limit", operation_limit)
+        refresh = command_option(build_action_command("ozon_refresh_prices", [], user_id, scope, tenant_seller_id), "--limit", operation_limit)
+        market = command_option(build_action_command("ozon_market_search", [], user_id, scope, tenant_seller_id), "--limit", operation_limit)
         if selection_path:
             refresh += ["--articles-file", str(selection_path)]
             market += ["--articles-file", str(selection_path)]
@@ -1111,15 +1162,15 @@ def build_action_command(
             [selection_path] if selection_path else [],
         )
     if action == "ozon_kz_price_actualize":
-        return build_action_command("ozon_kz_refresh_prices", codes, user_id, scope)
+        return build_action_command("ozon_kz_refresh_prices", codes, user_id, scope, tenant_seller_id)
     if action == "halyk_catalog_collect":
-        return build_action_command("halyk_sync_catalog", [], user_id, "all")
+        return build_action_command("halyk_sync_catalog", [], user_id, "all", tenant_seller_id)
     if action == "halyk_price_actualize":
-        return build_action_command("halyk_refresh_offers", codes, user_id, scope)
+        return build_action_command("halyk_refresh_offers", codes, user_id, scope, tenant_seller_id)
     if action == "forte_catalog_collect":
-        return build_action_command("forte_sync_catalog", [], user_id, "all")
+        return build_action_command("forte_sync_catalog", [], user_id, "all", tenant_seller_id)
     if action == "forte_price_actualize":
-        return build_action_command("forte_refresh_offers", codes, user_id, scope)
+        return build_action_command("forte_refresh_offers", codes, user_id, scope, tenant_seller_id)
 
     wildberries_actions = {
         "wb_catalog_collect": "sync-catalog",
@@ -1135,6 +1186,7 @@ def build_action_command(
             wildberries_cli, wildberries_actions[action],
             "--db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
+            "--tenant-seller-id", str(seller_internal_id),
             "--seller-id", seller_id,
             "--source-url", source_url,
             "--currency", str(wildberries.get("currency") or "kzt"),
@@ -1151,7 +1203,10 @@ def build_action_command(
     if action == "ozon_kz_status":
         return py_command(
             ozon_kz_status_cli, "status",
-            "--db", str(ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"),
+            "--db", str(
+                runtime.registry_path if runtime
+                else ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"
+            ),
         )
     ozon_kz_actions = {
         "ozon_kz_catalog_collect": "sync-catalog",
@@ -1165,17 +1220,28 @@ def build_action_command(
             raise ValueError("Подключите магазин Ozon.kz по ссылке в настройках компании.")
         command = py_command(
             ozon_kz_cli, ozon_kz_actions[action],
-            "--db", str(ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"),
+            "--db", str(
+                runtime.registry_path if runtime
+                else ROOT / "collectors" / "ozon_kz" / "data" / "ozon_kz_registry.db"
+            ),
             "--app-db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
+            "--tenant-seller-id", str(seller_internal_id),
             "--source-url", source_url,
             "--expected-seller", str(
                 kz_connection.get("seller_name") or kz_connection.get("seller_identifier") or ""
             ),
         )
+        if runtime:
+            command += [
+                "--runtime-dir", str(runtime.base_dir),
+                "--profile-path", str(runtime.profile_dir),
+                "--debug-port", "0",
+            ]
         if action == "ozon_kz_refresh_prices" and codes:
             command += ["--articles", ",".join(
-                code.removeprefix("ozon_kz:") for code in codes if code.startswith("ozon_kz:")
+                parse_product_code(code)[2]
+                for code in codes if marketplace_for_product_code(code) == "ozon_kz"
             )]
         return command
     ozon_actions = {
@@ -1195,7 +1261,15 @@ def build_action_command(
                     ozon_connection.get("seller_name") or ozon_connection.get("seller_identifier") or ""
                 ),
                 "--tenant-id", str(tenant_id),
+                "--tenant-seller-id", str(seller_internal_id),
                 "--app-db", str(DB_PATH),
+            ]
+        if runtime:
+            command += [
+                "--database-path", str(runtime.registry_path),
+                "--runtime-dir", str(runtime.base_dir),
+                "--profile-path", str(runtime.profile_dir),
+                "--debug-port", "0",
             ]
         if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
             command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
@@ -1213,8 +1287,10 @@ def build_action_command(
         command = py_command(
             halyk_cli,
             halyk_actions[action],
-            "--db", str(DB_PATH),
+            "--db", str(runtime.registry_path if runtime else DB_PATH),
+            "--app-db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
+            "--tenant-seller-id", str(seller_internal_id),
             "--seller-name", str(halyk["seller_name"]),
             "--merchant-id", stable_identifier("halyk_market"),
             "--source-url", str(connection("halyk_market").get("seller_url") or ""),
@@ -1248,8 +1324,10 @@ def build_action_command(
         command = py_command(
             forte_cli,
             forte_actions[action],
-            "--db", str(DB_PATH),
+            "--db", str(runtime.registry_path if runtime else DB_PATH),
+            "--app-db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
+            "--tenant-seller-id", str(seller_internal_id),
             "--seller-name", str(
                 connection("forte_market").get("seller_name")
                 or action_user.get("tenant_name")
@@ -1276,7 +1354,8 @@ def build_action_command(
             ROOT / "engine" / "catalog_sync.py",
             "--db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
-            "--profile", str(resolve_path(CFG, "profile")),
+            "--tenant-seller-id", str(seller_internal_id),
+            "--profile", str(kaspi_profile),
             "--seller-id", str(kaspi["seller_id"]),
             "--city-id", str(kaspi["city_id"]),
             "--timeout", str(kaspi["timeout_seconds"]),
@@ -1293,7 +1372,8 @@ def build_action_command(
             ROOT / "engine" / "own_price_refresh.py",
             "--db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
-            "--profile", str(resolve_path(CFG, "profile")),
+            "--tenant-seller-id", str(seller_internal_id),
+            "--profile", str(kaspi_profile),
             "--seller-id", str(kaspi["seller_id"]),
             "--city-id", str(kaspi["city_id"]),
             "--zone-id", str(kaspi["zone_id"]),
@@ -1312,7 +1392,8 @@ def build_action_command(
             ROOT / "engine" / "exact_offer_refresh.py",
             "--db", str(DB_PATH),
             "--tenant-id", str(tenant_id),
-            "--profile", str(resolve_path(CFG, "profile")),
+            "--tenant-seller-id", str(seller_internal_id),
+            "--profile", str(kaspi_profile),
             "--seller-id", str(kaspi["seller_id"]),
             "--seller-name", str(kaspi["seller_name"]),
             "--city-id", str(kaspi["city_id"]),
@@ -1462,6 +1543,7 @@ def after_request(response: Any) -> Any:
 @app.context_processor
 def template_context() -> dict[str, Any]:
     user = current_user()
+    template_user = dict(user) if user else None
     visible_catalog = INTEGRATION_CATALOG
     if user and user.get("tenant_id") and not is_superadmin(user):
         company_catalog = SAAS.marketplace_access(
@@ -1477,9 +1559,27 @@ def template_context() -> dict[str, Any]:
             item for item in company_catalog
             if str(item.get("code") or "") in visible_codes
         ]
+    if template_user is not None:
+        template_user["marketplace_sellers"] = {}
+        if template_user.get("tenant_id"):
+            for marketplace in MARKETPLACE_CODES:
+                template_user["marketplace_sellers"][marketplace] = [
+                    {
+                        "id": int(seller["id"]),
+                        "external_seller_id": str(
+                            seller.get("external_seller_id") or ""
+                        ),
+                        "display_name": str(seller.get("display_name") or ""),
+                    }
+                    for seller in SAAS.sellers(
+                        int(template_user["tenant_id"]),
+                        marketplace,
+                        active_only=True,
+                    )
+                ]
     return {
         "csrf_token": ensure_csrf(),
-        "current_user": user,
+        "current_user": template_user,
         "current_tenant": current_tenant(),
         "version": VERSION,
         "integration_catalog": visible_catalog,
@@ -1986,6 +2086,27 @@ def api_task_start() -> Any:
     if access_error:
         return json_error(access_error, 403)
     task_platform = marketplace_for_action(action, ACTION_INFO)
+    try:
+        requested_seller_id = int(payload.get("tenant_seller_id") or 0)
+    except (TypeError, ValueError):
+        return json_error("Некорректный идентификатор продавца.")
+    selected_seller: dict[str, Any] | None = None
+    if task_platform in MARKETPLACE_CODES:
+        active_sellers = SAAS.sellers(
+            int(user["tenant_id"]), task_platform, active_only=True
+        )
+        if requested_seller_id or active_sellers:
+            try:
+                selected_seller = SAAS.resolve_seller(
+                    int(user["tenant_id"]),
+                    task_platform,
+                    requested_seller_id or None,
+                )
+            except PermissionError as exc:
+                return json_error(str(exc), 403)
+            except ValueError as exc:
+                return json_error(str(exc), 409)
+    effective_seller_id = int((selected_seller or {}).get("id") or 0)
     codes = clean_codes(payload.get("codes"))
     access_error = product_codes_access_error(codes, user)
     if access_error:
@@ -2029,10 +2150,24 @@ def api_task_start() -> Any:
         codes = [code for code in codes if not code.startswith(("ozon:", "ozon_kz:", "halyk:", "forte:"))]
     if scope in {"selected", "filtered"} and action != "export_report" and not codes:
         return json_error("Для выбранной площадки подходящие товары не найдены.")
+    if codes and effective_seller_id and task_platform in MARKETPLACE_CODES:
+        memberships = CATALOG.catalog_memberships(
+            int(user["tenant_id"]), [task_platform], effective_seller_id
+        )
+        permitted_sources = {code for _, code in memberships}
+        source_codes = {parse_product_code(code)[2] for code in codes}
+        if source_codes - permitted_sources:
+            return json_error(
+                "Один или несколько товаров не принадлежат выбранному продавцу.",
+                403,
+            )
     command: list[str] = []
     quota_platforms: list[str] = []
     try:
-        command = build_action_command(action, codes, int(user["id"]), scope)
+        command = build_action_command(
+            action, codes, int(user["id"]), scope,
+            effective_seller_id or None,
+        )
         if scope == "filtered":
             suffix = f" — по фильтрам, {len(codes)} поз."
         elif codes:
@@ -2051,17 +2186,52 @@ def api_task_start() -> Any:
                     int(user["tenant_id"]), quota_platform
                 )
                 quota_platforms.append(quota_platform)
+        task_scope = seller_scope(
+            ROOT, int(user["tenant_id"]), task_platform, selected_seller
+        )
+        task_resources = (
+            task_scope.task_resources(info["resource"])
+            if task_scope else info["resource"]
+        )
+        if action == "full_sync_all":
+            task_resources = []
+            resource_by_platform = {
+                "kaspi": "kaspi_browser",
+                "ozon": "ozon_browser",
+                "ozon_kz": "ozon_kz",
+                "halyk_market": "halyk_api",
+                "forte_market": "forte_api",
+                "wildberries": "wildberries_api",
+            }
+            for platform in sorted(allowed_marketplaces(user)):
+                sellers = SAAS.sellers(
+                    int(user["tenant_id"]), platform, active_only=True
+                )
+                if sellers:
+                    task_resources.extend(
+                        f"seller:{int(user['tenant_id'])}:{platform}:{int(seller['id'])}"
+                        for seller in sellers
+                    )
+                elif platform in resource_by_platform:
+                    task_resources.append(resource_by_platform[platform])
         task = TASKS.start(
             action,
             label,
             command,
-            info["resource"],
+            task_resources,
             metadata={
                 "scope": scope,
                 "codes_count": len(codes),
                 "requested_by": user.get("display_name"),
                 "requested_by_id": user.get("id"),
                 "tenant_id": user.get("tenant_id"),
+                "tenant_seller_id": effective_seller_id or None,
+                "seller_id": str(
+                    (selected_seller or {}).get("external_seller_id") or ""
+                ),
+                "seller_name": str(
+                    (selected_seller or {}).get("display_name") or ""
+                ),
                 "platform": task_platform,
                 "platforms": (
                     sorted(allowed_marketplaces(user))
@@ -2078,6 +2248,13 @@ def api_task_start() -> Any:
         )
         record_event("task_started", "task", task["id"], {"action": action, "scope": scope, "codes": len(codes)})
         return json_ok(task=public_task(task))
+    except PermissionError as exc:
+        for quota_platform in quota_platforms:
+            subscription_service().release_operation(
+                int(user.get("tenant_id") or 0), quota_platform
+            )
+        cleanup_pending_command(command)
+        return json_error(str(exc), 403)
     except (ValueError, RuntimeError, SubscriptionError) as exc:
         for quota_platform in quota_platforms:
             subscription_service().release_operation(
@@ -2382,7 +2559,7 @@ def api_settings_put() -> Any:
                     value = float(analysis[key]) if "days" in key else int(analysis[key])
                     updated["analysis"][key] = max(minimum, min(value, maximum))
             if "max_parallel_tasks" in app_values:
-                updated["app"]["max_parallel_tasks"] = max(1, min(int(app_values["max_parallel_tasks"]), 5))
+                updated["app"]["max_parallel_tasks"] = max(1, min(int(app_values["max_parallel_tasks"]), 12))
             if "product_page_size" in app_values:
                 updated["app"]["product_page_size"] = max(10, min(int(app_values["product_page_size"]), 100))
             save_config(updated)
@@ -2907,13 +3084,15 @@ def api_platform_tenant_marketplaces_update(tenant_id: int) -> Any:
 def api_platform_tenant_marketplace_review(
     tenant_id: int, marketplace_code: str, decision: str
 ) -> Any:
+    payload = json_payload()
     try:
         result = SAAS.review_marketplace_connection(
             tenant_id,
             marketplace_code,
             decision,
             int((current_user() or {})["id"]),
-            str(json_payload().get("review_note") or ""),
+            str(payload.get("review_note") or ""),
+            int(payload.get("tenant_seller_id") or 0) or None,
         )
         return json_ok(integration=result)
     except ValueError as exc:
