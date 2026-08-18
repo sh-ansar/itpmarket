@@ -1,12 +1,12 @@
 # Multi-user / Multi-seller / Concurrency Audit
 
-Дата аудита: 18 августа 2026 года. Ветка: `feature/runtime-audit-and-startup`.
+Дата аудита: 18 августа 2026 года. Документ обновлён после production-read проверки каталога.
 
 ## Итог
 
 Приложение теперь имеет явную единицу изоляции `tenant + marketplace + tenant_seller_id`. Каталог продавца, price/offer snapshots Kaspi, credentials, browser profile, runtime artifacts, schedule, job resource и контекст лога привязаны к этой единице. Разные продавцы могут выполняться параллельно; две конфликтующие операции одного продавца отклоняются с сообщением `seller already has active job`.
 
-Автоматическая проверка прошла: **108/108 tests PASS**, включая 15 новых deterministic concurrency/regression tests. Live multi-seller запуск Kaspi/Ozon и параллельная проверка на настоящем PostgreSQL не выполнялись: в безопасной среде нет нескольких авторизованных профилей и локального PostgreSQL. Поэтому готовность к production нельзя считать полностью подтверждённой только по mock/SQLite результатам.
+Автоматические concurrency/regression проверки проходят. Read-only catalog path дополнительно измерен на настоящем production PostgreSQL; live multi-seller запуск Kaspi/Ozon по-прежнему не выполнялся, потому что для него нужны несколько отдельных авторизованных профилей. Поэтому результаты PostgreSQL-чтения не заменяют live-проверку marketplace runtime и конкурентных записей.
 
 ## Найденные архитектурные дефекты и исправления
 
@@ -32,7 +32,7 @@
 - PostgreSQL catalog replacement сериализуется row lock по tenant; SQLite использует immediate write transaction. Ошибка приводит к rollback всей операции выбранного seller.
 - `tenant_integrations` и `tenant_catalog_products` пока сохраняются как compatibility aggregate для single-seller/legacy code. Они не являются источником seller identity.
 
-Миграция [20260818_multi_seller_v1.sql](../migrations/20260818_multi_seller_v1.sql) additive: создаёт seller-scoped tables/columns/indexes, выполняет однозначный backfill и не содержит `DROP`/`DELETE`. В ходе аудита PostgreSQL-миграция **не применялась**. Перед production применением обязательны verified backup, staging rehearsal и явное maintenance decision.
+Миграция [20260818_multi_seller_v1.sql](../migrations/20260818_multi_seller_v1.sql) additive: создаёт seller-scoped tables/columns/indexes, выполняет однозначный backfill и не содержит `DROP`/`DELETE`. Она применена в production 18 августа 2026 года после verified backup и staging rehearsal.
 
 ## Авторизация и IDOR
 
@@ -61,7 +61,7 @@ Kaspi, Ozon.ru и Ozon.kz получают отдельный profile path на 
 
 ## Performance baseline
 
-Локальный baseline измеряет параллельную seller-scoped materialization по 50 товаров на seller в отдельной временной SQLite DB. Это не browser stress test и не PostgreSQL benchmark.
+Локальный baseline измеряет параллельную seller-scoped materialization по 50 товаров на seller в отдельной временной SQLite DB. Это не browser stress test.
 
 | Sellers | Duration, s | CPU, s | RSS delta, MB | Peak DB workers | Errors | Rows |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -71,6 +71,17 @@ Kaspi, Ozon.ru и Ozon.kz получают отдельный profile path на 
 | 6 | 0.287 | 0.359 | -0.21 | 6 | 0 | 300 |
 
 RSS delta на таком коротком процессе шумный (включая отрицательные значения из-за сборки памяти), поэтому по нему нельзя делать вывод о browser memory leak. Ошибок и незавершённых workers не было. Реальный baseline Chrome + PostgreSQL остаётся `BLOCKED`.
+
+Отдельно выполнен безопасный read-only benchmark production PostgreSQL на tenant с 15 825 seller-scoped строками. Production-код во время замера не менялся; версия с исправлением загружалась из staging-копии модулей.
+
+| Catalog read | До, s | После, s | Изменение |
+| --- | ---: | ---: | ---: |
+| Один прогретый products page | 1.100 | 0.262 | −76% |
+| 1 одновременный холодный запрос | 1.006 | 1.031 | в пределах шума |
+| 2 одновременных холодных запроса | 2.025 | 1.342 | −34% |
+| 4 одновременных холодных запроса | 3.911 | 1.973 | −50% |
+
+Ускорение получено за счёт двухсекундного tenant snapshot и single-flight одинаковых tenant/scope запросов. Разные tenants используют разные locks. Legacy snapshot после истечения TTL обновляется в фоне, а HTTP получает последний полностью собранный снимок. Product detail повторно использует уже загруженные строки, а CPU matching больше не удерживает соединение из ограниченного PostgreSQL pool.
 
 ## Startup prerequisites
 
@@ -112,7 +123,7 @@ RSS delta на таком коротком процессе шумный (вкл
 | Subscription concurrency | PASS | Два синхронных writers не превышают tenant+marketplace capacity; один получает контролируемый отказ. |
 | Cross-tenant access | PASS | Direct seller IDOR, seller list, credentials, catalogs и одинаковые external IDs изолированы по tenant. |
 | Browser profile isolation | PASS | Deterministic path test доказывает уникальность tenant/marketplace/seller profiles; live cookies не инспектировались. |
-| PostgreSQL concurrency | PARTIAL | Hard connection bound, transaction/locking SQL и compatibility tests PASS; live PostgreSQL server отсутствует. |
+| PostgreSQL concurrency | PARTIAL | Read-only каталог измерен на production PostgreSQL, hard connection bound и transaction/locking SQL покрыты; конкурентный write/deadlock stress не выполнялся. |
 | UI availability during sync | PASS | Collectors запускаются subprocess-ами вне request thread; local HTTP smoke сохраняет ответы health/ready/UI/API. |
 
 ## Команды проверки

@@ -70,7 +70,7 @@ from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import seller_scope
 
-VERSION = "3.7.0"
+VERSION = "3.7.1"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -661,6 +661,10 @@ def requested_platform_filters() -> tuple[dict[str, Any], set[str]]:
     if not requested:
         if len(visible) == 1:
             filters["platform"] = next(iter(visible))
+        elif visible:
+            # Keep an unfiltered catalogue inside the effective marketplace
+            # grant and use the same tenant/scope cache key as inventory/detail.
+            filters["platforms"] = sorted(visible)
         elif not visible:
             filters["platform"] = "__no_marketplace_access__"
     selections: dict[str, list[str]] = {}
@@ -1484,6 +1488,7 @@ atexit.register(SCHEDULER.stop)
 
 @app.before_request
 def before_request() -> Any:
+    g.request_started_at = time.perf_counter()
     g.user = None
     user_id = session.get("user_id")
     if user_id:
@@ -1518,6 +1523,21 @@ def before_request() -> Any:
 
 @app.after_request
 def after_request(response: Any) -> Any:
+    started_at = getattr(g, "request_started_at", None)
+    if started_at is not None:
+        duration_ms = max(0.0, (time.perf_counter() - float(started_at)) * 1000)
+        response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
+        if duration_ms >= 2000 and request.path.startswith("/api/"):
+            user = current_user() or {}
+            app.logger.warning(
+                "slow_request method=%s path=%s status=%s duration_ms=%.1f user_id=%s tenant_id=%s",
+                request.method,
+                request.path,
+                response.status_code,
+                duration_ms,
+                user.get("id"),
+                user.get("tenant_id"),
+            )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
@@ -1971,6 +1991,8 @@ def product_filters_from_payload(raw: Any, user: dict[str, Any]) -> dict[str, An
     if not requested:
         if len(allowed) == 1:
             filters["platform"] = next(iter(allowed))
+        elif allowed:
+            filters["platforms"] = sorted(allowed)
         elif not allowed:
             filters["platform"] = "__no_marketplace_access__"
     raw_attributes = source.get("attributes")
@@ -2025,10 +2047,10 @@ def api_product(code: str) -> Any:
     platform = marketplace_for_product_code(code)
     if platform not in allowed_marketplaces(user):
         return json_error("Нет доступа к выбранной площадке.", 403)
-    product = DATA.product(code, int(user["id"]))
+    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
+    product = DATA.product(code, int(user["id"]), rows=rows)
     if not product:
         return json_error("Товар не найден.", 404)
-    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
     try:
         context = inventory_service().context(
             int(user["tenant_id"]), code, rows,

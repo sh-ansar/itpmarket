@@ -55,9 +55,12 @@
   const FILTERABLE_ACTIONS = new Set(['kaspi_price_actualize','ozon_price_actualize','ozon_kz_price_actualize','halyk_price_actualize','forte_price_actualize','export_report']);
 
 
-  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0};
+  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,overviewLoading:false,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0,inventoryLoaded:false,inventoryLoading:false};
   const multiSelectRegistry = new Map();
   let helpReturnFocus = null;
+  let productsRequestController = null;
+  let productsRequestSerial = 0;
+  let productDrawerController = null;
 
   function multiValues(target){
     const node=typeof target==='string'?$(target):target;
@@ -122,8 +125,12 @@
 
   async function api(path, options={}) {
     const timeoutMs=Number(options.timeoutMs||25000);
-    const controller=options.signal?null:new AbortController();
-    const opts = {...options, headers:{...(options.headers||{})},signal:options.signal||(controller&&controller.signal)};
+    const externalSignal=options.signal||null;
+    const controller=new AbortController();
+    let externallyAborted=false;
+    const forwardAbort=()=>{externallyAborted=true;controller.abort()};
+    if(externalSignal){if(externalSignal.aborted)forwardAbort();else externalSignal.addEventListener('abort',forwardAbort,{once:true})}
+    const opts = {...options, headers:{...(options.headers||{})},signal:controller.signal};
     delete opts.timeoutMs;
     if (opts.body && typeof opts.body !== 'string') { opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body); }
     if (opts.method && opts.method !== 'GET') opts.headers['X-CSRF-Token']=csrf;
@@ -133,7 +140,11 @@
       const data = await res.json().catch(()=>({ok:false,error:`HTTP ${res.status}`}));
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
-    }catch(error){if(error?.name==='AbortError')throw new Error('Сервер отвечает слишком долго. Повторите действие.');throw error}finally{if(timer)clearTimeout(timer)}
+    }catch(error){
+      if(error?.name==='AbortError'&&externallyAborted)throw error;
+      if(error?.name==='AbortError'){const timeoutError=new Error('Запрос занял слишком много времени. Текущие данные сохранены — попробуйте обновить ещё раз.');timeoutError.code='REQUEST_TIMEOUT';throw timeoutError}
+      throw error;
+    }finally{if(timer)clearTimeout(timer);externalSignal?.removeEventListener('abort',forwardAbort)}
   }
   const esc = v => String(v ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const externalHref = v => {
@@ -266,7 +277,13 @@
   }
   function renderPageHeading(){ const node=$('#pageTitle'),wrap=node?.closest('.page-section-header'); if(!node||!wrap)return; wrap.hidden=['dashboard','products','operations','reports','schedules','users'].includes(state.page); const key=`${state.page}_page_title`; node.textContent=t(key,t(`nav_${state.page}`,'Spyon')); }
   const PAGE_PERMISSIONS={dashboard:'view_dashboard',products:'view_products',operations:'view_operations',schedules:'view_operations',reports:'view_reports',users:'manage_users',settings:'view_settings'};
-  function navigate(page){ if(PAGE_PERMISSIONS[page]&&!can(PAGE_PERMISSIONS[page]))return toast('Недостаточно прав.',true);state.page=page; $$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`)); $$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page)); renderPageHeading(); if(page==='products')loadProducts(); if(page==='operations')loadTasks(); if(page==='reports')loadReports(); if(page==='schedules')loadSchedules(); if(page==='settings')loadSettings(); if(page==='users')loadUsers(); $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton(); }
+  function navigate(page){
+    if(PAGE_PERMISSIONS[page]&&!can(PAGE_PERMISSIONS[page]))return toast('Недостаточно прав.',true);
+    state.page=page;$$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`));$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page));renderPageHeading();
+    if(page==='products'){loadProducts();if(can('view_inventory'))loadInventorySummary()}
+    if(page==='operations')loadTasks();if(page==='reports')loadReports();if(page==='schedules')loadSchedules();if(page==='settings')loadSettings();if(page==='users')loadUsers();
+    $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton();
+  }
   function applyPermissions(){
     Object.entries(PAGE_PERMISSIONS).forEach(([page,permission])=>{
       $$(`[data-page="${page}"],[data-page-link="${page}"]`).forEach(node=>node.hidden=!can(permission));
@@ -277,6 +294,7 @@
   }
 
   async function loadOverview(){
+    if(state.overviewLoading)return;state.overviewLoading=true;
     try{
       const data=await api('/api/overview',{timeoutMs:60000}); const o=data.overview; state.overview=o; state.tasks=data.tasks||[];
       const dataCoverage=Number(o.data_coverage_pct ?? o.scan_coverage_pct ?? 0);
@@ -286,7 +304,7 @@
       $('#metricOpportunity').closest('article').title='Оценка возможного роста выручки: для товаров Kaspi с точными предложениями рассчитывается разница до нижнего квартиля цен продавцов и умножается на заданный месячный объём. Это не бухгалтерская маржа и не прогноз прибыли.';
       renderStatusChart(o.status_distribution||[]); renderHealth(o.health||{},o); if($('#activityList')) renderActivity(o.recent_events||[]); renderRunningBadge(data.tasks||[]);
       if(o.preferences?.locale && !localStorage.getItem('itp_lang')) applyI18n(o.preferences.locale);
-    }catch(e){toast(e.message,true)}
+    }catch(e){toast(e.message,true)}finally{state.overviewLoading=false}
   }
   function renderStatusChart(rows){ const total=rows.reduce((a,b)=>a+Number(b.count||0),0)||1; $('#statusChart').innerHTML=rows.length?rows.slice(0,8).map(r=>{const count=Number(r.count||0),pct=Math.min(100,count*100/total);return `<div class="status-row"><div class="status-row-head"><label>${esc(statusLabel(r.status))}</label><b>${number(count)}</b></div><div class="status-bar"><i style="width:${Math.max(2,pct)}%"></i></div><small>${esc(t('status_scale_summary','Из {total} товаров · {pct}% по шкале из 100%').replace('{total}',number(total)).replace('{pct}',pct.toFixed(1)))}</small></div>`}).join(''):`<div class="empty">${esc(t('empty_data','Нет данных'))}</div>`; }
   function renderHealth(h,o){ const coverage=Number(o.data_coverage_pct ?? o.scan_coverage_pct ?? 0);const items=[['catalog','Каталог',platformCounts(o),'catalog'],['prices','Цены',`${Number(o.price_coverage_pct||0).toFixed(1)}% покрытия`,'currency'],['market','Обработка данных',`${coverage.toFixed(1)}% · ${platformReady(o)}`,'chart']];$('#healthList').innerHTML=items.map(([k,n,d,ic])=>`<div class="health-item ${esc(h[k]||'empty')}"><span>${icon(ic)}</span><div><b>${n}</b><small>${d}</small></div><i></i></div>`).join(''); }
@@ -379,16 +397,45 @@
   function hasProductFilters(){const f=productFiltersPayload();return Boolean(f.query.trim()||f.platforms.length||f.brand.length||f.status.length||f.freshness.length||f.product_type.length||f.size.length||f.season.length||f.characteristic_group.length||Object.keys(f.attributes).length||f.scope!=='all');}
   function updateFilterResetVisibility(){const button=$('#resetFilters'),filters=$('#productFilters');const active=hasProductFilters();if(button)button.hidden=!active;if(filters)filters.classList.toggle('has-reset',active);}
 
+  function productSkeletonRows(){
+    return Array.from({length:6},()=>`<tr class="product-skeleton-row" aria-hidden="true"><td><i></i></td><td><i class="wide"></i><i class="medium"></i></td><td><i class="medium"></i></td><td><i class="short"></i></td><td><i class="wide"></i></td><td><i class="medium"></i></td><td><i class="short"></i></td><td><i class="medium"></i></td><td><i class="short"></i></td></tr>`).join('');
+  }
+  function setProductsLoading(active,{initial=false}={}){
+    const card=$('#page-products .table-card'),info=$('#productsLoadInfo'),refresh=$('#refreshProducts');
+    card?.classList.toggle('is-loading',active);card?.setAttribute('aria-busy',String(active));info?.classList.toggle('is-loading',active);if(refresh)refresh.disabled=active;
+    if(active&&initial)$('#productsBody').innerHTML=productSkeletonRows();
+  }
+  function renderProductsError(message){
+    $('#productsBody').innerHTML=`<tr><td colspan="9"><div class="catalog-error"><b>${esc(t('load_error','Не удалось загрузить каталог'))}</b><span>${esc(message)}</span><button class="secondary" id="retryProducts" type="button">${esc(t('refresh','Повторить'))}</button></div></td></tr>`;
+    $('#retryProducts').onclick=()=>loadProducts();
+  }
+
   async function loadProducts(){
-    state.products.requestStartedAt=Date.now();
+    const requestSerial=++productsRequestSerial;
+    productsRequestController?.abort();
+    const controller=new AbortController();productsRequestController=controller;
+    const startedAt=Date.now();state.products.requestStartedAt=startedAt;
     updateFilterResetVisibility();
     $('#productsLoadInfo').textContent=t('loading_catalog','Загружаем каталог…');
-    $('#productsBody').innerHTML=`<tr><td colspan="9"><div class="loader">${esc(t('loading_catalog','Загрузка каталога…'))}</div></td></tr>`;
-    if(can('view_inventory'))loadInventorySummary();
-    try{const d=await api(`/api/products?${productQuery()}`);const r=d.result;state.products={...state.products,page:r.page,pages:r.pages,pageSize:r.page_size,total:r.total,items:r.items,lastDurationMs:Date.now()-state.products.requestStartedAt};$('#productsFound').textContent=number(r.total);$('#pageInfo').textContent=`${r.page} / ${r.pages}`;$('#productsLoadInfo').textContent=t('products_updated_in','Обновлено за {seconds} сек').replace('{seconds}',(state.products.lastDurationMs/1000).toFixed(2));renderProducts(r.items);}catch(e){$('#productsLoadInfo').textContent=t('load_error','Ошибка загрузки');$('#productsBody').innerHTML=`<tr><td colspan="9"><div class="empty">${esc(e.message)}</div></td></tr>`;}
+    setProductsLoading(true,{initial:!state.products.items.length});
+    try{
+      const d=await api(`/api/products?${productQuery()}`,{signal:controller.signal,timeoutMs:45000});
+      if(requestSerial!==productsRequestSerial)return;
+      const r=d.result,lastDurationMs=Date.now()-startedAt;
+      state.products={...state.products,page:r.page,pages:r.pages,pageSize:r.page_size,total:r.total,items:r.items,lastDurationMs};
+      $('#productsFound').textContent=number(r.total);$('#pageInfo').textContent=`${r.page} / ${r.pages}`;$('#productsLoadInfo').textContent=t('products_updated_in','Обновлено за {seconds} сек').replace('{seconds}',(lastDurationMs/1000).toFixed(2));renderProducts(r.items);
+    }catch(e){
+      if(e?.name==='AbortError'||requestSerial!==productsRequestSerial)return;
+      $('#productsLoadInfo').textContent=t('load_error','Ошибка загрузки');
+      if(state.products.items.length){toast(e.message,true)}else renderProductsError(e.message);
+    }finally{
+      if(requestSerial===productsRequestSerial){setProductsLoading(false);productsRequestController=null}
+    }
   }
-  async function loadInventorySummary(){
+  async function loadInventorySummary({force=false}={}){
     const host=$('#inventorySummary');if(!host)return;
+    if(state.inventoryLoading||(!force&&state.inventoryLoaded))return;
+    state.inventoryLoading=true;host.classList.add('is-loading');host.setAttribute('aria-busy','true');
     try{
       const data=await api('/api/inventory/summary'),summary=data.summary||{};
       $('#inventoryItems').textContent=number(summary.inventory_products);
@@ -396,8 +443,9 @@
       $('#inventoryValue').textContent=money(summary.stock_value_kzt);
       $('#inventoryValueNote').textContent=summary.stock_value_complete?'по закупочной цене':`частичная сумма · без цены: ${number(summary.unpriced_inventory_products)}`;
       $('#inventoryUnmatched').textContent=number(summary.unmatched_listings);
-      host.classList.remove('has-error');
+      host.classList.remove('has-error');state.inventoryLoaded=true;
     }catch(error){host.classList.add('has-error');}
+    finally{state.inventoryLoading=false;host.classList.remove('is-loading');host.setAttribute('aria-busy','false')}
   }
   function renderProducts(items){
     $('#productsBody').innerHTML=items.length?items.map(p=>{
@@ -499,8 +547,13 @@
   }
 
 async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_product',{method:'POST',body:{product_code:code}}); if(d && d.stopped && d.stopped.length) toast(t('stopped_ok','Остановлено')) ; else if(d && d.stopped && d.stopped.length===0) toast(t('stopped_none','Связанные выполняемые операции не найдены'), true); if(typeof loadTasks==='function') loadTasks(); }catch(e){toast(e.message,true)} }
-  async function openProduct(code){ state.currentProductCode=code;$('#backdrop').hidden=false;$('#productDrawer').classList.add('open');$('#productDrawer').setAttribute('aria-hidden','false');$('#drawerBody').innerHTML='<div class="loader">Загрузка…</div>';try{const d=await api(`/api/products/${encodeURIComponent(code)}`);renderDrawer(d.product);}catch(e){$('#drawerBody').innerHTML=`<div class="empty">${esc(e.message)}</div>`;} }
-  function closeDrawer(){ $('#productDrawer').classList.remove('open');$('#backdrop').hidden=true;$('#productDrawer').setAttribute('aria-hidden','true'); }
+  function drawerLoadingMarkup(){return '<div class="drawer-loading" aria-label="Загрузка товара"><div class="drawer-skeleton-product"><i></i><span><b></b><b></b><b></b></span></div><div class="drawer-skeleton-grid"><i></i><i></i><i></i><i></i></div><div class="drawer-skeleton-section"></div><div class="drawer-skeleton-section"></div></div>'}
+  async function openProduct(code){
+    productDrawerController?.abort();const controller=new AbortController();productDrawerController=controller;
+    state.currentProductCode=code;$('#backdrop').hidden=false;$('#productDrawer').classList.add('open');$('#productDrawer').setAttribute('aria-hidden','false');$('#drawerBody').innerHTML=drawerLoadingMarkup();
+    try{const d=await api(`/api/products/${encodeURIComponent(code)}`,{signal:controller.signal,timeoutMs:45000});if(state.currentProductCode===code&&!controller.signal.aborted)renderDrawer(d.product)}catch(e){if(e?.name==='AbortError')return;$('#drawerBody').innerHTML=`<div class="catalog-error drawer-error"><b>${esc(t('load_error','Не удалось загрузить товар'))}</b><span>${esc(e.message)}</span><button class="secondary" id="retryProduct" type="button">${esc(t('refresh','Повторить'))}</button></div>`;$('#retryProduct').onclick=()=>openProduct(code)}finally{if(productDrawerController===controller)productDrawerController=null}
+  }
+  function closeDrawer(){ productDrawerController?.abort();productDrawerController=null;$('#productDrawer').classList.remove('open');$('#backdrop').hidden=true;$('#productDrawer').setAttribute('aria-hidden','true'); }
   function renderDrawer(p){
     $('#drawerTitle').textContent=p.title||t('product','Товар');
     // Only Ozon.ru uses RUB. Kaspi and Halyk Market are always displayed in KZT.
@@ -544,12 +597,12 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   async function saveInventoryFromDrawer(event){
     event.preventDefault();const form=event.currentTarget,button=form.querySelector('button[type="submit"]');
     const values=Object.fromEntries(new FormData(form).entries());
-    try{if(button)button.disabled=true;await api(`/api/products/${encodeURIComponent(state.currentProductCode)}/inventory`,{method:'PUT',body:values});toast('Остаток и закупочная цена сохранены');await Promise.all([openProduct(state.currentProductCode),loadInventorySummary()]);}catch(error){toast(error.message,true)}finally{if(button)button.disabled=false}
+    try{if(button)button.disabled=true;await api(`/api/products/${encodeURIComponent(state.currentProductCode)}/inventory`,{method:'PUT',body:values});toast('Остаток и закупочная цена сохранены');await Promise.all([openProduct(state.currentProductCode),loadInventorySummary({force:true})]);}catch(error){toast(error.message,true)}finally{if(button)button.disabled=false}
   }
 
   async function decideProductMatch(button){
     const decision=button.dataset.matchDecision,candidateCode=button.dataset.candidateCode,code=state.currentProductCode;
-    try{button.disabled=true;await api(`/api/products/${encodeURIComponent(code)}/match`,{method:'POST',body:{candidate_code:candidateCode,decision}});toast(decision==='confirmed'?'Карточки объединены в один складской товар':'Предложение отклонено');await Promise.all([openProduct(code),loadInventorySummary()]);}catch(error){toast(error.message,true)}finally{button.disabled=false}
+    try{button.disabled=true;await api(`/api/products/${encodeURIComponent(code)}/match`,{method:'POST',body:{candidate_code:candidateCode,decision}});toast(decision==='confirmed'?'Карточки объединены в один складской товар':'Предложение отклонено');await Promise.all([openProduct(code),loadInventorySummary({force:true})]);}catch(error){toast(error.message,true)}finally{button.disabled=false}
   }
 
   const relationLabel = v => ({KASPI_SAME_CARD:'Та же карточка Kaspi',EXACT_MODEL:'Точный товар',REVIEW:'Требует проверки',accepted:'Подтверждено',review:'Проверка',rejected:'Отклонено'}[v]||v||'Точный кандидат');
@@ -1115,7 +1168,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if(can('view_operations'))jobs.push(loadTasks());
     jobs.push(loadNotifications({announce:false}));
     Promise.allSettled(jobs).then(results=>results.filter(item=>item.status==='rejected').forEach(item=>console.error(item.reason)));
-    setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(loadOverview,15000);
+    setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(()=>{if(state.page==='dashboard')loadOverview()},15000);
     setInterval(()=>loadNotifications(),10000);
   }
   init().catch(e=>{console.error(e);$('#boot').innerHTML=`<strong>Ошибка запуска</strong><span>${esc(e.message)}</span>`});

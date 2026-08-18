@@ -45,6 +45,8 @@ SORT_FIELDS = {
 RISK_STATUSES = {"EXACT_ABOVE", "EXACT_HIGHEST", "DATA_ERROR"}
 OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_BELOW"}
 UNSCANNED_STATUSES = {"NOT_ANALYZED", "INSUFFICIENT_DATA", "REVIEW_REQUIRED"}
+TENANT_SNAPSHOT_CACHE_TTL_SECONDS = 2.0
+TENANT_SNAPSHOT_CACHE_MAX_KEYS = 128
 OZON_READY_STATUSES = {
     "DATA_COLLECTED", "NO_OTHER_SELLERS", "EXACT_LOWEST", "EXACT_BELOW",
     "EXACT_TIED_LOWEST", "EXACT_IN_MARKET", "EXACT_ABOVE", "EXACT_HIGHEST",
@@ -95,6 +97,14 @@ class DataService:
         self._rows_cache: list[dict[str, Any]] = []
         self._rows_cached_at = 0.0
         self._rows_signature: tuple[int, ...] | None = None
+        self._rows_refreshing = False
+        self._cache_generation = 0
+        self._tenant_snapshot_cache: dict[
+            tuple[int, tuple[str, ...]], tuple[float, list[dict[str, Any]]]
+        ] = {}
+        self._tenant_snapshot_locks: dict[
+            tuple[int, tuple[str, ...]], threading.Lock
+        ] = {}
         ensure_database(self.db_path)
         # The legacy Kaspi Database wrapper validates a local SQLite file.
         # PostgreSQL deployments deliberately have no such file in a clean
@@ -119,9 +129,13 @@ class DataService:
 
     def invalidate(self) -> None:
         with self.lock:
+            self._cache_generation += 1
             self._rows_cached_at = 0.0
             self._rows_cache = []
             self._rows_signature = None
+            self._rows_refreshing = False
+            self._tenant_snapshot_cache.clear()
+            self._tenant_snapshot_locks.clear()
 
     @staticmethod
     def _json(value: Any, default: Any) -> Any:
@@ -1481,6 +1495,59 @@ class DataService:
     def _tenant_catalog_snapshot(
         self, tenant_id: int, marketplaces: set[str] | None = None
     ) -> list[dict[str, Any]]:
+        requested = tuple(sorted({
+            str(value).strip() for value in (marketplaces or set())
+            if str(value).strip()
+        }))
+        key = (int(tenant_id), requested)
+        now = time.monotonic()
+        with self.lock:
+            generation = self._cache_generation
+            cached = self._tenant_snapshot_cache.get(key)
+            if cached and cached[0] > now:
+                return cached[1]
+            key_lock = self._tenant_snapshot_locks.setdefault(key, threading.Lock())
+
+        # Only identical tenant/scope loads wait for each other. Different
+        # companies and marketplace scopes remain fully concurrent.
+        with key_lock:
+            now = time.monotonic()
+            with self.lock:
+                cached = self._tenant_snapshot_cache.get(key)
+                if cached and cached[0] > now:
+                    return cached[1]
+            result = self._load_tenant_catalog_snapshot(
+                int(tenant_id), set(requested) or None
+            )
+            with self.lock:
+                # A collector or settings update may invalidate the catalogue
+                # while this query is in flight. Its response is still valid
+                # for the caller, but it must not repopulate a cleared cache.
+                if generation != self._cache_generation:
+                    return result
+                expires_at = time.monotonic() + TENANT_SNAPSHOT_CACHE_TTL_SECONDS
+                self._tenant_snapshot_cache[key] = (expires_at, result)
+                if len(self._tenant_snapshot_cache) > TENANT_SNAPSHOT_CACHE_MAX_KEYS:
+                    removable = sorted(
+                        (
+                            (cache_key, value[0])
+                            for cache_key, value in self._tenant_snapshot_cache.items()
+                            if cache_key != key
+                        ),
+                        key=lambda item: item[1],
+                    )
+                    while (
+                        len(self._tenant_snapshot_cache) > TENANT_SNAPSHOT_CACHE_MAX_KEYS
+                        and removable
+                    ):
+                        stale_key, _ = removable.pop(0)
+                        self._tenant_snapshot_cache.pop(stale_key, None)
+                        self._tenant_snapshot_locks.pop(stale_key, None)
+            return result
+
+    def _load_tenant_catalog_snapshot(
+        self, tenant_id: int, marketplaces: set[str] | None = None
+    ) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
             requested = {
@@ -1704,7 +1771,10 @@ class DataService:
             return self._with_tenant_state(snapshot, user_id)
         platforms_with_membership = {platform for platform, _ in memberships}
         if legacy_owner:
-            shared_rows = self.rows()
+            shared_rows = [
+                row for row in self.rows()
+                if not requested or str(row.get("platform") or "") in requested
+            ]
         else:
             shared_platforms = platforms_with_membership - {"wildberries"}
             kaspi_codes = sorted(
@@ -1778,7 +1848,11 @@ class DataService:
             # Compatibility for the original workspace: old collector tables have
             # no tenant_id. Platforms without explicit membership retain the
             # legacy fallback only for the original owning workspace.
-            elif legacy_owner and key[0] not in platforms_with_membership:
+            elif (
+                legacy_owner
+                and key[0] not in platforms_with_membership
+                and (not requested or key[0] in requested)
+            ):
                 visible.append(row)
                 represented.add(key)
         visible.extend(row for row in snapshot if (
@@ -1802,18 +1876,51 @@ class DataService:
                     values.extend((0, 0))
         return tuple(values)
 
+    def _materialize_shared_rows(self) -> list[dict[str, Any]]:
+        return (
+            self._kaspi_rows()
+            + self._ozon_rows()
+            + self._ozon_kz_rows()
+            + self._halyk_rows()
+            + self._forte_rows()
+        )
+
+    def _refresh_shared_rows(self, generation: int) -> None:
+        try:
+            rows = self._materialize_shared_rows()
+            signature = self._source_signature()
+            with self.lock:
+                if generation == self._cache_generation:
+                    self._rows_cache = rows
+                    self._rows_cached_at = time.monotonic()
+                    self._rows_signature = signature
+        finally:
+            with self.lock:
+                if generation == self._cache_generation:
+                    self._rows_refreshing = False
+
     def rows(self, ttl_seconds: float = 60.0) -> list[dict[str, Any]]:
         with self.lock:
             signature = self._source_signature()
+            cache_age = time.monotonic() - self._rows_cached_at
+            ttl = max(0.0, float(ttl_seconds))
             if self._rows_cache and self._rows_signature == signature:
-                return self._rows_cache
-            self._rows_cache = (
-                self._kaspi_rows()
-                + self._ozon_rows()
-                + self._ozon_kz_rows()
-                + self._halyk_rows()
-                + self._forte_rows()
-            )
+                if cache_age < ttl:
+                    return self._rows_cache
+                if ttl > 0:
+                    # A legacy refresh can take many seconds on a production
+                    # catalogue. Serve the last complete snapshot and rebuild
+                    # it in the background instead of blocking an HTTP thread.
+                    if not self._rows_refreshing:
+                        self._rows_refreshing = True
+                        threading.Thread(
+                            target=self._refresh_shared_rows,
+                            args=(self._cache_generation,),
+                            name="spyon-shared-catalog-refresh",
+                            daemon=True,
+                        ).start()
+                    return self._rows_cache
+            self._rows_cache = self._materialize_shared_rows()
             self._rows_cached_at = time.monotonic()
             self._rows_signature = self._source_signature()
             return self._rows_cache
@@ -2380,10 +2487,18 @@ class DataService:
             "statuses": [{"value": status, "label": STATUS_INFO.get(status, {}).get("label", status), "tone": STATUS_INFO.get(status, {}).get("tone", "neutral")} for status in statuses],
         }
 
-    def product(self, code: str, user_id: int | None = None) -> dict[str, Any] | None:
+    def product(
+        self,
+        code: str,
+        user_id: int | None = None,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         marketplace_scope = {"wildberries"} if str(code).startswith("wb:") else None
+        visible_rows = rows if rows is not None else self.rows_for_user(
+            user_id, marketplace_scope
+        )
         base = next((
-            row for row in self.rows_for_user(user_id, marketplace_scope)
+            row for row in visible_rows
             if str(row.get("product_code")) == str(code)
         ), None)
         if base is None:

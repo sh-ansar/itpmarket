@@ -128,13 +128,15 @@ class InventoryService:
                     and str(source.get("product_type") or "")
                     == str(candidate.get("product_type") or "")
                 )
+                if not same_base:
+                    return None
                 left_model = compact(source.get("model"))
                 right_model = compact(candidate.get("model"))
                 similarity = (
                     SequenceMatcher(None, left_model, right_model).ratio()
                     if left_model and right_model else 0.0
                 )
-                if not same_base or similarity < 0.82:
+                if similarity < 0.82:
                     return None
                 method = "BRAND_MODEL_SIZE_REVIEW"
                 score = round(70 + similarity * 20, 2)
@@ -231,43 +233,46 @@ class InventoryService:
                     inventory.update(self._pricing(inventory | {
                         "purchase_price_kzt": linked["purchase_price_kzt"]
                     }, source.get("price_kzt") or source.get("own_price_kzt")))
-            suggestions: list[dict[str, Any]] = []
-            for candidate_code, candidate in by_code.items():
-                if candidate_code == str(listing_code) or candidate_code in rejected:
-                    continue
-                suggestion = self._suggestion(source, candidate)
-                if not suggestion:
-                    continue
-                candidate_inventory_id = link_map.get(candidate_code)
-                current_inventory_id = int(linked["inventory_product_id"]) if linked else None
-                suggestion["status"] = (
-                    "confirmed"
-                    if current_inventory_id and candidate_inventory_id == current_inventory_id
-                    else "conflict"
-                    if current_inventory_id and candidate_inventory_id
-                    and candidate_inventory_id != current_inventory_id
-                    else "suggested"
-                )
-                suggestions.append(suggestion)
-            suggestions.sort(
-                key=lambda item: (
-                    item["status"] != "confirmed",
-                    -float(item.get("match_score") or 0),
-                    str(item.get("platform")),
-                )
-            )
-            return {
-                "can_view_inventory": bool(include_inventory),
-                "inventory": inventory if include_inventory else None,
-                "has_inventory_link": bool(linked),
-                "matching": {
-                    "suggestions": suggestions[:30],
-                    "confirmed_listings": linked_listings,
-                    "dynamic": True,
-                },
-            }
         finally:
             conn.close()
+
+        # Matching is CPU work and can scan a large tenant catalogue. Never
+        # keep one of the bounded PostgreSQL connections checked out here.
+        suggestions: list[dict[str, Any]] = []
+        for candidate_code, candidate in by_code.items():
+            if candidate_code == str(listing_code) or candidate_code in rejected:
+                continue
+            suggestion = self._suggestion(source, candidate)
+            if not suggestion:
+                continue
+            candidate_inventory_id = link_map.get(candidate_code)
+            current_inventory_id = int(linked["inventory_product_id"]) if linked else None
+            suggestion["status"] = (
+                "confirmed"
+                if current_inventory_id and candidate_inventory_id == current_inventory_id
+                else "conflict"
+                if current_inventory_id and candidate_inventory_id
+                and candidate_inventory_id != current_inventory_id
+                else "suggested"
+            )
+            suggestions.append(suggestion)
+        suggestions.sort(
+            key=lambda item: (
+                item["status"] != "confirmed",
+                -float(item.get("match_score") or 0),
+                str(item.get("platform")),
+            )
+        )
+        return {
+            "can_view_inventory": bool(include_inventory),
+            "inventory": inventory if include_inventory else None,
+            "has_inventory_link": bool(linked),
+            "matching": {
+                "suggestions": suggestions[:30],
+                "confirmed_listings": linked_listings,
+                "dynamic": True,
+            },
+        }
 
     def save_inventory(
         self,

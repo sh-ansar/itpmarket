@@ -1,3 +1,10 @@
+## 3.7.1
+
+- Collapsed simultaneous tenant-catalog reads into one short-lived snapshot without blocking other tenants.
+- Reused catalog rows for product details and released PostgreSQL connections before CPU-heavy matching.
+- Cancelled stale catalog searches, stopped off-page dashboard polling and avoided recomputing inventory totals on every filter change.
+- Added catalog/table and product-drawer skeletons, retry states and `Server-Timing` diagnostics for slow API requests.
+
 ## 3.4.15
 
 - Fixed Halyk Market price rendering: KZT is now used in product rows, market ranges and the product drawer.

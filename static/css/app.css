@@ -2656,6 +2656,22 @@ html[data-theme="dark"] .metric-card-body em{color:#9db0ba!important}
 .page-size-command select{width:76px;height:38px!important;min-height:38px!important}
 .pager-buttons{display:flex;align-items:center;gap:8px}
 html[data-theme="dark"] .products-command-row .scope-tabs button.active,html[data-theme="dark"] .products-command-row .scope-tabs button:hover,html[data-theme="dark"] .icon-command,html[data-theme="dark"] .info-dot,html[data-theme="dark"] #page-products .table-card,html[data-theme="dark"] #page-products .table-scroll th{background:#0d202b!important;border-color:var(--line)!important}
+
+/* Catalog request feedback: keep the last useful result visible while a new
+   filter request is running, and use skeletons only for the first load. */
+#page-products .table-card{position:relative;overflow:hidden}
+#page-products .table-card.is-loading:before{content:"";position:absolute;z-index:6;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,transparent,var(--blue),var(--cyan),transparent);background-size:220% 100%;animation:catalog-progress 1.1s linear infinite}
+@keyframes catalog-progress{to{background-position:-220% 0}}
+#productsLoadInfo.is-loading:before{content:"";display:inline-block;width:10px;height:10px;margin-right:7px;border:2px solid rgba(6,169,231,.22);border-top-color:var(--blue);border-radius:50%;vertical-align:-1px;animation:catalog-spin .75s linear infinite}
+@keyframes catalog-spin{to{transform:rotate(360deg)}}
+.product-skeleton-row i{display:block;height:11px;min-width:22px;border-radius:7px;background:linear-gradient(90deg,#edf2f5,#f8fafb,#e8eef2);background-size:220% 100%;animation:catalog-shimmer 1.25s linear infinite}
+.product-skeleton-row i+ i{margin-top:8px}.product-skeleton-row i.wide{width:min(260px,90%)}.product-skeleton-row i.medium{width:96px}.product-skeleton-row i.short{width:48px}
+@keyframes catalog-shimmer{to{background-position:-220% 0}}
+.catalog-error{display:grid;justify-items:center;gap:9px;padding:38px 20px;text-align:center;color:var(--muted)}.catalog-error b{color:var(--ink);font-size:14px}.catalog-error span{max-width:520px}.catalog-error button{margin-top:4px}
+.inventory-summary.is-loading article{position:relative;overflow:hidden}.inventory-summary.is-loading article:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.72),transparent);transform:translateX(-100%);animation:inventory-shimmer 1.2s infinite}@keyframes inventory-shimmer{to{transform:translateX(100%)}}
+.drawer-loading{display:grid;gap:18px}.drawer-skeleton-product{display:flex;gap:15px}.drawer-skeleton-product>i{width:82px;height:82px;border-radius:15px}.drawer-skeleton-product span{flex:1;display:grid;align-content:center;gap:10px}.drawer-skeleton-product b,.drawer-skeleton-grid i,.drawer-skeleton-section,.drawer-skeleton-product>i{background:linear-gradient(90deg,#edf2f5,#fafcfd,#e7eef2);background-size:220% 100%;animation:catalog-shimmer 1.25s linear infinite}.drawer-skeleton-product b{display:block;height:13px;border-radius:8px}.drawer-skeleton-product b:nth-child(2){width:68%}.drawer-skeleton-product b:nth-child(3){width:42%}.drawer-skeleton-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.drawer-skeleton-grid i{height:92px;border-radius:13px}.drawer-skeleton-section{height:150px;border-radius:14px}.drawer-error{min-height:280px;align-content:center}
+html[data-theme="dark"] .product-skeleton-row i,html[data-theme="dark"] .drawer-skeleton-product b,html[data-theme="dark"] .drawer-skeleton-grid i,html[data-theme="dark"] .drawer-skeleton-section,html[data-theme="dark"] .drawer-skeleton-product>i{background:linear-gradient(90deg,#132c38,#1b3744,#102630);background-size:220% 100%}
+@media(max-width:900px){.drawer-skeleton-grid{grid-template-columns:1fr 1fr}}
 html[data-theme="dark"] .icon-command::after,html[data-theme="dark"] .responsive-command::after,html[data-theme="dark"] .info-dot::after{background:#e6f2f7;color:#0b2532}
 html[data-theme="dark"] .price-range span+span{border-left-color:#263d49}
 @media(max-width:1160px){

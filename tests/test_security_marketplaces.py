@@ -194,6 +194,35 @@ class SecurityMarketplaceTests(unittest.TestCase):
         html = self.client.get("/app").get_data(as_text=True)
         self.assertNotIn('<option value="halyk_market">', html)
 
+    def test_unfiltered_catalog_uses_effective_marketplace_scope(self) -> None:
+        captured: dict[str, object] = {}
+
+        def products(page, page_size, filters, user_id):
+            captured.update(filters)
+            return {
+                "page": page,
+                "pages": 1,
+                "page_size": page_size,
+                "total": 0,
+                "items": [],
+            }
+
+        with (
+            patch.object(
+                webapp,
+                "allowed_marketplaces",
+                return_value={"halyk_market", "kaspi", "ozon"},
+            ),
+            patch.object(self.data, "products", side_effect=products),
+        ):
+            response = self.client.get("/api/products")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {"halyk_market", "kaspi", "ozon"},
+            set(captured.get("platforms") or []),
+        )
+
     def test_pending_company_blocks_direct_operation_api(self) -> None:
         conn = sqlite3.connect(self.db_path)
         conn.execute("UPDATE tenants SET status='pending' WHERE id=?", (self.tenant_id,))

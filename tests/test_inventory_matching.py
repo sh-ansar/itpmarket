@@ -324,7 +324,7 @@ class FakeCatalogData:
             if not marketplaces or str(row["platform"]) in marketplaces
         ]
 
-    def product(self, code: str, user_id: int | None = None):
+    def product(self, code: str, user_id: int | None = None, rows=None):
         product = next(
             (dict(row) for row in self.rows if str(row["product_code"]) == code),
             None,
