@@ -250,7 +250,8 @@ if ($backend -eq 'postgresql') {
     }
     elseif ($python) {
         try {
-            $databaseCheck = (& $python -c "import os,psycopg; c=psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=5); q=c.cursor(); q.execute(\"SELECT 1 FROM information_schema.tables WHERE table_schema='app' AND table_name='tenants'\"); assert q.fetchone(), 'app.tenants is missing'; q.execute('SELECT 1'); q.fetchone(); c.close(); print('connection and app.tenants are ready')" 2>&1 | Out-String).Trim()
+            $postgresCheck = Join-Path $root 'scripts\check_postgres.py'
+            $databaseCheck = (& $python $postgresCheck 2>&1 | Out-String).Trim()
             if ($LASTEXITCODE -eq 0) {
                 Add-DiagnosticResult PASS 'PostgreSQL' $databaseCheck
             }

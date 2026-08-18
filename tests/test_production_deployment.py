@@ -101,6 +101,8 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("LocalAddress", diagnostic)
         self.assertIn("@('/health', '/ready', '/')", diagnostic)
         self.assertIn("environment_check.py') --check-only", diagnostic)
+        self.assertIn("scripts\\check_postgres.py", diagnostic)
+        self.assertNotIn("psycopg.connect(os.environ", diagnostic)
 
     def test_postgres_manifest_covers_every_runtime_schema(self) -> None:
         manifest = json.loads(
