@@ -372,8 +372,20 @@ class AuthService:
         value = self.get_user_by_email(email, include_secret=True)
         if not value or not bool(value.get("is_active")):
             return None
-        if not check_password_hash(str(value["password_hash"]), password or ""):
+        if not check_password_hash(
+            str(value["password_hash"]),
+            password or "",
+        ):
             return None
+
+        public_value = self.public_user(value)
+
+        if not public_value:
+            return None
+
+        if not public_value.get("email_verified"):
+            return public_value
+
         stamp = now_iso()
         conn = self._connect()
         try:

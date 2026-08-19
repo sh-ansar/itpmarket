@@ -2173,9 +2173,18 @@ def registration() -> Any:
                 "workspace_profile": profile,
             }
             provision = SAAS.provision_tenant_from_request(request_id, None, "pending")
+            verification_required = bool(
+                email_service().settings.enabled
+            )
+
             user, recovery_code = AUTH.create_user(
-                payload["email"], payload["contact_name"] or payload["company_name"],
-                password, "admin", None, tenant_id=int(provision["tenant_id"]),
+                payload["email"],
+                payload["contact_name"] or payload["company_name"],
+                password,
+                "admin",
+                None,
+                tenant_id=int(provision["tenant_id"]),
+                email_verified=not verification_required,
             )
             locale = str(payload.get("locale") or "ru").strip().casefold()
             if locale not in {"ru", "kk", "en"}:
@@ -2186,16 +2195,51 @@ def registration() -> Any:
                 str(payload.get("subscription_plan_code") or "starter"),
                 int(user["id"]),
             )
+            if verification_required:
+                try:
+                    queue_verification_email(
+                        user,
+                        request_ip=request.remote_addr or "",
+                    )
+                except (ValueError, RuntimeError):
+                    app.logger.exception(
+                        "Unable to queue registration verification email"
+                    )
+
+                session.clear()
+                session["csrf_token"] = secrets.token_urlsafe(32)
+                session["pending_verification_email"] = str(
+                    user.get("email") or email
+                )
+                session["registration_request_id"] = request_id
+
+                return redirect(
+                    url_for("verification_sent")
+                )
+
+            # Compatibility mode while email delivery is disabled.
             session.clear()
             session.permanent = True
             session["user_id"] = int(user["id"])
+            session["session_version"] = int(
+                user.get("session_version") or 0
+            )
             session["csrf_token"] = secrets.token_urlsafe(32)
             session["registration_request_id"] = request_id
+
             completion_result.update({
-                "tenant_id": int(provision["tenant_id"]), "tenant": provision["tenant"],
-                "request": provision["request"], "user": user, "recovery_code": recovery_code,
+                "tenant_id": int(provision["tenant_id"]),
+                "tenant": provision["tenant"],
+                "request": provision["request"],
+                "user": user,
+                "recovery_code": recovery_code,
             })
-            return render_template("registration_complete.html", result=completion_result, **template_data)
+
+            return render_template(
+                "registration_complete.html",
+                result=completion_result,
+                **template_data,
+            )
         except ValueError as exc:
             flash(str(exc), "error")
     return render_template("register.html", **template_data)
@@ -3710,15 +3754,40 @@ def api_platform_registration_review(request_id: int, decision: str) -> Any:
 @login_required
 def api_account_password() -> Any:
     payload = json_payload()
-    if payload.get("new_password") != payload.get("new_password_confirm"):
-        return json_error("Новые пароли не совпадают.")
+
+    if (
+        payload.get("new_password")
+        != payload.get("new_password_confirm")
+    ):
+        return json_error(
+            "????? ?????? ?? ?????????."
+        )
+
     try:
-        AUTH.change_password(
+        user = AUTH.change_password(
             int((current_user() or {})["id"]),
             str(payload.get("current_password") or ""),
             str(payload.get("new_password") or ""),
         )
-        return json_ok(message="Пароль изменён.")
+
+        # Password change increments session_version.
+        # Keep the current browser session valid while
+        # previously issued sessions become invalid.
+        session["session_version"] = int(
+            user.get("session_version") or 0
+        )
+
+        try:
+            queue_password_changed_email(user)
+        except (ValueError, RuntimeError):
+            app.logger.exception(
+                "Unable to queue password changed email"
+            )
+
+        return json_ok(
+            message="?????? ???????."
+        )
+
     except ValueError as exc:
         return json_error(str(exc))
 

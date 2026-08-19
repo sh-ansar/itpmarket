@@ -788,8 +788,21 @@ class TelegramBotWorker:
                 "Слишком много попыток входа. Повторите через 15 минут.",
             )
             return
-        user = self.auth.authenticate(email, password, event_type="telegram_login")
+        user = self.auth.authenticate(
+            email,
+            password,
+            event_type="telegram_login",
+        )
         password = ""
+
+        if user and not user.get("email_verified"):
+            self._send(
+                chat_id,
+                "??????? ??????????? ??????????? ????? "
+                "? Spyon, ????? ????????? ????.",
+            )
+            return
+
         if not user:
             self._record_auth_failure(chat_id, email)
             warning = (

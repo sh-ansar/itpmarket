@@ -126,7 +126,10 @@ class ProductionDeploymentTests(unittest.TestCase):
         )
         schemas = manifest["schemas"]
         self.assertEqual({"app", "ozon_ru", "ozon_kz"}, set(schemas))
-        self.assertEqual(104, sum(len(tables) for tables in schemas.values()))
+        self.assertEqual(107, sum(len(tables) for tables in schemas.values()))
+        self.assertIn("auth_tokens", schemas["app"])
+        self.assertIn("email_outbox", schemas["app"])
+        self.assertIn("notification_preferences", schemas["app"])
         self.assertIn("tenants", schemas["app"])
         self.assertIn("tenant_inventory_products", schemas["app"])
         self.assertIn("tenant_product_listings", schemas["app"])

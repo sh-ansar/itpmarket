@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Spyon{% endblock %}</title>
+<script>
+(function(){
+    var p=localStorage.getItem("itp_theme")||"light";
+    var d=p==="system"
+        ?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")
+        :p;
+    document.documentElement.dataset.theme=d;
+    document.documentElement.style.colorScheme=d;
+}());
+</script>
+<link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}?v={{ version }}">
+</head>
+<body>
+
+<div class="auth-ui-controls">
+    <button class="auth-theme"
+            data-theme-toggle
+            aria-label="??????????? ????">
+        <img src="{{ url_for('static', filename='icons/sun.svg') }}" alt="">
+        <i></i>
+        <img src="{{ url_for('static', filename='icons/moon.svg') }}" alt="">
+    </button>
+</div>
+
+<div class="ambient ambient-one"></div>
+<div class="ambient ambient-two"></div>
+
+<main class="auth-shell">
+    <section class="auth-brand">
+        <img src="{{ url_for('static', filename='images/spyon-logo.svg') }}"
+             alt="Spyon"
+             class="auth-logo">
+
+        <div class="brand-kicker">
+            <span></span>
+            SPYON SECURITY
+        </div>
+
+        <h1>{% block headline %}???????????? ????? ??????? ??????.{% endblock %}</h1>
+
+        <p>
+            {% block description %}
+            ?????????? ?????? ? ???????? ???????????? Spyon.
+            {% endblock %}
+        </p>
+
+        <div class="feature-grid">
+            <div>
+                <b>??????????? ??????</b>
+                <span>?????? ????? ???????????? ???? ????????</span>
+            </div>
+            <div>
+                <b>?????????? ??????</b>
+                <span>?????? ? ?????? ?? ?????????? ? ???????? ????</span>
+            </div>
+            <div>
+                <b>???????? ??????</b>
+                <span>????? ?????? ???????? ?????? ??????</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="auth-card wide-card">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+
+        <div class="secure-note">
+            <span class="secure-dot"></span>
+            ?????????? ???????? Spyon
+        </div>
+    </section>
+</main>
+
+<script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>
+<script src="{{ url_for('static', filename='js/auth_ui.js') }}?v={{ version }}"></script>
+</body>
+</html>

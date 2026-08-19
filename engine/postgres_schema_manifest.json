@@ -81,7 +81,10 @@
       "v9_price_snapshots",
       "v9_price_state",
       "v9_product_cache",
-      "v9_run_metrics"
+      "v9_run_metrics",
+      "auth_tokens",
+      "email_outbox",
+      "notification_preferences"
     ],
     "ozon_ru": [
       "catalog_snapshots",

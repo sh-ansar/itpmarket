@@ -39,3 +39,80 @@ html[data-theme="light"] .warning-note{color:#596f79;background:#fff7e9}
 html[data-theme="light"] .flash.error{background:#fff1ef;border-color:#ffc8c2;color:#a43d31}
 html[data-theme="light"] .flash.success{background:#eefaf4;border-color:#bee7d2;color:#19734b}
 html[data-theme="light"] img[src*="spyon-logo.svg"]{content:url("../images/spyon-logo.svg")}
+
+/* Transactional auth flows */
+.flash.info{
+    background:rgba(6,169,231,.10);
+    border:1px solid rgba(6,169,231,.24);
+    color:#8bdcf8
+}
+html[data-theme="light"] .flash.info{
+    background:#edf9fd;
+    border-color:#b9e6f5;
+    color:#176c8c
+}
+.auth-status-card{
+    display:flex;
+    align-items:flex-start;
+    gap:16px;
+    padding:18px;
+    margin:0 0 20px;
+    border:1px solid rgba(255,255,255,.09);
+    border-radius:15px;
+    background:rgba(255,255,255,.035)
+}
+.auth-status-card p{
+    margin:7px 0 0;
+    color:#929aa2;
+    font-size:13px;
+    line-height:1.55
+}
+.auth-status-icon{
+    flex:0 0 42px;
+    width:42px;
+    height:42px;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    background:rgba(6,169,231,.14);
+    color:var(--accent-2);
+    font-size:20px
+}
+.auth-small-note{
+    color:#7f8a92;
+    font-size:12px;
+    line-height:1.6;
+    text-align:center;
+    margin:22px 0 0
+}
+.auth-success-mark{
+    width:76px;
+    height:76px;
+    margin:10px auto 28px;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    background:rgba(69,196,134,.13);
+    border:1px solid rgba(69,196,134,.34);
+    color:#72dda8;
+    font-size:38px;
+    font-weight:800;
+    box-shadow:0 0 34px rgba(69,196,134,.10)
+}
+html[data-theme="light"] .auth-status-card{
+    background:#f7fbfc;
+    border-color:#d5e6ec
+}
+html[data-theme="light"] .auth-status-card p,
+html[data-theme="light"] .auth-small-note{
+    color:#687f89
+}
+html[data-theme="light"] .auth-status-icon{
+    background:#e3f6fc;
+    color:#087fae
+}
+html[data-theme="light"] .auth-success-mark{
+    background:#edf9f3;
+    border-color:#bfe7d1;
+    color:#21865a
+}
