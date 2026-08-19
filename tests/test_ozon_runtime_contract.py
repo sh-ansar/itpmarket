@@ -16,10 +16,52 @@ if str(OZON_ROOT) not in sys.path:
 
 from browser_session import BrowserSession
 from ozon_collector import combined_status, result_exit_code
+from registry import Registry
 from storage.postgres_compat import _schema_for_path
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
+    def test_price_queue_is_limited_to_the_selected_seller_source(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_source_queue_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                registry.upsert_catalog_product(
+                    {
+                        "article": "alpha-tyre",
+                        "name": "Alpha tyre",
+                        "url": "https://www.ozon.ru/product/alpha-tyre-1/",
+                        "catalog_card_price": 100,
+                    },
+                    "https://www.ozon.ru/seller/alfa-tires-3381444/",
+                    "alpha-run",
+                    1,
+                    "2026-08-19T12:00:00",
+                )
+                registry.upsert_catalog_product(
+                    {
+                        "article": "foreign-detergent",
+                        "name": "Foreign detergent",
+                        "url": "https://www.ozon.ru/product/foreign-detergent-2/",
+                        "catalog_card_price": 200,
+                    },
+                    "https://ozon.kz/seller/foreign-shop/",
+                    "foreign-run",
+                    1,
+                    "2026-08-19T12:00:00",
+                )
+                allowed = registry.articles_for_sources(
+                    ["https://www.ozon.ru/seller/alfa-tires-3381444/"]
+                )
+                self.assertEqual({"alpha-tyre"}, allowed)
+                self.assertEqual(
+                    ["alpha-tyre"],
+                    registry.select_articles(
+                        "refresh-prices", 100, allowed_articles=allowed
+                    ),
+                )
+            finally:
+                registry.close()
+
     def test_partial_and_blocked_results_fail_the_background_job(self) -> None:
         self.assertEqual("PARTIAL", combined_status(
             {"status": "PASSED"}, {"status": "PARTIAL"}

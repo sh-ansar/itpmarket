@@ -460,6 +460,25 @@ class Registry:
             "url": row.get("canonical_url", ""),
         }
 
+    def articles_for_sources(self, source_urls: Iterable[Any]) -> set[str]:
+        sources = {
+            canonical_source_url(value)
+            for value in source_urls
+            if canonical_source_url(value)
+        }
+        if not sources:
+            return set()
+        placeholders = ",".join("?" for _ in sources)
+        return {
+            str(row[0])
+            for row in self.conn.execute(
+                f"""SELECT DISTINCT article
+                    FROM product_sources
+                    WHERE source_url IN ({placeholders})""",
+                sorted(sources),
+            ).fetchall()
+        }
+
     def select_articles(
         self, mode: str, limit: int, stale_days: int = 30, max_attempts: int = 3,
         allowed_articles: set[str] | None = None,

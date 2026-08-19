@@ -295,12 +295,20 @@ class Collector:
         self.registry.begin_run(run_id, mode, self.settings.start_url)
         started = time.monotonic()
         batch_limit = self.settings.batch_limit if limit is None else max(0, limit)
+        source_articles = self.registry.articles_for_sources(
+            self.settings.start_urls or (self.settings.start_url,)
+        )
+        allowed_articles = (
+            source_articles
+            if articles is None
+            else {str(article) for article in articles} & source_articles
+        )
         selected_articles = self.registry.select_articles(
             mode,
             batch_limit,
             stale_days=self.settings.stale_days,
             max_attempts=self.settings.max_task_attempts,
-            allowed_articles=articles,
+            allowed_articles=allowed_articles,
         )
         metrics = {
             "pages_loaded": 0,

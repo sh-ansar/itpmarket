@@ -1,3 +1,8 @@
+## 3.8.3
+
+- Scoped Ozon.ru and Ozon.kz enrichment and price queues to products discovered from the selected seller source.
+- Prevented legacy products from other sellers or storefronts from entering a seller's live refresh operation.
+
 ## 3.8.2
 
 - Preserved existing authenticated/VPN Ozon.ru and Ozon.kz Chrome profiles only for the active seller whose source matches the live browser tab, and persisted that non-secret ownership marker.

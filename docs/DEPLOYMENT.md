@@ -135,7 +135,7 @@ SPYON_PUBLIC_URL=https://spyon.kz
 
 Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После рестарта проверьте `/status` в личном чате, вход тестового пользователя и доставку специально созданного тестового уведомления.
 
-Для Ozon после deploy проверьте пути обеих площадок: непустой collector-local legacy Chrome profile может получить только один активный продавец во всех компаниях, чей source URL однозначно совпал с seller-вкладкой этого браузера; owner marker должен содержать только seller ID и нормализованный публичный seller URL. Каждый другой продавец использует отдельный seller-scoped профиль. Ozon.ru должен подключаться к PostgreSQL schema `ozon_ru`, а повторный Ozon.kz запуск с уже открытым профилем — использовать его `DevToolsActivePort`, не создавать конфликтующий Chrome и не завершать процессы других sellers.
+Для Ozon после deploy проверьте пути обеих площадок: непустой collector-local legacy Chrome profile может получить только один активный продавец во всех компаниях, чей source URL однозначно совпал с seller-вкладкой этого браузера; owner marker должен содержать только seller ID и нормализованный публичный seller URL. Каждый другой продавец использует отдельный seller-scoped профиль, а enrichment/price queue должна содержать только статьи из `product_sources` выбранного source URL. Ozon.ru должен подключаться к PostgreSQL schema `ozon_ru`, а повторный Ozon.kz запуск с уже открытым профилем — использовать его `DevToolsActivePort`, не создавать конфликтующий Chrome и не завершать процессы других sellers.
 
 ## Post-deploy verification
 
