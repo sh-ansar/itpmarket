@@ -85,6 +85,107 @@ class BrowserSession:
         except Exception:
             return False
 
+    def _set_debug_port(self, port: int) -> None:
+        self.debug_port = int(port)
+        self.debug_base = f"http://127.0.0.1:{self.debug_port}"
+
+    @staticmethod
+    def _valid_debug_port(value: Any) -> int | None:
+        try:
+            port = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        return port if 0 < port <= 65535 else None
+
+    @staticmethod
+    def _normalized_profile_path(value: Any) -> str:
+        return os.path.normcase(
+            os.path.normpath(str(value or "").strip().strip('"'))
+        )
+
+    def _ports_from_process_output(self, value: str) -> list[int]:
+        """Extract DevTools ports only for the exact isolated profile path."""
+        expected = self._normalized_profile_path(self.profile_dir)
+        ports: list[int] = []
+        for command_line in str(value or "").splitlines():
+            profile_match = re.search(
+                r'--user-data-dir=(?:"([^"]+)"|(\S+))', command_line, re.I
+            )
+            port_match = re.search(
+                r"--remote-debugging-port=(\d{1,5})", command_line, re.I
+            )
+            if not profile_match or not port_match:
+                continue
+            profile = profile_match.group(1) or profile_match.group(2) or ""
+            port = self._valid_debug_port(port_match.group(1))
+            if self._normalized_profile_path(profile) == expected and port is not None:
+                ports.append(port)
+        return list(dict.fromkeys(ports))
+
+    def _running_profile_debug_ports(self) -> list[int]:
+        if not sys.platform.startswith("win"):
+            return []
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+            "ForEach-Object { [Console]::Out.WriteLine($_.CommandLine) }"
+        )
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+                check=False,
+                creationflags=creationflags,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        return self._ports_from_process_output(completed.stdout)
+
+    def _profile_debug_ports(self) -> list[int]:
+        """Return candidate DevTools ports owned by this isolated profile."""
+        ports: list[int] = []
+        for name in (".spyon_devtools_port", "DevToolsActivePort"):
+            try:
+                value = self.profile_dir.joinpath(name).read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()[0]
+            except (OSError, IndexError):
+                continue
+            port = self._valid_debug_port(value)
+            if port is not None:
+                ports.append(port)
+        ports.extend(self._running_profile_debug_ports())
+        return list(dict.fromkeys(ports))
+
+    def _remember_profile_debug_port(self) -> None:
+        try:
+            self.profile_dir.mkdir(parents=True, exist_ok=True)
+            self.profile_dir.joinpath(".spyon_devtools_port").write_text(
+                str(self.debug_port), encoding="ascii"
+            )
+        except OSError:
+            pass
+
+    def _adopt_profile_debugger(self) -> bool:
+        """Reuse an already-running browser for the same isolated profile."""
+        previous_port = self.debug_port
+        for profile_port in self._profile_debug_ports():
+            self._set_debug_port(profile_port)
+            if self._debugger_ready():
+                self._remember_profile_debug_port()
+                if profile_port != previous_port:
+                    print(
+                        f"{self.marketplace_label} reuses the browser for this profile "
+                        f"on port {profile_port}."
+                    )
+                return True
+        self._set_debug_port(previous_port)
+        return False
+
     @staticmethod
     def _chrome_executable() -> str:
         env_value = os.environ.get("OZON_CHROME_PATH") or os.environ.get("CHROME_PATH") or os.environ.get("CHROME")
@@ -139,11 +240,21 @@ class BrowserSession:
 
     def ensure_debug_browser(self) -> None:
         if self._debugger_ready():
+            self._remember_profile_debug_port()
+            return
+        if self._adopt_profile_debugger():
             return
         self._launch_debug_browser()
         deadline = time.monotonic() + float(os.environ.get("OZON_BROWSER_STARTUP_WAIT", "45"))
         while time.monotonic() < deadline:
             if self._debugger_ready():
+                self._remember_profile_debug_port()
+                return
+            # Chrome redirects a second launch for the same user-data-dir to
+            # the existing process and ignores the newly requested port.
+            # Profile markers/process lookup are seller-scoped, so adopting the
+            # port preserves the session without killing another seller's Chrome.
+            if self._adopt_profile_debugger():
                 return
             time.sleep(1.0)
         raise RuntimeError(

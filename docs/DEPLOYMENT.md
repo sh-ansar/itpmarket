@@ -135,6 +135,8 @@ SPYON_PUBLIC_URL=https://spyon.kz
 
 Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После рестарта проверьте `/status` в личном чате, вход тестового пользователя и доставку специально созданного тестового уведомления.
 
+Для Ozon после deploy проверьте seller-scoped пути обеих площадок: Ozon.ru должен подключаться к PostgreSQL schema `ozon_ru`, а повторный Ozon.kz запуск с уже открытым профилем — использовать его `DevToolsActivePort`, не создавать конфликтующий Chrome и не завершать процессы других sellers.
+
 ## Post-deploy verification
 
 ```powershell

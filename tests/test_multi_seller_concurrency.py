@@ -499,6 +499,16 @@ class MultiSellerDatabaseTests(unittest.TestCase):
 
 
 class TaskAndRuntimeIsolationTests(unittest.TestCase):
+    def test_single_seller_selector_is_hidden_everywhere(self) -> None:
+        javascript = (
+            Path(__file__).resolve().parents[1] / "static" / "js" / "app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "sellerField.hidden=sellers.length<=1||platform==='system'",
+            javascript,
+        )
+        self.assertIn("field.hidden=sellers.length<=1", javascript)
+
     def test_runtime_paths_and_resources_are_tenant_seller_scoped(self) -> None:
         root = Path("C:/test-root")
         scopes = [

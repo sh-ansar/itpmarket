@@ -96,7 +96,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/api/public/plans
 .\.venv\Scripts\python.exe collectors\wildberries\wildberries_collector.py --help
 ```
 
-Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru использует `collectors\ozon\chrome_vpn_profile`, Ozon.kz — отдельный `collectors\ozon\chrome_kz_profile` и Chrome remote debugging. Не копируйте и не коммитьте профили, cookies или их содержимое. Без подтверждённого seller/source URL и сессии обозначайте проверку как `BLOCKED`, а не как успешную.
+Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru использует `collectors\ozon\chrome_vpn_profile`, Ozon.kz — отдельный `collectors\ozon\chrome_kz_profile` и Chrome remote debugging. Seller-scoped runtime хранит эти профили в `.runtime\browser_profiles\t<tenant>\<marketplace>\s<seller>`; если Chrome для профиля уже работает, сборщик повторно использует порт из `DevToolsActivePort`, не завершает чужой процесс и не создаёт второй экземпляр профиля. Не копируйте и не коммитьте профили, cookies или их содержимое. Без подтверждённого seller/source URL и сессии обозначайте проверку как `BLOCKED`, а не как успешную.
 
 ## Частые проблемы
 

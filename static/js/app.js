@@ -625,7 +625,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const previousSeller=sellerNode.value;
       sellerNode.innerHTML=sellers.map(item=>`<option value="${Number(item.id)}">${esc(item.display_name||item.external_seller_id||`#${item.id}`)}</option>`).join('');
       if([...sellerNode.options].some(option=>option.value===previousSeller))sellerNode.value=previousSeller;
-      if(sellerField)sellerField.hidden=!sellers.length||platform==='system';
+      if(sellerField)sellerField.hidden=sellers.length<=1||platform==='system';
     }
     const previous=actionNode.value;
     actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>(id!=='backup_database'||user.platform_role==='superadmin')&&(id!=='full_sync_all'||visibleMarketplaceCodes().length>1)).map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
@@ -1006,7 +1006,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     if(!select||!field)return;
     select.innerHTML=sellers.map(item=>`<option value="${Number(item.id)}">${esc(item.display_name||item.external_seller_id||`#${item.id}`)}</option>`).join('');
     if(preferred&&[...select.options].some(option=>Number(option.value)===Number(preferred)))select.value=String(preferred);
-    field.hidden=!sellers.length;
+    field.hidden=sellers.length<=1;
     select.required=sellers.length>1;
   }
 

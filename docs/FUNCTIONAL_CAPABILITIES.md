@@ -1,6 +1,6 @@
 # Spyon: функциональные возможности
 
-Документ описывает состояние проекта после аудита 18 августа 2026 года. Источники истины — исполняемый код, схема данных и автоматические тесты; наличие элемента в интерфейсе само по себе не считается подтверждением backend-функции.
+Документ описывает состояние проекта после аудита 19 августа 2026 года. Источники истины — исполняемый код, схема данных и автоматические тесты; наличие элемента в интерфейсе само по себе не считается подтверждением backend-функции.
 
 ## Multi-user and Multi-seller Architecture
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Multiple tenants | `SUPPORTED` | Tenant-scoped RBAC, catalogs, sellers, jobs, schedules и direct API IDOR regression tests. |
 | Multiple users and roles | `SUPPORTED` | `superadmin`, tenant `admin`/`operator`/`viewer`, marketplace overrides и backend permission checks покрыты HTTP/unit tests. |
-| Multiple sellers одного marketplace | `SUPPORTED` | Канонический `tenant_seller_id`, seller catalog PK, seller-aware UI/API и одинаковый SKU у двух sellers без collision. |
+| Multiple sellers одного marketplace | `SUPPORTED` | Канонический `tenant_seller_id`, seller catalog PK, seller-aware UI/API и одинаковый SKU у двух sellers без collision; выбор продавца показывается только при двух и более активных вариантах. |
 | Multiple marketplace accounts | `SUPPORTED` | Seller registry разрешает несколько accounts на tenant + marketplace; legacy integration row больше не является seller identity. |
 | Parallel jobs разных sellers | `SUPPORTED` | Seller-scoped resource locks; 6 simultaneous subprocess jobs и 2 TaskManager instances проверены автоматически. |
 | Две операции одного seller | `SUPPORTED` | Безопасная модель C: второй Full Sync/Price job отклоняется как conflict, очередь не реализована. |
@@ -97,8 +97,8 @@ SQLite является локальным backend по умолчанию. Prod
 | Integration | Purpose | Entry point | Required dependencies | Required env/config | External executable | Browser | Profile | Scheduler | PostgreSQL | Local test | Result |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Kaspi | Каталог, свои цены, предложения, full sync | `engine/kaspi_search_compare_v8_2.py`, `engine/exact_offer_refresh.py`; `app.py` actions | Selenium, certifi | seller/city/zone в seller connection; optional `CHROMEDRIVER_PATH` | Chrome; ChromeDriver или Selenium Manager | да | `.runtime/browser_profiles/t<tenant>/kaspi/s<seller>`; `.kaspi_profile` legacy fallback | да, по тарифу | да через app storage | CLI, unit, seller/tenant/limit/atomic tests | `PASS` seller storage/isolation; `BLOCKED` live: нет нескольких подтверждённых сессий |
-| Ozon.ru | Discovery, enrichment, prices, market matching, retry, export | `collectors/ozon/ozon_collector.py` | Selenium, selenium-stealth | source/seller connection; optional `OZON_CHROME_PATH` | Chrome и driver | да | `.runtime/browser_profiles/t<tenant>/ozon_ru/s<seller>` | да, по тарифу | да, schema `ozon_ru` | прямой `SELF_TEST.py`, 8 fixture-товаров; unit/CLI | `PASS` fixture/seller catalog; `BLOCKED` live: нет нескольких профилей/VPN-сессий |
-| Ozon.kz | Отдельный KZ storefront catalog/prices/full sync | `collectors/ozon_kz/ozon_kz_collector.py` | Selenium и общий Ozon browser runtime | source/seller; dynamic debug port; optional Chrome path | Chrome remote debugging | да | `.runtime/browser_profiles/t<tenant>/ozon_kz/s<seller>` | да, по тарифу | да, schema `ozon_kz` | CLI, storage и source-boundary tests | `PASS` contract/seller path; `BLOCKED` live: нет отдельных сессий |
+| Ozon.ru | Discovery, enrichment, prices, market matching, retry, export | `collectors/ozon/ozon_collector.py` | Selenium, selenium-stealth | source/seller connection; optional `OZON_CHROME_PATH` | Chrome и driver | да | `.runtime/browser_profiles/t<tenant>/ozon/s<seller>` | да, по тарифу | да, schema `ozon_ru`, включая seller-scoped registry paths | прямой `SELF_TEST.py`, 8 fixture-товаров; unit/CLI | `PASS` fixture/seller catalog/schema routing; `BLOCKED` live: нет нескольких профилей/VPN-сессий |
+| Ozon.kz | Отдельный KZ storefront catalog/prices/full sync | `collectors/ozon_kz/ozon_kz_collector.py` | Selenium и общий Ozon browser runtime | source/seller; dynamic debug port; optional Chrome path | Chrome remote debugging с безопасным reuse `DevToolsActivePort` того же профиля | да | `.runtime/browser_profiles/t<tenant>/ozon_kz/s<seller>` | да, по тарифу | да, schema `ozon_kz` | CLI, storage, source-boundary и active-profile reuse tests | `PASS` contract/seller path/profile reuse; `BLOCKED` live: нет нескольких независимых сессий |
 | Halyk Market | Публичный каталог и точные предложения | `collectors/halyk/halyk_collector.py` | certifi/stdlib HTTPS | seller, location, query/category в config/connection | optional `curl.exe` fallback | нет | нет | да, по тарифу | да через app storage | ограниченная публичная probe: 1 item, reported total 816; unit | `PASS` probe; partial cards дают exit 2 |
 | Forte Market | Catalog/product/offer API и fallback сортировки | `collectors/forte/forte_collector.py` | Python HTTPS stack | seller/merchant/city/category в config/connection | нет | нет | нет | да, по тарифу | да через app storage | публичная probe: total 12 736 и sample offer; unit | `PASS` probe; partial cards дают exit 2 |
 | Wildberries | Публичный seller catalog, цены и tenant-снимок | `collectors/wildberries/wildberries_collector.py` | Python HTTPS stack | seller ID, currency/destination | нет | нет | нет | да, по тарифу | да через app storage | seller `250000260`: total 4 296 и sample; unit | `PASS` probe; внешний API может меняться |
@@ -113,7 +113,7 @@ Backend предоставляет отдельные проверки прав 
 
 ## Что подтверждено и что остаётся ограничением
 
-Подтверждено: 143 автоматических теста, Python compile, JavaScript syntax checks, PowerShell parse, согласованность Python-пакетов, read-only runtime diagnostic без `FAIL` и локальный HTTP 200 для `/health`, `/ready`, `/`, `/register`, `/api/public/plans` и новых static assets. Отдельно покрыты Telegram login/delivery/isolation, параллельные catalog reads, отмена устаревших UI-запросов, равные минимальные цены, tenant-scoped остатки, отсутствие двойного подсчёта, match confirm/reject, RBAC и direct API marketplace boundary.
+Подтверждено: 146 автоматических тестов, Python compile, JavaScript syntax checks, PowerShell parse, согласованность Python-пакетов, read-only runtime diagnostic без `FAIL` и локальный HTTP 200 для `/health`, `/ready`, `/`, `/register`, `/api/public/plans` и новых static assets. Отдельно покрыты Telegram login/delivery/isolation, параллельные catalog reads, seller-selector cardinality, seller-scoped PostgreSQL routing Ozon.ru, повторное подключение к Chrome-профилю Ozon.kz, отмена устаревших UI-запросов, равные минимальные цены, tenant-scoped остатки, отсутствие двойного подсчёта, match confirm/reject, RBAC и direct API marketplace boundary.
 
 Read-only соединение с production PostgreSQL и каталог tenant на 15 825 строк проверены: прогретая страница сократилась с 1.100 до 0.262 секунды, а четыре одновременных холодных чтения — с 3.911 до 1.973 секунды. Не подтверждены live-сессии нескольких Kaspi/Ozon seller, полный сетевой сбор и конкурентный write/deadlock stress. Это внешние эксплуатационные проверки, а не подтверждённые дефекты кода.
 

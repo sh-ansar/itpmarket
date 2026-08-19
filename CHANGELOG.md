@@ -1,3 +1,9 @@
+## 3.8.1
+
+- Hidden seller selectors in Products, Operations and Schedules when a marketplace has only one active seller; the sole seller is still selected automatically.
+- Fixed PostgreSQL schema routing for seller-scoped Ozon.ru runtime registries.
+- Reused the active Chrome DevTools port for an already-running seller profile, preventing Ozon.kz restarts from failing on a newly allocated port.
+
 ## 3.8.0
 
 - Added private-chat Telegram authentication with immediate credential-message deletion, login throttling and tenant/user-scoped account links.

@@ -81,6 +81,14 @@ def _schema_for_path(path: str | Path) -> str:
     normalized = str(path).replace("\\", "/").casefold()
     if "ozon_kz" in normalized or "ozon-kz" in normalized:
         return "ozon_kz"
+    segments = [segment for segment in normalized.split("/") if segment]
+    for index, segment in enumerate(segments):
+        if (
+            segment == "marketplaces"
+            and index + 2 < len(segments)
+            and segments[index + 2] == "ozon"
+        ):
+            return "ozon_ru"
     if "/collectors/ozon/" in normalized or normalized.endswith("ozon_registry.db"):
         return "ozon_ru"
     return "app"
