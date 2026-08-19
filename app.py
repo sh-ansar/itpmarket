@@ -3760,7 +3760,7 @@ def api_account_password() -> Any:
         != payload.get("new_password_confirm")
     ):
         return json_error(
-            "????? ?????? ?? ?????????."
+            "Новые пароли не совпадают."
         )
 
     try:
@@ -3785,7 +3785,7 @@ def api_account_password() -> Any:
             )
 
         return json_ok(
-            message="?????? ???????."
+            message="Пароль изменён."
         )
 
     except ValueError as exc:
