@@ -1,3 +1,9 @@
+## 3.8.2
+
+- Preserved existing authenticated/VPN Ozon.ru and Ozon.kz Chrome profiles only for the active seller whose source matches the live browser tab, and persisted that non-secret ownership marker.
+- Kept additional Ozon sellers on separate seller-scoped browser profiles so concurrent accounts do not share cookies or sessions.
+- Fell back to seller-scoped profiles when a legacy profile is absent, empty or unreadable.
+
 ## 3.8.1
 
 - Hidden seller selectors in Products, Operations and Schedules when a marketplace has only one active seller; the sole seller is still selected automatically.

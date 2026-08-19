@@ -522,6 +522,123 @@ class TaskAndRuntimeIsolationTests(unittest.TestCase):
         resources = [tuple(item.task_resources(["kaspi_browser"])) for item in scopes]
         self.assertEqual(4, len(set(resources)))
 
+    def test_first_ozon_seller_preserves_legacy_profile_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_legacy_profile_") as folder:
+            root = Path(folder)
+            legacy = root / "legacy"
+            legacy.mkdir()
+            (legacy / "profile-marker").write_text("ready", encoding="utf-8")
+            (legacy / ".spyon_seller_owner.json").write_text(
+                json.dumps(
+                    {
+                        "seller_id": 17,
+                        "seller_identity": "ozon.ru/seller/alfa-tires-3381444",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            first = SellerRuntimeScope(root, 8, "ozon", 17)
+            second = SellerRuntimeScope(root, 8, "ozon", 23)
+            sellers = [
+                {
+                    "id": 17,
+                    "source_url": "https://www.ozon.ru/seller/alfa-tires-3381444/",
+                },
+                {"id": 23, "source_url": "https://www.ozon.ru/seller/other/"},
+            ]
+            with patch.dict(webapp.OZON_LEGACY_PROFILE_PATHS, {"ozon": legacy}):
+                self.assertEqual(
+                    legacy.resolve(),
+                    webapp.browser_profile_for_seller(first, "ozon", sellers),
+                )
+                self.assertEqual(
+                    second.profile_dir,
+                    webapp.browser_profile_for_seller(second, "ozon", sellers),
+                )
+
+    def test_empty_ozon_legacy_profile_falls_back_to_seller_scope(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_empty_profile_") as folder:
+            root = Path(folder)
+            legacy = root / "legacy"
+            legacy.mkdir()
+            runtime = SellerRuntimeScope(root, 8, "ozon_kz", 19)
+            with patch.dict(
+                webapp.OZON_LEGACY_PROFILE_PATHS, {"ozon_kz": legacy}
+            ):
+                self.assertEqual(
+                    runtime.profile_dir,
+                    webapp.browser_profile_for_seller(
+                        runtime,
+                        "ozon_kz",
+                        [{"id": 19, "source_url": "https://ozon.kz/seller/alfa/"}],
+                    ),
+                )
+
+    def test_live_ozon_tab_bootstraps_exact_legacy_profile_owner(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def read() -> bytes:
+                return json.dumps(
+                    [{"url": "https://ozon.kz/seller/alfa-tires-3381444/"}]
+                ).encode("utf-8")
+
+        with tempfile.TemporaryDirectory(prefix="ozon_profile_bootstrap_") as folder:
+            root = Path(folder)
+            legacy = root / "legacy"
+            legacy.mkdir()
+            (legacy / "profile-marker").write_text("ready", encoding="utf-8")
+            runtime = SellerRuntimeScope(root, 10, "ozon_kz", 19)
+            sellers = [
+                {"id": 3, "source_url": "https://ozon.kz/seller/ridial/"},
+                {
+                    "id": 19,
+                    "source_url": "https://ozon.kz/seller/alfa-tires-3381444/",
+                },
+            ]
+            with (
+                patch.dict(webapp.OZON_LEGACY_PROFILE_PATHS, {"ozon_kz": legacy}),
+                patch("urllib.request.urlopen", return_value=FakeResponse()),
+            ):
+                self.assertEqual(
+                    legacy.resolve(),
+                    webapp.browser_profile_for_seller(runtime, "ozon_kz", sellers),
+                )
+            marker = json.loads(
+                (legacy / ".spyon_seller_owner.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(19, marker["seller_id"])
+            self.assertEqual(
+                "ozon.kz/seller/alfa-tires-3381444", marker["seller_identity"]
+            )
+
+    def test_legacy_profile_owner_is_global_across_tenants(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_profile_owner_") as folder:
+            db_path = Path(folder) / "app.db"
+            ensure_database(db_path)
+            auth = AuthService(db_path)
+            root_user, _ = auth.create_initial_admin(
+                "root-owner@example.test", "Root", "StrongPassword123!"
+            )
+            first_tenant = int(root_user["tenant_id"])
+            second_tenant = add_approved_tenant(db_path, "profile-owner-second")
+            first_seller = add_seller(
+                db_path, first_tenant, "ozon", "first-global", "First"
+            )
+            second_seller = add_seller(
+                db_path, second_tenant, "ozon", "second-global", "Second"
+            )
+            service = SaaSService(db_path)
+            self.assertEqual(
+                [first_seller, second_seller],
+                [item["id"] for item in service.active_seller_sources("ozon")],
+            )
+
     def test_two_managers_allow_six_sellers_reject_duplicate_and_isolate_failure(self) -> None:
         with tempfile.TemporaryDirectory(prefix="task_multi_seller_") as folder:
             root = Path(folder)

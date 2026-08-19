@@ -51,7 +51,7 @@
     registry/ runs/ reports/ exports/ raw/
 ```
 
-Kaspi, Ozon.ru и Ozon.kz получают отдельный profile path на seller. Halyk, Forte и Wildberries не используют browser profile; их seller result staging/materialization также получает отдельный runtime/app scope. Старые `.kaspi_profile` и collector-local Chrome profiles остаются только legacy fallback для прямого CLI без tenant seller context.
+Kaspi получает отдельный profile path на seller. Для обновлённой установки один активный seller Ozon.ru или Ozon.kz во всех компаниях может сохранить соответствующий непустой collector-local Chrome profile только после точного сопоставления его source URL с открытой seller-вкладкой. Несекретный owner marker повторно проверяется по актуальному source URL; каждый другой seller получает отдельный seller-scoped profile path. Пустой, неоднозначный или недоступный legacy-профиль не используется. Halyk, Forte и Wildberries не используют browser profile; их seller result staging/materialization также получает отдельный runtime/app scope.
 
 ## Jobs, failure isolation и observability
 

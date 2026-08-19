@@ -534,6 +534,29 @@ class SaaSService:
         finally:
             conn.close()
 
+    def active_seller_sources(
+        self, marketplace_code: str
+    ) -> list[dict[str, Any]]:
+        """Return global active sources used to identify a legacy browser owner."""
+        code = str(marketplace_code or "").strip().casefold()
+        if code not in MARKETPLACE_BY_CODE:
+            raise ValueError("Неизвестная площадка.")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT id,tenant_id,external_seller_id,source_url
+                   FROM tenant_marketplace_sellers
+                   WHERE marketplace_code=?
+                     AND status='active'
+                     AND approval_status='approved'
+                   ORDER BY id
+                """,
+                (code,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     def seller(
         self, tenant_id: int, tenant_seller_id: int
     ) -> dict[str, Any] | None:
