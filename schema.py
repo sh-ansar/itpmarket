@@ -149,7 +149,9 @@ CREATE TABLE IF NOT EXISTS app_users (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_login_at TEXT,
-    password_changed_at TEXT
+    password_changed_at TEXT,
+    email_verified_at TEXT,
+    session_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active, role);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email_normalized ON app_users(lower(email));
@@ -193,6 +195,57 @@ CREATE TABLE IF NOT EXISTS app_notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_app_notifications_user_time ON app_notifications(user_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_notifications_unread ON app_notifications(user_id,read_at,created_at DESC);
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    purpose TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    request_ip TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_active
+ON auth_tokens(user_id,purpose,consumed_at,expires_at,id DESC);
+CREATE TABLE IF NOT EXISTS email_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER,
+    user_id INTEGER,
+    recipient TEXT NOT NULL,
+    template_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','sending','retry','sent','failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+    next_attempt_at TEXT NOT NULL,
+    last_error TEXT NOT NULL DEFAULT '',
+    dedupe_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sent_at TEXT,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_outbox_due
+ON email_outbox(status,next_attempt_at,id);
+CREATE INDEX IF NOT EXISTS idx_email_outbox_user
+ON email_outbox(user_id,id DESC);
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    in_app_enabled INTEGER NOT NULL DEFAULT 1 CHECK(in_app_enabled IN (0,1)),
+    email_enabled INTEGER NOT NULL DEFAULT 1 CHECK(email_enabled IN (0,1)),
+    telegram_enabled INTEGER NOT NULL DEFAULT 1 CHECK(telegram_enabled IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,category),
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_notification_preferences_user
+ON notification_preferences(user_id,category);
 CREATE TABLE IF NOT EXISTS telegram_user_links (
     user_id INTEGER PRIMARY KEY,
     tenant_id INTEGER,
@@ -1302,6 +1355,18 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE schedule_runs ADD COLUMN tenant_seller_id INTEGER")
         if "platform_role" not in _columns(conn, "app_users"):
             conn.execute("ALTER TABLE app_users ADD COLUMN platform_role TEXT NOT NULL DEFAULT ''")
+        user_columns = _columns(conn, "app_users")
+        email_verified_column_added = "email_verified_at" not in user_columns
+        if email_verified_column_added:
+            conn.execute("ALTER TABLE app_users ADD COLUMN email_verified_at TEXT")
+        if "session_version" not in user_columns:
+            conn.execute("ALTER TABLE app_users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0")
+        if email_verified_column_added:
+            # Users that predate verified-email authentication retain access.
+            # Newly created users are explicitly inserted as unverified.
+            conn.execute(
+                "UPDATE app_users SET email_verified_at=COALESCE(email_verified_at,created_at)"
+            )
         if "tenant_id" not in _columns(conn, "app_events"):
             conn.execute("ALTER TABLE app_events ADD COLUMN tenant_id INTEGER")
         if "tenant_id" not in _columns(conn, "app_reports"):

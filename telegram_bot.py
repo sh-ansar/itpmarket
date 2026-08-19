@@ -411,8 +411,14 @@ class TelegramLinkService:
                    FROM app_notifications n
                    JOIN telegram_user_links l ON l.user_id=n.user_id
                    JOIN app_users u ON u.id=n.user_id AND u.is_active=1
-                   WHERE l.is_enabled=1
-                     AND n.id>l.notification_start_id
+                    WHERE l.is_enabled=1
+                      AND n.id>l.notification_start_id
+                      AND (
+                          n.category='security' OR COALESCE((
+                              SELECT p.telegram_enabled FROM notification_preferences p
+                              WHERE p.user_id=n.user_id AND p.category=n.category
+                          ),1)=1
+                      )
                      AND (
                          l.tenant_id IS NULL OR EXISTS(
                              SELECT 1 FROM tenant_users tu
@@ -446,8 +452,14 @@ class TelegramLinkService:
                    JOIN telegram_user_links l
                      ON l.user_id=d.user_id AND l.chat_id=d.chat_id
                    JOIN app_users u ON u.id=d.user_id AND u.is_active=1
-                   WHERE l.is_enabled=1
-                     AND (
+                    WHERE l.is_enabled=1
+                      AND (
+                          n.category='security' OR COALESCE((
+                              SELECT p.telegram_enabled FROM notification_preferences p
+                              WHERE p.user_id=n.user_id AND p.category=n.category
+                          ),1)=1
+                      )
+                      AND (
                          l.tenant_id IS NULL OR EXISTS(
                              SELECT 1 FROM tenant_users tu
                              WHERE tu.tenant_id=l.tenant_id

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#152033;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f7fb;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
+        <tr><td style="padding:28px 36px 20px;background:#101c35;color:#ffffff;">
+          <div style="font-size:24px;font-weight:700;letter-spacing:.4px;">Spyon</div>
+          <div style="margin-top:5px;font-size:12px;letter-spacing:1.4px;color:#9bb8ff;">MARKETPLACE INTELLIGENCE</div>
+        </td></tr>
+        <tr><td style="padding:34px 36px 26px;font-size:16px;line-height:1.55;">
+          <h1 style="margin:0 0 16px;font-size:25px;line-height:1.25;color:#142444;">{{ heading }}</h1>
+          {% block content %}<p style="margin:0 0 18px;">{{ message }}</p>{% endblock %}
+          {% if action_url %}
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:#2f6fed;">
+            <a href="{{ action_url }}" style="display:inline-block;padding:13px 21px;color:#ffffff;text-decoration:none;font-weight:700;">{{ action_label }}</a>
+          </td></tr></table>
+          <p style="margin:0;color:#667085;font-size:13px;line-height:1.5;word-break:break-all;">Если кнопка не работает, откройте ссылку:<br><a href="{{ action_url }}" style="color:#2f6fed;">{{ action_url }}</a></p>
+          {% endif %}
+          {% if security_notice %}<p style="margin:24px 0 0;padding:12px 14px;background:#fff7e6;border-left:3px solid #f0a126;color:#6b4d00;font-size:13px;">Если это действие выполнили не вы, не переходите по ссылке и обратитесь в поддержку.</p>{% endif %}
+        </td></tr>
+        <tr><td style="padding:20px 36px 28px;border-top:1px solid #e6ebf2;color:#7b8798;font-size:12px;line-height:1.5;">
+          Spyon · Marketplace intelligence platform<br>{% if support_email %}<a href="mailto:{{ support_email }}" style="color:#506b9a;text-decoration:none;">{{ support_email }}</a>{% endif %}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

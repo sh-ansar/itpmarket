@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import os
 import re
@@ -32,7 +33,7 @@ from flask import (
 from waitress import serve
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from auth_service import AuthService, validate_password
+from auth_service import AuthService, normalize_email, validate_password
 from config import (
     ROOT,
     ensure_directories,
@@ -67,6 +68,7 @@ from subscription_service import (
 )
 from notification_service import NotificationService
 from telegram_bot import TelegramBotWorker, TelegramLinkService
+from email_service import EmailOutboxWorker, EmailService
 from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import SellerRuntimeScope, seller_scope
@@ -98,7 +100,8 @@ ensure_database(DB_PATH)
 AUTH = AuthService(DB_PATH)
 SAAS = SaaSService(DB_PATH)
 SUBSCRIPTIONS = SubscriptionService(DB_PATH)
-NOTIFICATIONS = NotificationService(DB_PATH)
+EMAIL = EmailService(DB_PATH)
+NOTIFICATIONS = NotificationService(DB_PATH, EMAIL)
 TELEGRAM_LINKS = TelegramLinkService(DB_PATH)
 PUBLIC = PublicProductService(DB_PATH)
 DATA = DataService(
@@ -140,8 +143,51 @@ def notification_service() -> NotificationService:
     """Return the notification store bound to the current application DB."""
     global NOTIFICATIONS
     if Path(NOTIFICATIONS.db_path).resolve() != Path(DB_PATH).resolve():
-        NOTIFICATIONS = NotificationService(DB_PATH)
+        NOTIFICATIONS = NotificationService(DB_PATH, email_service())
+    else:
+        NOTIFICATIONS.set_email_service(email_service())
     return NOTIFICATIONS
+
+
+def email_service() -> EmailService:
+    """Return the transactional-mail service bound to the active application DB."""
+    global EMAIL
+    if Path(EMAIL.db_path).resolve() != Path(DB_PATH).resolve():
+        EMAIL = EmailService(DB_PATH)
+    return EMAIL
+
+
+def email_action_url(endpoint: str, **values: Any) -> str:
+    return email_service().settings.public_url + url_for(endpoint, **values)
+
+
+def queue_verification_email(user: dict[str, Any], *, request_ip: str = "") -> None:
+    token = AUTH.issue_auth_token(
+        int(user["id"]), "verify_email", expires_minutes=24 * 60,
+        request_ip=request_ip,
+    )
+    email_service().queue_for_user(
+        user_id=int(user["id"]), tenant_id=user.get("tenant_id"),
+        template_key="verify_email", security=True,
+        payload={
+            "recipient_name": user.get("display_name") or "",
+            "action_url": email_action_url("verify_email", token=token),
+            "action_label": "Подтвердить почту",
+        },
+        dedupe_key=(
+            f"verify-email:{int(user['id'])}:"
+            f"{hashlib.sha256(token.encode('utf-8')).hexdigest()[:16]}"
+        ),
+    )
+
+
+def queue_password_changed_email(user: dict[str, Any]) -> None:
+    email_service().queue_for_user(
+        user_id=int(user["id"]), tenant_id=user.get("tenant_id"),
+        template_key="password_changed", security=True,
+        payload={"action_url": email_action_url("login")},
+        dedupe_key=f"password-changed:{int(user['id'])}:{user.get('password_changed_at') or now_epoch()}",
+    )
 
 
 def telegram_link_service() -> TelegramLinkService:
@@ -1643,6 +1689,13 @@ if os.environ.get("ITP_DISABLE_SCHEDULER", "0") != "1":
     SCHEDULER.start()
 atexit.register(SCHEDULER.stop)
 
+EMAIL_WORKER = EmailOutboxWorker(
+    email_service(), interval_seconds=float(os.environ.get("ITP_EMAIL_WORKER_INTERVAL", "5"))
+)
+if os.environ.get("ITP_DISABLE_EMAIL_WORKER", "0") != "1":
+    EMAIL_WORKER.start()
+atexit.register(EMAIL_WORKER.stop)
+
 TELEGRAM_WORKER: TelegramBotWorker | None = None
 if environment_flag("ITP_TELEGRAM_BOT_ENABLED"):
     telegram_token = str(os.environ.get("ITP_TELEGRAM_BOT_TOKEN") or "").strip()
@@ -1673,7 +1726,14 @@ def before_request() -> Any:
     if user_id:
         user = AUTH.get_user(int(user_id))
         if user and user.get("is_active"):
-            g.user = apply_subscription_permissions(user)
+            expected_version = session.get("session_version")
+            if expected_version is not None and int(expected_version) != int(user.get("session_version") or 0):
+                session.clear()
+            else:
+                # Pre-email-auth sessions did not have a version. Preserve them
+                # once, then make them eligible for password-reset revocation.
+                session["session_version"] = int(user.get("session_version") or 0)
+                g.user = apply_subscription_permissions(user)
         else:
             session.clear()
 
@@ -1687,7 +1747,11 @@ def before_request() -> Any:
         return redirect(url_for("setup"))
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        if request.endpoint in {"login", "setup", "forgot_password", "registration"}:
+        if request.endpoint in {
+            "login", "setup", "forgot_password", "registration",
+            "resend_verification", "verify_email", "reset_password",
+            "accept_invitation",
+        }:
             token = request.form.get("csrf_token")
         elif is_api_request():
             token = request.headers.get("X-CSRF-Token")
@@ -1842,6 +1906,7 @@ def setup() -> Any:
             session.clear()
             session.permanent = True
             session["user_id"] = user["id"]
+            session["session_version"] = int(user.get("session_version") or 0)
             session["csrf_token"] = secrets.token_urlsafe(32)
             session["setup_recovery_code"] = recovery
             return redirect(url_for("setup_complete"))
@@ -1876,11 +1941,20 @@ def login() -> Any:
             attempts.append(now_epoch())
             LOGIN_ATTEMPTS[ip] = attempts
             flash("Неверная почта или пароль.", "error")
+        elif not user.get("email_verified"):
+            # Correct credentials are required before exposing the unverified
+            # account state, so this does not create an enumeration endpoint.
+            session.clear()
+            session["pending_verification_email"] = user.get("email")
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            flash("Подтвердите электронную почту, чтобы продолжить.", "info")
+            return redirect(url_for("verification_sent"))
         else:
             LOGIN_ATTEMPTS.pop(ip, None)
             session.clear()
             session.permanent = True
             session["user_id"] = user["id"]
+            session["session_version"] = int(user.get("session_version") or 0)
             session["csrf_token"] = secrets.token_urlsafe(32)
             next_url = request.args.get("next")
             return redirect(next_url if next_url and next_url.startswith("/") else url_for("app_index"))
@@ -1891,23 +1965,128 @@ def login() -> Any:
 def forgot_password() -> Any:
     ensure_csrf()
     if request.method == "POST":
-        email_value = str(request.form.get("email") or "")
-        if rate_limit_hit("recovery", email_value, RECOVERY_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS):
-            flash("Слишком много попыток восстановления. Повторите позже.", "error")
+        email_value = normalize_email(str(request.form.get("email") or ""))
+        if rate_limit_hit("forgot_password", email_value, RECOVERY_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS):
+            # Do not disclose whether the address was registered.
+            flash("Если такой адрес зарегистрирован, мы отправили инструкции по восстановлению.", "success")
             return render_template("forgot_password.html"), 429
         try:
-            if request.form.get("password") != request.form.get("password_confirm"):
-                raise ValueError("Пароли не совпадают.")
-            AUTH.reset_password_with_recovery(
-                email_value,
-                request.form.get("recovery_code", ""),
-                request.form.get("password", ""),
-            )
-            flash("Пароль изменён. Теперь можно войти.", "success")
-            return redirect(url_for("login"))
-        except ValueError as exc:
-            flash(str(exc), "error")
+            raw_token = AUTH.request_password_reset(email_value, request.remote_addr or "")
+            if raw_token:
+                user = AUTH.get_user_by_email(email_value)
+                if user:
+                    email_service().queue_for_user(
+                        user_id=int(user["id"]), tenant_id=user.get("tenant_id"),
+                        template_key="password_reset", security=True,
+                        payload={
+                            "recipient_name": user.get("display_name") or "",
+                            "action_url": email_action_url("reset_password", token=raw_token),
+                            "action_label": "Сбросить пароль",
+                        },
+                        dedupe_key=(
+                            f"password-reset:{int(user['id'])}:"
+                            f"{hashlib.sha256(raw_token.encode('utf-8')).hexdigest()[:16]}"
+                        ),
+                    )
+        except (ValueError, RuntimeError):
+            # The public answer remains the same for malformed/inactive users and
+            # for a temporarily unavailable optional mail channel.
+            pass
+        flash("Если такой адрес зарегистрирован, мы отправили инструкции по восстановлению.", "success")
+        return redirect(url_for("forgot_password"))
     return render_template("forgot_password.html")
+
+
+@app.get("/verification-sent")
+def verification_sent() -> Any:
+    ensure_csrf()
+    return render_template(
+        "verification_sent.html",
+        email=session.get("pending_verification_email") or "",
+    )
+
+
+@app.post("/resend-verification")
+def resend_verification() -> Any:
+    ensure_csrf()
+    email_value = normalize_email(
+        str(request.form.get("email") or session.get("pending_verification_email") or "")
+    )
+    if not rate_limit_hit("resend_verification", email_value, 3, LOGIN_LOCK_SECONDS):
+        user = AUTH.get_user_by_email(email_value)
+        if user and user.get("is_active") and not user.get("email_verified"):
+            try:
+                queue_verification_email(user, request_ip=request.remote_addr or "")
+            except (ValueError, RuntimeError):
+                pass
+    flash("Если такой адрес зарегистрирован и ещё не подтверждён, мы отправили новую ссылку.", "success")
+    return redirect(url_for("verification_sent"))
+
+
+@app.route("/verify-email/<token>", methods=["GET", "POST"])
+def verify_email(token: str) -> Any:
+    ensure_csrf()
+    status = AUTH.auth_token_status(token, "verify_email")
+    if not status:
+        return render_template("auth_token_error.html", kind="verification"), 400
+    if request.method == "POST":
+        user = AUTH.verify_email(token)
+        if not user:
+            return render_template("auth_token_error.html", kind="verification"), 400
+        session.clear()
+        session.permanent = True
+        session["user_id"] = int(user["id"])
+        session["session_version"] = int(user.get("session_version") or 0)
+        session["csrf_token"] = secrets.token_urlsafe(32)
+        return render_template("email_verified.html", user=user)
+    return render_template("verify_email.html", token=token)
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token: str) -> Any:
+    ensure_csrf()
+    if not AUTH.auth_token_status(token, "password_reset"):
+        return render_template("auth_token_error.html", kind="reset"), 400
+    if request.method == "POST":
+        password = str(request.form.get("password") or "")
+        if password != str(request.form.get("password_confirm") or ""):
+            flash("Пароли не совпадают.", "error")
+        else:
+            try:
+                user = AUTH.reset_password_from_token(token, password)
+                if user:
+                    queue_password_changed_email(user)
+                    flash("Пароль изменён. Теперь можно войти.", "success")
+                    return redirect(url_for("login"))
+                return render_template("auth_token_error.html", kind="reset"), 400
+            except ValueError as exc:
+                flash(str(exc), "error")
+    return render_template("reset_password.html", token=token)
+
+
+@app.route("/invite/<token>", methods=["GET", "POST"])
+def accept_invitation(token: str) -> Any:
+    ensure_csrf()
+    if not AUTH.auth_token_status(token, "user_invitation"):
+        return render_template("auth_token_error.html", kind="invitation"), 400
+    if request.method == "POST":
+        password = str(request.form.get("password") or "")
+        if password != str(request.form.get("password_confirm") or ""):
+            flash("Пароли не совпадают.", "error")
+        else:
+            try:
+                user = AUTH.accept_invitation(token, password)
+                if user:
+                    session.clear()
+                    session.permanent = True
+                    session["user_id"] = int(user["id"])
+                    session["session_version"] = int(user.get("session_version") or 0)
+                    session["csrf_token"] = secrets.token_urlsafe(32)
+                    return redirect(url_for("app_index"))
+                return render_template("auth_token_error.html", kind="invitation"), 400
+            except ValueError as exc:
+                flash(str(exc), "error")
+    return render_template("accept_invitation.html", token=token)
 
 
 @app.route("/logout", methods=["GET", "POST"])

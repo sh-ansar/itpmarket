@@ -29,12 +29,17 @@ def _parse_time(value: Any) -> datetime | None:
 class NotificationService:
     """Persistent per-user notifications backed by the application database."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, email_service: Any | None = None):
         self.db_path = Path(db_path)
+        self.email_service = email_service
         self._cache_lock = threading.Lock()
         self._task_states: dict[str, str] = {}
         self._expiry_checks: dict[int, float] = {}
         self.ensure_schema()
+
+    def set_email_service(self, email_service: Any | None) -> None:
+        """Attach the optional transactional-email channel after app startup."""
+        self.email_service = email_service
 
     def _connect(self) -> sqlite3.Connection | PostgresConnection:
         conn = connect_database(self.db_path, timeout=30)
@@ -107,11 +112,12 @@ class NotificationService:
         action_url: str = "/app",
         dedupe_key: str,
     ) -> None:
-        self._insert_many([(
+        row = (
             tenant_id, int(user_id), str(category), str(event_type), str(level),
             str(title)[:240], str(message)[:1200], str(action_url)[:500],
             str(dedupe_key)[:500], now_iso(),
-        )])
+        )
+        self._insert_many([row])
 
     def _insert_many(self, rows: list[tuple[Any, ...]]) -> None:
         if not rows:
@@ -129,6 +135,88 @@ class NotificationService:
             conn.commit()
         finally:
             conn.close()
+        channel = self.email_service
+        if channel is not None:
+            for row in rows:
+                try:
+                    channel.queue_notification(
+                        tenant_id=int(row[0]) if row[0] is not None else None,
+                        user_id=int(row[1]), category=str(row[2]), event_type=str(row[3]),
+                        title=str(row[5]), message=str(row[6]), action_url=str(row[7]),
+                        dedupe_key=str(row[8]),
+                    )
+                except Exception:
+                    # Notification delivery is deliberately best effort: an email
+                    # configuration or provider outage must not break in-app work.
+                    pass
+
+    def preferences_for_user(self, user_id: int) -> dict[str, dict[str, bool]]:
+        defaults = {
+            category: {
+                "in_app_enabled": True, "email_enabled": True,
+                "telegram_enabled": True,
+            }
+            for category in ("security", "billing", "marketplaces", "operations")
+        }
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT category,in_app_enabled,email_enabled,telegram_enabled
+                   FROM notification_preferences WHERE user_id=?""",
+                (int(user_id),),
+            ).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            category = str(row["category"])
+            if category not in defaults:
+                continue
+            defaults[category] = {
+                "in_app_enabled": bool(row["in_app_enabled"]),
+                "email_enabled": bool(row["email_enabled"]),
+                "telegram_enabled": bool(row["telegram_enabled"]),
+            }
+        # Security delivery is a required account-protection channel.
+        defaults["security"] = {
+            "in_app_enabled": True, "email_enabled": True,
+            "telegram_enabled": True,
+        }
+        return defaults
+
+    def save_preferences(
+        self, user_id: int, values: dict[str, Any]
+    ) -> dict[str, dict[str, bool]]:
+        if not isinstance(values, dict):
+            raise ValueError("Настройки уведомлений должны быть объектом.")
+        stamp = now_iso()
+        conn = self._connect()
+        try:
+            for category in ("security", "billing", "marketplaces", "operations"):
+                raw = values.get(category)
+                if not isinstance(raw, dict):
+                    continue
+                if category == "security":
+                    in_app, email, telegram = 1, 1, 1
+                else:
+                    in_app = 1 if raw.get("in_app_enabled", True) else 0
+                    email = 1 if raw.get("email_enabled", True) else 0
+                    telegram = 1 if raw.get("telegram_enabled", True) else 0
+                conn.execute(
+                    """INSERT INTO notification_preferences(
+                           user_id,category,in_app_enabled,email_enabled,telegram_enabled,
+                           created_at,updated_at
+                       ) VALUES(?,?,?,?,?,?,?)
+                       ON CONFLICT(user_id,category) DO UPDATE SET
+                           in_app_enabled=excluded.in_app_enabled,
+                           email_enabled=excluded.email_enabled,
+                           telegram_enabled=excluded.telegram_enabled,
+                           updated_at=excluded.updated_at""",
+                    (int(user_id), category, in_app, email, telegram, stamp, stamp),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return self.preferences_for_user(int(user_id))
 
     def sync_tasks(self, tasks: Iterable[dict[str, Any]]) -> None:
         rows: list[tuple[Any, ...]] = []

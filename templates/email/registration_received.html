@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% set heading = "Заявка получена" %}{% set action_label = "Открыть Spyon" %}{% block content %}<p>Мы получили заявку{% if company_name %} компании «{{ company_name }}»{% endif %}.</p><p>Сначала подтвердите email. Затем супер-администратор проверит данные компании.</p>{% endblock %}

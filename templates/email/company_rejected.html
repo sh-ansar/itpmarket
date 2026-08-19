@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% set heading = "Решение по заявке" %}{% set action_label = "Связаться с поддержкой" %}{% block content %}<p>Заявка{% if company_name %} компании «{{ company_name }}»{% endif %} пока не может быть одобрена.</p><p>{{ message or "Уточните данные у поддержки и отправьте обновлённую информацию." }}</p>{% endblock %}

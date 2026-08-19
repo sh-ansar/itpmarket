@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% set heading = "Компания одобрена" %}{% set action_label = "Открыть рабочее пространство" %}{% block content %}<p>{% if company_name %}Компания «{{ company_name }}»{% else %}Ваша компания{% endif %} одобрена в Spyon.</p><p>Теперь можно продолжить настройку рабочих процессов и подключений marketplace.</p>{% endblock %}
