@@ -2,6 +2,7 @@
 
 - Scoped Ozon.ru and Ozon.kz enrichment and price queues to products discovered from the selected seller source.
 - Prevented legacy products from other sellers or storefronts from entering a seller's live refresh operation.
+- Parsed Ozon's current exact-SKU `webOutOfStock` response as a priced unavailable offer instead of a failed product.
 
 ## 3.8.2
 

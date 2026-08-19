@@ -210,7 +210,7 @@ def normalize_for_import(item: dict[str, Any], collected_at: str, run_id: str) -
         "review_count": item.get("review_count"),
         "location_city": str(item.get("location_city") or ""),
         "location_country": str(item.get("location_country") or ""),
-        "availability_status": "UNKNOWN",
+        "availability_status": str(item.get("availability_status") or "UNKNOWN"),
         "seller_match_status": str(item.get("seller_match_status") or "NOT_CONFIGURED"),
         "detail_status": str(item.get("detail_status") or ""),
         "overall_status": str(item.get("overall_status") or ""),

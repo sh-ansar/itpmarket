@@ -323,6 +323,7 @@ def parse_product_json(
     heading: dict[str, Any] = {}
     price_data: dict[str, Any] = {}
     current_seller: dict[str, Any] = {}
+    out_of_stock: dict[str, Any] = {}
 
     for key, obj in states:
         if key.startswith("webStickyProducts-"):
@@ -333,10 +334,16 @@ def parse_product_json(
             price_data = obj
         elif key.startswith("webCurrentSeller-"):
             current_seller = obj
+        elif key.startswith("webOutOfStock-"):
+            if str(obj.get("sku") or "").strip() == str(article).strip():
+                out_of_stock = obj
 
     seller = sticky.get("seller") if isinstance(sticky.get("seller"), dict) else {}
     seller_name = str(seller.get("name") or "")
     seller_link = str(seller.get("link") or "")
+    if out_of_stock:
+        seller_name = str(out_of_stock.get("sellerName") or seller_name)
+        seller_link = str(out_of_stock.get("sellerLink") or seller_link)
 
     seller_cell = current_seller.get("sellerCell")
     if isinstance(seller_cell, dict):
@@ -366,7 +373,13 @@ def parse_product_json(
     if nested_seller_id not in (None, ""):
         seller_id = str(nested_seller_id)
 
-    name = str(heading.get("title") or sticky.get("name") or catalog_product.get("name") or "")
+    name = str(
+        heading.get("title")
+        or sticky.get("name")
+        or out_of_stock.get("skuName")
+        or catalog_product.get("name")
+        or ""
+    )
     image_url = str(
         sticky.get("coverImageUrl")
         or catalog_product.get("image_url")
@@ -394,6 +407,8 @@ def parse_product_json(
     card_price = parse_price(price_data.get("cardPrice"))
     regular_price = parse_price(price_data.get("price"))
     original_price = parse_price(price_data.get("originalPrice"))
+    if not card_price and not regular_price and out_of_stock:
+        regular_price = parse_price(out_of_stock.get("price"))
     catalog_card_price = parse_price(catalog_product.get("catalog_card_price"))
 
     item = {
@@ -424,6 +439,7 @@ def parse_product_json(
         "manufacturer_article": manufacturer_article,
         "location_city": str(current_location.get("city") or ""),
         "location_country": str(current_location.get("country") or ""),
+        "availability_status": "OUT_OF_STOCK" if out_of_stock else "UNKNOWN",
         "page_type": str(page_info.get("pageType") or ""),
         "url": str(catalog_product.get("url") or ""),
         "success": bool(name and (card_price or regular_price)),

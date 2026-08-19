@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -16,11 +17,44 @@ if str(OZON_ROOT) not in sys.path:
 
 from browser_session import BrowserSession
 from ozon_collector import combined_status, result_exit_code
+from ozon_probe_core import parse_product_json
+from ozon_validation_core import normalize_for_import
 from registry import Registry
 from storage.postgres_compat import _schema_for_path
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
+    def test_out_of_stock_widget_is_a_valid_exact_product_response(self) -> None:
+        article = "2946348346"
+        data = {
+            "widgetStates": {
+                "webOutOfStock-1": json.dumps(
+                    {
+                        "sku": article,
+                        "skuName": "MICHELIN PILOT SPORT 4S 245/40 R20 99Y",
+                        "price": "36\u2009824\u2009₽",
+                        "sellerName": "Alfa Tires",
+                        "sellerLink": "https://www.ozon.ru/seller/alfa-tires-3381444/",
+                        "productLink": f"/product/{article}/?oos_search=false",
+                        "deliveryMessage": "Доставка недоступна",
+                    },
+                    ensure_ascii=False,
+                )
+            }
+        }
+        item = parse_product_json(
+            article,
+            data,
+            {"article": article, "url": f"https://www.ozon.ru/product/{article}/"},
+        )
+        self.assertTrue(item["success"])
+        self.assertEqual(36824, item["regular_price"])
+        self.assertEqual("3381444", item["seller_id"])
+        self.assertEqual("OUT_OF_STOCK", item["availability_status"])
+        normalized = normalize_for_import(item, "2026-08-19T12:00:00", "run")
+        self.assertEqual(36824, normalized["price"])
+        self.assertEqual("OUT_OF_STOCK", normalized["availability_status"])
+
     def test_price_queue_is_limited_to_the_selected_seller_source(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_source_queue_") as folder:
             registry = Registry(Path(folder) / "registry.db")
