@@ -18,7 +18,11 @@ if str(OZON_RU_ROOT) not in sys.path:
     sys.path.insert(0, str(OZON_RU_ROOT))
 
 from collector_config import Settings, load_settings  # noqa: E402
-from ozon_collector import Collector, materialize_tenant_catalog  # noqa: E402
+from ozon_collector import (  # noqa: E402
+    Collector,
+    materialize_tenant_catalog,
+    result_exit_code,
+)
 from registry import now_iso  # noqa: E402
 from collectors.ozon_kz.storage import connect, ensure_schema  # noqa: E402
 
@@ -191,6 +195,15 @@ def parse_articles(value: str) -> set[str] | None:
     return result or None
 
 
+def require_success(result: dict[str, Any], operation: str) -> dict[str, Any]:
+    if result_exit_code(result) != 0:
+        raise RuntimeError(
+            f"Ozon.kz {operation} завершён со статусом "
+            f"{str(result.get('status') or 'FAILED')}."
+        )
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ozon.kz public storefront collector")
     parser.add_argument("action", choices=("sync-catalog", "refresh-prices", "full-sync"))
@@ -225,9 +238,14 @@ def main() -> int:
                     "Ozon.kz; если показана проверка доступа, пройдите её и повторите запуск."
                 )
         if args.action == "full-sync":
-            collector.process("enrich-new", limit, None)
+            require_success(
+                collector.process("enrich-new", limit, None), "enrich-new"
+            )
         if args.action in {"refresh-prices", "full-sync"}:
-            collector.process("refresh-prices", limit, articles)
+            require_success(
+                collector.process("refresh-prices", limit, articles),
+                "refresh-prices",
+            )
         mirrored = mirror_public_registry(settings)
         tenant_count = materialize_tenant_catalog(
             settings, int(args.tenant_id), str(getattr(args, "app_db", "") or args.db), "ozon_kz",

@@ -1,3 +1,7 @@
+## 3.8.4
+
+- Made Ozon.kz return a non-zero job result when enrichment or price collection is partial, blocked or failed.
+
 ## 3.8.3
 
 - Scoped Ozon.ru and Ozon.kz enrichment and price queues to products discovered from the selected seller source.

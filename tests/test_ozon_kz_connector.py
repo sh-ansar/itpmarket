@@ -8,7 +8,7 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
-from collectors.ozon_kz.ozon_kz_collector import build_settings
+from collectors.ozon_kz.ozon_kz_collector import build_settings, require_success
 from collectors.ozon_kz.ozon_kz_connector import validate_source_url
 from collectors.ozon_kz.storage import connect, ensure_schema, status
 from collectors.ozon.ozon_probe_core import _extract_tile_price
@@ -18,6 +18,13 @@ from schema import ensure_database
 
 
 class OzonKzConnectorTests(unittest.TestCase):
+    def test_partial_collector_result_fails_the_kz_cli(self) -> None:
+        self.assertEqual(
+            "PASSED", require_success({"status": "PASSED"}, "refresh")["status"]
+        )
+        with self.assertRaisesRegex(RuntimeError, "PARTIAL"):
+            require_success({"status": "PARTIAL"}, "refresh")
+
     def test_raw_artifact_path_supports_kz_collector_directory(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         raw_path = project_root / "collectors" / "ozon_kz" / "raw" / "42" / "run.json"
