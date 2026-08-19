@@ -71,7 +71,7 @@ from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import SellerRuntimeScope, seller_scope
 
-VERSION = "3.8.6"
+VERSION = "3.8.7"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 

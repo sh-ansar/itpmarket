@@ -674,6 +674,21 @@ def settings_for_args(settings: Settings, args: argparse.Namespace) -> Settings:
     return replace(settings, **updates) if updates else settings
 
 
+def marketplace_seller_identifiers(settings: Settings) -> tuple[str, ...]:
+    values = {str(settings.expected_seller or "").strip().casefold()}
+    parsed = urlparse(str(settings.start_url or ""))
+    parts = [part.strip().casefold() for part in parsed.path.split("/") if part.strip()]
+    if len(parts) >= 2 and parts[0] == "seller":
+        slug = parts[1]
+        values.add(slug)
+        values.update(
+            part for part in slug.split("-")
+            if part.isdigit() and len(part) >= 3
+        )
+    values.discard("")
+    return tuple(sorted(values))
+
+
 def materialize_tenant_catalog(
     settings: Settings,
     tenant_id: int,
@@ -697,21 +712,27 @@ def materialize_tenant_catalog(
             f"""SELECT p.* FROM products p WHERE {where} ORDER BY p.article""",
             params,
         ).fetchall()
-        offers = {
-            str(row["article"]): dict(row)
-            for row in conn.execute(
-                """SELECT o.* FROM offers o
-                   WHERE o.active=1 AND (
-                       lower(o.seller_name)=lower(?) OR lower(o.seller_id)=lower(?)
-                       OR lower(o.seller_url) LIKE lower(?)
-                   ) ORDER BY o.last_checked_at DESC""",
-                (
-                    settings.expected_seller,
-                    settings.expected_seller,
-                    f"%/{settings.expected_seller}/%",
-                ),
+        identifiers = marketplace_seller_identifiers(settings)
+        offer_conditions: list[str] = []
+        offer_params: list[Any] = []
+        for identifier in identifiers:
+            offer_conditions.append(
+                "(lower(o.seller_name)=? OR lower(o.seller_id)=? "
+                "OR lower(o.seller_url) LIKE ?)"
+            )
+            offer_params.extend(
+                (identifier, identifier, f"%/seller/{identifier}/%")
+            )
+        offers: dict[str, dict[str, Any]] = {}
+        if offer_conditions:
+            offer_rows = conn.execute(
+                "SELECT o.* FROM offers o WHERE o.active=1 AND ("
+                + " OR ".join(offer_conditions)
+                + ") ORDER BY o.article,o.last_checked_at DESC",
+                offer_params,
             ).fetchall()
-        }
+            for row in offer_rows:
+                offers.setdefault(str(row["article"]), dict(row))
     finally:
         conn.close()
     products: list[dict[str, Any]] = []
@@ -734,11 +755,15 @@ def materialize_tenant_catalog(
             "model": value.get("model") or "",
             "url": value.get("canonical_url") or "",
             "image_url": value.get("image_url") or "",
-            "price": own.get("card_price") or value.get("catalog_price") or None,
+            "price": (
+                own.get("card_price") or own.get("regular_price")
+                or value.get("catalog_price") or None
+            ),
             "currency": (
                 "KZT" if marketplace_code == "ozon_kz"
                 else own.get("currency") or currency
             ),
+            "availability": own.get("availability_status") or "",
             "category": "",
             "attributes": attributes,
             "updated_at": value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at"),

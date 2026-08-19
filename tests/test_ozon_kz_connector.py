@@ -42,7 +42,7 @@ class OzonKzConnectorTests(unittest.TestCase):
             registry = Registry(Path(folder) / "ozon_kz_registry.db")
             try:
                 stamp = "2026-08-19T14:00:00+05:00"
-                source_url = "https://ozon.kz/seller/example/"
+                source_url = "https://ozon.kz/seller/alfa-tires-3381444/"
                 registry.upsert_catalog_product(
                     {
                         "article": "kz-1",
@@ -56,10 +56,14 @@ class OzonKzConnectorTests(unittest.TestCase):
                 )
                 registry.conn.execute(
                     """INSERT INTO offers(
-                           article,seller_key,seller_id,card_price,currency,
+                           article,seller_key,seller_id,seller_name,seller_url,
+                           card_price,currency,availability_status,
                            first_seen_at,last_seen_at,last_checked_at
-                       ) VALUES(?,?,?,?,?,?,?,?)""",
-                    ("kz-1", "own", "own", 42000, "RUB", stamp, stamp, stamp),
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        "kz-1", "own", "3381444", "Alfa Tires", source_url,
+                        42000, "RUB", "OUT_OF_STOCK", stamp, stamp, stamp,
+                    ),
                 )
                 registry.conn.execute(
                     """INSERT INTO price_history(
@@ -88,7 +92,7 @@ class OzonKzConnectorTests(unittest.TestCase):
                 registry.conn.commit()
                 settings = build_settings(Namespace(
                     source_url=source_url,
-                    expected_seller="own",
+                    expected_seller="alfa tires 3381444",
                     debug_port=9333,
                     db=str(registry.path),
                 ))
@@ -104,6 +108,8 @@ class OzonKzConnectorTests(unittest.TestCase):
                     )
                     products = service.return_value.replace_catalog_products.call_args.args[2]
                     self.assertEqual("KZT", products[0]["currency"])
+                    self.assertEqual(42000, products[0]["price"])
+                    self.assertEqual("OUT_OF_STOCK", products[0]["availability"])
             finally:
                 registry.close()
 

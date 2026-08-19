@@ -1,3 +1,7 @@
+## 3.8.7
+
+- Matched Ozon seller offers by storefront slug and numeric seller ID, and carried the own price and availability into the tenant catalog.
+
 ## 3.8.6
 
 - Stored Ozon.kz offers and history as KZT, forced KZT during tenant catalog materialization and repaired legacy RUB labels inside the dedicated KZ registry without changing amounts.
