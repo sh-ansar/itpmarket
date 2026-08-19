@@ -71,6 +71,8 @@
       "tenant_user_permissions",
       "tenant_users",
       "tenants",
+      "telegram_notification_deliveries",
+      "telegram_user_links",
       "user_marketplace_access",
       "v9_catalog_audits",
       "v9_catalog_imports",

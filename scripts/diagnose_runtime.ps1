@@ -224,11 +224,24 @@ if ($Mode -eq 'Production') {
     elseif ([string]$env:ITP_SESSION_SECRET) {
         Add-DiagnosticResult PASS 'env contract session secret' 'Length is valid (value hidden).'
     }
+    if ([string]$env:ITP_TELEGRAM_BOT_ENABLED -eq '1') {
+        if (-not [string]$env:ITP_TELEGRAM_BOT_TOKEN) {
+            Add-DiagnosticResult FAIL 'Telegram bot token' 'Enabled but token is missing.'
+        }
+        elseif ([string]$env:ITP_TELEGRAM_BOT_TOKEN -notmatch '^\d+:[A-Za-z0-9_-]{30,}$') {
+            Add-DiagnosticResult FAIL 'Telegram bot token' 'Enabled but token format is invalid.'
+        }
+        else {
+            Add-DiagnosticResult PASS 'Telegram bot token' 'Configured (value hidden).'
+        }
+    }
 }
 
 $optionalEnvironment = @(
     'ITP_CREDENTIAL_MASTER_KEY',
     'ITP_DISABLE_SCHEDULER',
+    'ITP_TELEGRAM_BOT_ENABLED',
+    'ITP_TELEGRAM_BOT_USERNAME',
     'ITP_POSTGRES_POOL_SIZE',
     'ITP_TRUSTED_HOSTS',
     'OZON_CHROME_PATH',

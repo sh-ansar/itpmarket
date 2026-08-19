@@ -193,6 +193,46 @@ CREATE TABLE IF NOT EXISTS app_notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_app_notifications_user_time ON app_notifications(user_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_notifications_unread ON app_notifications(user_id,read_at,created_at DESC);
+CREATE TABLE IF NOT EXISTS telegram_user_links (
+    user_id INTEGER PRIMARY KEY,
+    tenant_id INTEGER,
+    chat_id INTEGER NOT NULL UNIQUE,
+    telegram_user_id INTEGER NOT NULL UNIQUE,
+    telegram_username TEXT NOT NULL DEFAULT '',
+    telegram_display_name TEXT NOT NULL DEFAULT '',
+    is_enabled INTEGER NOT NULL DEFAULT 1 CHECK(is_enabled IN (0,1)),
+    notification_start_id INTEGER NOT NULL DEFAULT 0,
+    linked_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_user_links_tenant
+ON telegram_user_links(tenant_id,is_enabled);
+CREATE TABLE IF NOT EXISTS telegram_notification_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    chat_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','retry','sent','failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    telegram_message_id INTEGER,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sent_at TEXT,
+    UNIQUE(notification_id,chat_id),
+    FOREIGN KEY(notification_id) REFERENCES app_notifications(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_deliveries_pending
+ON telegram_notification_deliveries(status,next_attempt_at,id);
+CREATE INDEX IF NOT EXISTS idx_telegram_deliveries_user
+ON telegram_notification_deliveries(user_id,id DESC);
 CREATE TABLE IF NOT EXISTS app_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_type TEXT NOT NULL,

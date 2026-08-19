@@ -53,6 +53,8 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("ITP_STORAGE_BACKEND=postgresql", example)
         self.assertIn("ITP_COOKIE_SECURE=1", example)
         self.assertIn("ITP_TRUST_PROXY=1", example)
+        self.assertIn("ITP_TELEGRAM_BOT_ENABLED=0", example)
+        self.assertIn("ITP_TELEGRAM_BOT_TOKEN=CHANGE_ME", example)
         self.assertIn("CHANGE_ME", example)
         self.assertNotIn("85.159.27.24", example)
 
@@ -66,6 +68,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("postgres_initialize.py' --check", launcher)
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH", launcher)
         self.assertIn("environment_check.py' --check-only", launcher)
+        self.assertIn("ITP_TELEGRAM_BOT_TOKEN", launcher)
         self.assertNotIn("Start-Process", launcher)
 
         installer = (
@@ -76,6 +79,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("PLAYWRIGHT_BROWSERS_PATH", installer)
         self.assertIn("@('py', '-3.11')", installer)
         self.assertIn("@('py', '-3.10')", installer)
+        self.assertIn("TelegramBotToken", installer)
 
         stopper = (
             ROOT / "deploy" / "windows" / "stop-production.ps1"
@@ -112,12 +116,14 @@ class ProductionDeploymentTests(unittest.TestCase):
         )
         schemas = manifest["schemas"]
         self.assertEqual({"app", "ozon_ru", "ozon_kz"}, set(schemas))
-        self.assertEqual(102, sum(len(tables) for tables in schemas.values()))
+        self.assertEqual(104, sum(len(tables) for tables in schemas.values()))
         self.assertIn("tenants", schemas["app"])
         self.assertIn("tenant_inventory_products", schemas["app"])
         self.assertIn("tenant_product_listings", schemas["app"])
         self.assertIn("tenant_product_match_decisions", schemas["app"])
         self.assertIn("tenant_inventory_events", schemas["app"])
+        self.assertIn("telegram_user_links", schemas["app"])
+        self.assertIn("telegram_notification_deliveries", schemas["app"])
         self.assertIn("products", schemas["ozon_ru"])
         self.assertIn("ozon_kz_products", schemas["ozon_kz"])
 

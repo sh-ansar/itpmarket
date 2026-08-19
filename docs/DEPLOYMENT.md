@@ -34,7 +34,7 @@ Production — Windows Server 2016. Активный checkout: `C:\Spyon\current
 - Не использовать `git reset --hard`, `git clean`, forced checkout или ручное копирование поверх `C:\Spyon\current`.
 - Не удалять и не заменять `.runtime`, `.venv`, БД, `data`, browser profiles, `logs`, `output`, `backups` и Playwright browsers.
 - Не выполнять bootstrap/migration на существующей production PostgreSQL «для проверки». `--check` — read-only; инициализация без него может менять схему/данные.
-- Не печатать и не коммить `.runtime\production.env`, `DATABASE_URL`, `ITP_SESSION_SECRET`, `ITP_CREDENTIAL_MASTER_KEY`, cookies или профили.
+- Не печатать и не коммить `.runtime\production.env`, `DATABASE_URL`, `ITP_SESSION_SECRET`, `ITP_CREDENTIAL_MASTER_KEY`, `ITP_TELEGRAM_BOT_TOKEN`, cookies или профили.
 - Не открывать Waitress наружу. `ITP_HOST=127.0.0.1`; внешний трафик принимает Caddy.
 
 ## Подготовка feature-ветки
@@ -69,8 +69,9 @@ Backup-helper определяет major-версию PostgreSQL-сервера 
 
 1. `migrations/20260818_multi_seller_v1.sql`.
 2. `migrations/20260818_inventory_matching_v1.sql`.
+3. `migrations/20260818_telegram_notifications_v1.sql`.
 
-Обе миграции аддитивны. Вторая не переносит и не объединяет карточки автоматически; она добавляет отсутствующие default-права системных ролей (`admin` и `operator`) без удаления персональных overrides. После применения `engine/postgres_initialize.py --check` должен увидеть новые таблицы; только затем разрешён restart приложения. В рамках локальной feature-разработки эти миграции к production не применяются.
+Все миграции аддитивны. Вторая не переносит и не объединяет карточки автоматически; она добавляет отсутствующие default-права системных ролей (`admin` и `operator`) без удаления персональных overrides. Третья создаёт только персональные Telegram-привязки и журнал доставки; токен в PostgreSQL не хранится. После применения `engine/postgres_initialize.py --check` должен увидеть новые таблицы; только затем разрешён restart приложения. В рамках локальной feature-разработки эти миграции к production не применяются.
 
 После явного approval локальное продвижение выполняется только fast-forward:
 
@@ -122,6 +123,17 @@ Set-Location C:\Spyon\current
 5. При любой ошибке завершиться ненулевым кодом и сохранить deploy log.
 
 `deploy\windows\start-production.ps1` загружает secret-bearing env, принудительно задаёт loopback/без открытия браузера, проверяет PostgreSQL, Python imports, Playwright, `pip check` и Chrome, затем запускает `app.py`. Для уже подготовленной БД deploy-обвязка должна вызывать его с `-SkipDatabaseInitialization`: этот режим всё равно делает `postgres_initialize.py --check`, но не пытается инициализировать БД.
+
+Telegram включается только через закрытый `.runtime\production.env`:
+
+```text
+ITP_TELEGRAM_BOT_ENABLED=1
+ITP_TELEGRAM_BOT_TOKEN=<token from BotFather>
+ITP_TELEGRAM_BOT_USERNAME=<username without @>
+SPYON_PUBLIC_URL=https://spyon.kz
+```
+
+Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После рестарта проверьте `/status` в личном чате, вход тестового пользователя и доставку специально созданного тестового уведомления.
 
 ## Post-deploy verification
 

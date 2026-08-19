@@ -1,3 +1,10 @@
+## 3.8.0
+
+- Added private-chat Telegram authentication with immediate credential-message deletion, login throttling and tenant/user-scoped account links.
+- Added idempotent Telegram delivery for existing Spyon notifications, with retries, pause/resume, unlinking and inactive-user protection.
+- Added personal Telegram status controls in Settings and additive SQLite/PostgreSQL schema support.
+- Added secret-safe production configuration and runtime diagnostics for the Telegram bot.
+
 ## 3.7.1
 
 - Collapsed simultaneous tenant-catalog reads into one short-lived snapshot without blocking other tenants.

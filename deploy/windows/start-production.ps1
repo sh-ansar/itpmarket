@@ -20,6 +20,14 @@ if ($env:ITP_STORAGE_BACKEND -ne 'postgresql' -or -not $env:DATABASE_URL) {
 if ($env:ITP_ENV -eq 'production' -and ($env:ITP_SESSION_SECRET.Length -lt 32)) {
     throw 'ITP_SESSION_SECRET must contain at least 32 characters.'
 }
+if ($env:ITP_TELEGRAM_BOT_ENABLED -eq '1') {
+    if (-not $env:ITP_TELEGRAM_BOT_TOKEN) {
+        throw 'ITP_TELEGRAM_BOT_TOKEN is required when Telegram bot is enabled.'
+    }
+    if ($env:ITP_TELEGRAM_BOT_TOKEN -notmatch '^\d+:[A-Za-z0-9_-]{30,}$') {
+        throw 'ITP_TELEGRAM_BOT_TOKEN format is invalid.'
+    }
+}
 
 # Waitress is never exposed directly. Caddy is the only public listener.
 $env:ITP_HOST = '127.0.0.1'

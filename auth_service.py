@@ -339,7 +339,13 @@ class AuthService:
         finally:
             conn.close()
 
-    def authenticate(self, email: str, password: str) -> dict[str, Any] | None:
+    def authenticate(
+        self,
+        email: str,
+        password: str,
+        *,
+        event_type: str = "login",
+    ) -> dict[str, Any] | None:
         value = self.get_user_by_email(email, include_secret=True)
         if not value or not bool(value.get("is_active")):
             return None
@@ -355,7 +361,11 @@ class AuthService:
                 )
             else:
                 conn.execute("UPDATE app_users SET last_login_at=?,updated_at=? WHERE id=?", (stamp, stamp, value["id"]))
-            self._event(conn, int(value["id"]), "login", "user", str(value["id"]), {})
+            auth_event = (
+                str(event_type) if str(event_type) in {"login", "telegram_login"}
+                else "login"
+            )
+            self._event(conn, int(value["id"]), auth_event, "user", str(value["id"]), {})
             conn.commit()
         finally:
             conn.close()

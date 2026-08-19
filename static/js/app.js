@@ -55,7 +55,7 @@
   const FILTERABLE_ACTIONS = new Set(['kaspi_price_actualize','ozon_price_actualize','ozon_kz_price_actualize','halyk_price_actualize','forte_price_actualize','export_report']);
 
 
-  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,overviewLoading:false,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0,inventoryLoaded:false,inventoryLoading:false};
+  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,overviewLoading:false,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0,inventoryLoaded:false,inventoryLoading:false,telegram:null};
   const multiSelectRegistry = new Map();
   let helpReturnFocus = null;
   let productsRequestController = null;
@@ -792,6 +792,22 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     $('#requestSubscriptionAddon')?.addEventListener('click',async()=>{try{await api('/api/subscription/addons/request',{method:'POST',body:{addon_code:$('#subscriptionAddonSelect').value,marketplace_code:$('#subscriptionAddonMarketplace').value,quantity:1}});toast('Заявка на дополнительные позиции отправлена');loadSettings();}catch(e){toast(e.message,true)}});
   }
 
+  function renderTelegramStatus(data){
+    state.telegram=data||{};const card=$('#telegramSettings');if(!card)return;
+    const link=data?.link||null,available=Boolean(data?.available),username=String(data?.bot_username||'').replace(/^@/,'');
+    card.hidden=!available&&!link;
+    const title=$('#telegramStatusTitle'),description=$('#telegramStatusText'),dot=$('#telegramStatusDot'),toggle=$('#toggleTelegramNotifications'),disconnect=$('#disconnectTelegram'),open=$('#openTelegramBot');
+    if(open){open.hidden=!available;open.href=available?`https://t.me/${encodeURIComponent(username)}`:'#'}
+    if(link){
+      const enabled=Boolean(link.is_enabled),identity=link.telegram_username?`@${link.telegram_username}`:link.telegram_display_name||'личный чат';
+      title.textContent=enabled?'Telegram подключён':'Уведомления приостановлены';description.textContent=`${identity} · привязан ${dateText(link.linked_at)}`;dot.className=enabled?'connected':'paused';
+      toggle.hidden=false;toggle.textContent=enabled?'Приостановить':'Возобновить';toggle.dataset.enabled=String(enabled);disconnect.hidden=false;
+    }else{
+      title.textContent='Telegram не подключён';description.textContent='Откройте бота и выполните /login';dot.className='';toggle.hidden=true;disconnect.hidden=true;
+    }
+  }
+  async function loadTelegramStatus(){try{renderTelegramStatus(await api('/api/telegram/status'))}catch(error){console.error(error)}}
+
   async function loadSettings(){
     try{
       const d=await api('/api/settings');state.settings=d;const p=d.preferences||{};
@@ -801,6 +817,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       $('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;
       const tenant=d.tenant||{};
       renderSubscriptionSettings(d.subscription);
+      loadTelegramStatus();
       if($('#tenantName')){
         $('#tenantName').value=tenant.name||'';$('#tenantRegistrationNumber').value=tenant.registration_number||'';
         $('#tenantContactEmail').value=tenant.contact_email||'';$('#tenantContactPhone').value=tenant.contact_phone||'';
@@ -1107,6 +1124,8 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#closeNotifications'))$('#closeNotifications').onclick=closeNotifications;
     if($('#readAllNotifications'))$('#readAllNotifications').onclick=async()=>{try{await api('/api/notifications/read-all',{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
     if($('#notificationList'))$('#notificationList').onclick=async event=>{const item=event.target.closest('[data-notification-id]');if(!item)return;try{await api(`/api/notifications/${item.dataset.notificationId}/read`,{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
+    if($('#toggleTelegramNotifications'))$('#toggleTelegramNotifications').onclick=async()=>{const enabled=$('#toggleTelegramNotifications').dataset.enabled==='true';try{await api('/api/telegram/enabled',{method:'POST',body:{enabled:!enabled}});await loadTelegramStatus();toast(enabled?'Telegram-уведомления приостановлены':'Telegram-уведомления включены')}catch(error){toast(error.message,true)}};
+    if($('#disconnectTelegram'))$('#disconnectTelegram').onclick=async()=>{if(!confirm('Отвязать Telegram от аккаунта Spyon?'))return;try{await api('/api/telegram/disconnect',{method:'POST',body:{}});await loadTelegramStatus();toast('Telegram отключён')}catch(error){toast(error.message,true)}};
     $('#profileMenu').onclick=e=>e.stopPropagation();$('#openPassword').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
     $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang});if(state.page==='dashboard')loadOverview()});
     if($('#languageSelect'))$('#languageSelect').onchange=e=>{applyI18n(e.target.value);persistUiPreference({locale:e.target.value});if(state.page==='dashboard')loadOverview()};

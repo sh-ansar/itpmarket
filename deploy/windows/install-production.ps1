@@ -12,6 +12,10 @@ param(
 
     [string]$Domain = 'spyon.kz',
 
+    [string]$TelegramBotToken = '',
+
+    [string]$TelegramBotUsername = '',
+
     [switch]$LocalHttp,
     [switch]$DisableScheduler,
     [switch]$SkipBrowser
@@ -30,6 +34,18 @@ if ($DatabaseUrl -match "[`r`n]") {
 }
 if ($DatabaseUrl -notmatch '^postgres(?:ql)?://') {
     throw 'Production deployment requires a PostgreSQL DATABASE_URL.'
+}
+if ($TelegramBotToken -match "[`r`n]") {
+    throw 'Telegram bot token must be a single line.'
+}
+if ($TelegramBotToken -and $TelegramBotToken -notmatch '^\d+:[A-Za-z0-9_-]{30,}$') {
+    throw 'Telegram bot token format is invalid.'
+}
+if ($TelegramBotUsername) {
+    $TelegramBotUsername = $TelegramBotUsername.Trim().TrimStart('@')
+    if ($TelegramBotUsername -notmatch '^[A-Za-z0-9_]{5,64}$') {
+        throw 'Telegram bot username format is invalid.'
+    }
 }
 
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
@@ -109,8 +125,16 @@ $lines = @(
     "ITP_TRUST_PROXY=$trustProxy",
     "ITP_TRUSTED_HOSTS=$Domain,www.$Domain,127.0.0.1,localhost",
     "ITP_DISABLE_SCHEDULER=$disableSchedulerValue",
-    "SPYON_DOMAIN=$Domain"
+    "SPYON_DOMAIN=$Domain",
+    "SPYON_PUBLIC_URL=https://$Domain",
+    "ITP_TELEGRAM_BOT_ENABLED=$(if ($TelegramBotToken) { '1' } else { '0' })"
 )
+if ($TelegramBotToken) {
+    $lines += "ITP_TELEGRAM_BOT_TOKEN=$TelegramBotToken"
+}
+if ($TelegramBotUsername) {
+    $lines += "ITP_TELEGRAM_BOT_USERNAME=$TelegramBotUsername"
+}
 [IO.File]::WriteAllLines($environmentPath, $lines, [Text.UTF8Encoding]::new($false))
 
 Write-Output "Spyon environment installed in $root"

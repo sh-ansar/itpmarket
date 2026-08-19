@@ -66,11 +66,12 @@ from subscription_service import (
     SubscriptionService,
 )
 from notification_service import NotificationService
+from telegram_bot import TelegramBotWorker, TelegramLinkService
 from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import seller_scope
 
-VERSION = "3.7.1"
+VERSION = "3.8.0"
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -98,6 +99,7 @@ AUTH = AuthService(DB_PATH)
 SAAS = SaaSService(DB_PATH)
 SUBSCRIPTIONS = SubscriptionService(DB_PATH)
 NOTIFICATIONS = NotificationService(DB_PATH)
+TELEGRAM_LINKS = TelegramLinkService(DB_PATH)
 PUBLIC = PublicProductService(DB_PATH)
 DATA = DataService(
     DB_PATH,
@@ -140,6 +142,22 @@ def notification_service() -> NotificationService:
     if Path(NOTIFICATIONS.db_path).resolve() != Path(DB_PATH).resolve():
         NOTIFICATIONS = NotificationService(DB_PATH)
     return NOTIFICATIONS
+
+
+def telegram_link_service() -> TelegramLinkService:
+    """Return personal Telegram links bound to the active application DB."""
+    global TELEGRAM_LINKS
+    if Path(TELEGRAM_LINKS.db_path).resolve() != Path(DB_PATH).resolve():
+        TELEGRAM_LINKS = TelegramLinkService(DB_PATH)
+    return TELEGRAM_LINKS
+
+
+def sync_telegram_notification_sources() -> None:
+    """Create bot-bound events even when no browser is polling the web inbox."""
+    service = notification_service()
+    service.sync_tasks(TASKS.raw_states())
+    for tenant_id in telegram_link_service().active_tenant_ids():
+        service.ensure_expiry_reminders(tenant_id)
 
 
 def inventory_service() -> InventoryService:
@@ -1485,6 +1503,27 @@ if os.environ.get("ITP_DISABLE_SCHEDULER", "0") != "1":
     SCHEDULER.start()
 atexit.register(SCHEDULER.stop)
 
+TELEGRAM_WORKER: TelegramBotWorker | None = None
+if environment_flag("ITP_TELEGRAM_BOT_ENABLED"):
+    telegram_token = str(os.environ.get("ITP_TELEGRAM_BOT_TOKEN") or "").strip()
+    if telegram_token:
+        TELEGRAM_WORKER = TelegramBotWorker(
+            DB_PATH,
+            AUTH,
+            telegram_token,
+            public_url=str(
+                os.environ.get("SPYON_PUBLIC_URL")
+                or f"https://{os.environ.get('SPYON_DOMAIN') or 'spyon.kz'}"
+            ),
+            notification_sync=sync_telegram_notification_sources,
+        )
+        TELEGRAM_WORKER.start()
+        atexit.register(TELEGRAM_WORKER.stop)
+    else:
+        app.logger.error(
+            "telegram_bot_disabled reason=ITP_TELEGRAM_BOT_TOKEN_missing"
+        )
+
 
 @app.before_request
 def before_request() -> Any:
@@ -2216,6 +2255,57 @@ def api_notification_read(notification_id: int) -> Any:
     return json_ok(updated=notification_service().mark_read(
         int((current_user() or {})["id"]), notification_id
     ))
+
+
+@app.get("/api/telegram/status")
+@login_required
+def api_telegram_status() -> Any:
+    user = current_user() or {}
+    link = telegram_link_service().status_for_user(int(user["id"]))
+    configured_username = str(
+        (TELEGRAM_WORKER.bot_username if TELEGRAM_WORKER else "")
+        or os.environ.get("ITP_TELEGRAM_BOT_USERNAME")
+        or ""
+    ).strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,64}", configured_username):
+        configured_username = ""
+    public_link = None
+    if link:
+        public_link = {
+            "telegram_username": link["telegram_username"],
+            "telegram_display_name": link["telegram_display_name"],
+            "is_enabled": link["is_enabled"],
+            "linked_at": link["linked_at"],
+        }
+    return json_ok(
+        available=bool(
+            environment_flag("ITP_TELEGRAM_BOT_ENABLED")
+            and configured_username
+        ),
+        bot_username=configured_username,
+        link=public_link,
+    )
+
+
+@app.post("/api/telegram/enabled")
+@login_required
+def api_telegram_enabled() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    enabled = payload.get("enabled") is True
+    if not telegram_link_service().set_enabled(int(user["id"]), enabled):
+        return json_error("Telegram ещё не привязан.", 404)
+    return json_ok(enabled=enabled)
+
+
+@app.post("/api/telegram/disconnect")
+@login_required
+def api_telegram_disconnect() -> Any:
+    user = current_user() or {}
+    disconnected = telegram_link_service().unlink_user(
+        int(user["id"]), actor_user_id=int(user["id"])
+    )
+    return json_ok(disconnected=disconnected)
 
 
 @app.post("/api/tasks/start")
