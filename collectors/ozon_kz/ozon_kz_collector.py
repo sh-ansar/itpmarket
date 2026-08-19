@@ -85,11 +85,22 @@ def _attributes(value: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def normalize_registry_currency(conn: Any) -> dict[str, int]:
+    offers = conn.execute(
+        "UPDATE offers SET currency='KZT' WHERE currency<>'KZT'"
+    ).rowcount
+    history = conn.execute(
+        "UPDATE price_history SET currency='KZT' WHERE currency<>'KZT'"
+    ).rowcount
+    return {"offers": int(offers or 0), "price_history": int(history or 0)}
+
+
 def mirror_public_registry(settings: Settings) -> dict[str, int]:
     ensure_schema(settings.database_path)
     conn = connect(settings.database_path)
     stamp = now_iso()
     try:
+        normalize_registry_currency(conn)
         products = conn.execute(
             """SELECT p.* FROM products p
                WHERE p.active=1 AND EXISTS(

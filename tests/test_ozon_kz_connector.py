@@ -7,17 +7,106 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
-from collectors.ozon_kz.ozon_kz_collector import build_settings, require_success
+from collectors.ozon_kz.ozon_kz_collector import (
+    build_settings,
+    normalize_registry_currency,
+    require_success,
+)
 from collectors.ozon_kz.ozon_kz_connector import validate_source_url
 from collectors.ozon_kz.storage import connect, ensure_schema, status
 from collectors.ozon.ozon_probe_core import _extract_tile_price
-from collectors.ozon.ozon_collector import portable_storage_path
+from collectors.ozon.ozon_collector import (
+    materialize_tenant_catalog,
+    normalize_marketplace_item,
+    portable_storage_path,
+)
+from collectors.ozon.registry import Registry
 from data_service import DataService
 from schema import ensure_database
 
 
 class OzonKzConnectorTests(unittest.TestCase):
+    def test_kz_normalization_and_legacy_registry_currency_are_kzt(self) -> None:
+        normalized = normalize_marketplace_item(
+            {"article": "kz-1", "card_price": 42000},
+            "2026-08-19T14:00:00+05:00",
+            "kz-run",
+            "https://ozon.kz/seller/example/",
+        )
+        self.assertEqual("ozon_kz", normalized["source"])
+        self.assertEqual("KZT", normalized["currency"])
+
+        with tempfile.TemporaryDirectory(prefix="ozon_kz_currency_") as folder:
+            registry = Registry(Path(folder) / "ozon_kz_registry.db")
+            try:
+                stamp = "2026-08-19T14:00:00+05:00"
+                source_url = "https://ozon.kz/seller/example/"
+                registry.upsert_catalog_product(
+                    {
+                        "article": "kz-1",
+                        "name": "Test Tire 205/55 R16",
+                        "catalog_card_price": 42000,
+                    },
+                    source_url,
+                    "kz-run",
+                    1,
+                    stamp,
+                )
+                registry.conn.execute(
+                    """INSERT INTO offers(
+                           article,seller_key,seller_id,card_price,currency,
+                           first_seen_at,last_seen_at,last_checked_at
+                       ) VALUES(?,?,?,?,?,?,?,?)""",
+                    ("kz-1", "own", "own", 42000, "RUB", stamp, stamp, stamp),
+                )
+                registry.conn.execute(
+                    """INSERT INTO price_history(
+                           run_id,article,seller_key,currency,collected_at
+                       ) VALUES(?,?,?,?,?)""",
+                    ("kz-run", "kz-1", "own", "RUB", stamp),
+                )
+                changed = normalize_registry_currency(registry.conn)
+                self.assertEqual({"offers": 1, "price_history": 1}, changed)
+                self.assertEqual(
+                    "KZT",
+                    registry.conn.execute(
+                        "SELECT currency FROM offers WHERE article='kz-1'"
+                    ).fetchone()[0],
+                )
+                self.assertEqual(
+                    "KZT",
+                    registry.conn.execute(
+                        "SELECT currency FROM price_history WHERE article='kz-1'"
+                    ).fetchone()[0],
+                )
+
+                registry.conn.execute(
+                    "UPDATE offers SET currency='RUB' WHERE article='kz-1'"
+                )
+                registry.conn.commit()
+                settings = build_settings(Namespace(
+                    source_url=source_url,
+                    expected_seller="own",
+                    debug_port=9333,
+                    db=str(registry.path),
+                ))
+                with patch(
+                    "collectors.ozon.ozon_collector.CatalogConfigurationService"
+                ) as service:
+                    service.return_value.replace_catalog_products.return_value = 1
+                    self.assertEqual(
+                        1,
+                        materialize_tenant_catalog(
+                            settings, 1, str(Path(folder) / "app.db"), "ozon_kz"
+                        ),
+                    )
+                    products = service.return_value.replace_catalog_products.call_args.args[2]
+                    self.assertEqual("KZT", products[0]["currency"])
+            finally:
+                registry.close()
+
     def test_partial_collector_result_fails_the_kz_cli(self) -> None:
         self.assertEqual(
             "PASSED", require_success({"status": "PASSED"}, "refresh")["status"]

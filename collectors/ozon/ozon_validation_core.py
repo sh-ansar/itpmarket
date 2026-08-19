@@ -171,7 +171,7 @@ def normalize_for_import(item: dict[str, Any], collected_at: str, run_id: str) -
     # the lower current price; original_price is a crossed-out reference only.
     price = _lowest_current_price(card_price, regular_price) or catalog_price
     return {
-        "source": "ozon_ru",
+        "source": str(item.get("source") or "ozon_ru"),
         "source_product_id": str(item.get("article") or ""),
         "source_seller_id": str(item.get("seller_id") or ""),
         "source_seller_name": str(item.get("seller_name") or ""),
@@ -203,7 +203,7 @@ def normalize_for_import(item: dict[str, Any], collected_at: str, run_id: str) -
             else "PDP_REGULAR" if regular_price > 0
             else "CATALOG_CARD"
         ),
-        "currency": "RUB",
+        "currency": str(item.get("currency") or "RUB"),
         "image_url": str(item.get("image_url") or ""),
         "seller_rating": item.get("seller_rating"),
         "product_rating": item.get("rating"),

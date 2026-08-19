@@ -1,3 +1,7 @@
+## 3.8.6
+
+- Stored Ozon.kz offers and history as KZT, forced KZT during tenant catalog materialization and repaired legacy RUB labels inside the dedicated KZ registry without changing amounts.
+
 ## 3.8.5
 
 - Made the verified production PID stopper non-interactive so background Scheduled Task deployments can actually replace the running app process.

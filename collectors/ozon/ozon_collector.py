@@ -11,7 +11,7 @@ import time
 import traceback
 import uuid
 from dataclasses import replace
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,17 @@ def run_id_for(mode: str) -> str:
 def sleep_range(pair: tuple[float, float], multiplier: float = 1.0) -> None:
     delay = random.uniform(pair[0], pair[1]) * multiplier
     time.sleep(delay)
+
+
+def normalize_marketplace_item(
+    item: dict[str, Any], collected_at: str, run_id: str, start_url: str
+) -> dict[str, Any]:
+    value = dict(item)
+    host = str(urlparse(str(start_url or "")).hostname or "").casefold()
+    if host in {"ozon.kz", "www.ozon.kz"}:
+        value["source"] = "ozon_kz"
+        value["currency"] = "KZT"
+    return normalize_for_import(value, collected_at, run_id)
 
 
 def portable_storage_path(path: Path) -> str:
@@ -354,7 +365,9 @@ class Collector:
                     item["seller_match_status"] = seller_match_status(
                         item, self.settings.expected_seller
                     )
-                    normalized = normalize_for_import(item, now_iso(), run_id)
+                    normalized = normalize_marketplace_item(
+                        item, now_iso(), run_id, self.settings.start_url
+                    )
                     raw_path = self._save_raw_json(article, response["json"], before, run_id)
                     if item.get("success"):
                         self.registry.update_from_detail(
@@ -365,7 +378,8 @@ class Collector:
                         consecutive_blocked = 0
                         print(
                             f"COMPLETE | {item.get('seller_name')} | "
-                            f"{int(item.get('card_price') or item.get('regular_price') or 0)} RUB | "
+                            f"{int(item.get('card_price') or item.get('regular_price') or 0)} "
+                            f"{normalized.get('currency')} | "
                             f"{normalized.get('tire_size')} | identity {normalized.get('identity_completeness_percent')}%"
                         )
                     else:
@@ -446,7 +460,9 @@ class Collector:
         item["seller_match_status"] = seller_match_status(item, self.settings.expected_seller)
         if not item.get("success"):
             return False
-        normalized = normalize_for_import(item, now_iso(), run_id)
+        normalized = normalize_marketplace_item(
+            item, now_iso(), run_id, self.settings.start_url
+        )
         raw_path = self._save_raw_json(article, response["json"], before, run_id)
         self.registry.update_from_detail(item, normalized, run_id, now_iso(), raw_path)
         return True
@@ -719,7 +735,10 @@ def materialize_tenant_catalog(
             "url": value.get("canonical_url") or "",
             "image_url": value.get("image_url") or "",
             "price": own.get("card_price") or value.get("catalog_price") or None,
-            "currency": own.get("currency") or currency,
+            "currency": (
+                "KZT" if marketplace_code == "ozon_kz"
+                else own.get("currency") or currency
+            ),
             "category": "",
             "attributes": attributes,
             "updated_at": value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at"),
