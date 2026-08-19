@@ -89,6 +89,16 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("start-production.ps1", stopper)
         self.assertIn("Refusing to stop", stopper)
 
+    def test_windows_stopper_is_safe_for_noninteractive_deploys(self) -> None:
+        stopper = (
+            ROOT / "deploy" / "windows" / "stop-production.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Refusing to stop", stopper)
+        self.assertIn("verifiedPython", stopper)
+        self.assertIn("verifiedVenvParent", stopper)
+        self.assertIn("Stop-Process -Id $serverPid -Force -Confirm:$false", stopper)
+        self.assertIn("Wait-Process -Id $serverPid", stopper)
+
     def test_runtime_diagnostic_is_read_only_and_checks_production_contract(self) -> None:
         diagnostic = (ROOT / "scripts" / "diagnose_runtime.ps1").read_text(
             encoding="utf-8-sig"

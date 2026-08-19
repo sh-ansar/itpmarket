@@ -1,3 +1,7 @@
+## 3.8.5
+
+- Made the verified production PID stopper non-interactive so background Scheduled Task deployments can actually replace the running app process.
+
 ## 3.8.4
 
 - Made Ozon.kz return a non-zero job result when enrichment or price collection is partial, blocked or failed.

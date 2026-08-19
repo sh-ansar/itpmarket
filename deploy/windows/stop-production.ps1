@@ -53,7 +53,7 @@ if (
     throw 'Refusing to stop a process that does not belong to this Spyon deployment.'
 }
 
-Stop-Process -Id $serverPid
+Stop-Process -Id $serverPid -Force -Confirm:$false
 Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $pidPath) {
     Remove-Item -LiteralPath $pidPath -Force
