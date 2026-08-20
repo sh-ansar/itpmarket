@@ -1,30 +1,314 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#152033;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f7fb;padding:24px 12px;">
-    <tr><td align="center">
-      <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
-        <tr><td style="padding:28px 36px 20px;background:#101c35;color:#ffffff;">
-          <div style="font-size:24px;font-weight:700;letter-spacing:.4px;">Spyon</div>
-          <div style="margin-top:5px;font-size:12px;letter-spacing:1.4px;color:#9bb8ff;">MARKETPLACE INTELLIGENCE</div>
-        </td></tr>
-        <tr><td style="padding:34px 36px 26px;font-size:16px;line-height:1.55;">
-          <h1 style="margin:0 0 16px;font-size:25px;line-height:1.25;color:#142444;">{{ heading }}</h1>
-          {% block content %}<p style="margin:0 0 18px;">{{ message }}</p>{% endblock %}
-          {% if action_url %}
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:#2f6fed;">
-            <a href="{{ action_url }}" style="display:inline-block;padding:13px 21px;color:#ffffff;text-decoration:none;font-weight:700;">{{ action_label }}</a>
-          </td></tr></table>
-          <p style="margin:0;color:#667085;font-size:13px;line-height:1.5;word-break:break-all;">Если кнопка не работает, откройте ссылку:<br><a href="{{ action_url }}" style="color:#2f6fed;">{{ action_url }}</a></p>
-          {% endif %}
-          {% if security_notice %}<p style="margin:24px 0 0;padding:12px 14px;background:#fff7e6;border-left:3px solid #f0a126;color:#6b4d00;font-size:13px;">Если это действие выполнили не вы, не переходите по ссылке и обратитесь в поддержку.</p>{% endif %}
-        </td></tr>
-        <tr><td style="padding:20px 36px 28px;border-top:1px solid #e6ebf2;color:#7b8798;font-size:12px;line-height:1.5;">
-          Spyon · Marketplace intelligence platform<br>{% if support_email %}<a href="mailto:{{ support_email }}" style="color:#506b9a;text-decoration:none;">{{ support_email }}</a>{% endif %}
-        </td></tr>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>Spyon</title>
+</head>
+
+<body style="
+  margin:0;
+  padding:0;
+  background:#eef5f7;
+  font-family:Inter,'Segoe UI',Arial,Helvetica,sans-serif;
+  color:#143746;
+">
+
+<table
+  role="presentation"
+  width="100%"
+  cellspacing="0"
+  cellpadding="0"
+  border="0"
+  style="
+    width:100%;
+    background:#eef5f7;
+    background-image:linear-gradient(
+      145deg,
+      #f8fbfc 0%,
+      #eef5f7 52%,
+      #f5f9fa 100%
+    );
+  "
+>
+  <tr>
+    <td
+      align="center"
+      style="padding:36px 14px 42px;"
+    >
+
+      <table
+        role="presentation"
+        width="600"
+        cellspacing="0"
+        cellpadding="0"
+        border="0"
+        style="
+          width:100%;
+          max-width:600px;
+          background:#ffffff;
+          border:1px solid #d8e6eb;
+          border-radius:20px;
+          overflow:hidden;
+          box-shadow:0 22px 60px rgba(31,74,91,.12);
+        "
+      >
+
+        <!-- Header -->
+        <tr>
+          <td
+            align="center"
+            style="
+              padding:17px 32px 16px;
+              background:#dce8ec;
+              background-image:linear-gradient(
+                135deg,
+                #e7f0f3,
+                #d8e6ea
+              );
+              border-bottom:1px solid #cedee4;
+            "
+          >
+            {% if logo_url %}
+            <a
+              href="{{ public_url }}"
+              style="
+                display:inline-block;
+                text-decoration:none;
+                border:0;
+              "
+            >
+              <img
+                src="{{ logo_url }}"
+                width="92"
+                alt="Spyon"
+                style="
+                  display:block;
+                  width:92px;
+                  max-width:92px;
+                  height:auto;
+                  margin:0 auto;
+                  border:0;
+                  outline:none;
+                  text-decoration:none;
+                "
+              >
+            </a>
+            {% else %}
+            <div
+              style="
+                color:#0a2f4c;
+                font-size:24px;
+                line-height:1;
+                font-weight:800;
+                letter-spacing:-.4px;
+              "
+            >
+              Spyon
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+
+        <!-- Content -->
+        <tr>
+          <td
+            style="
+              padding:34px 38px 30px;
+              font-size:15px;
+              line-height:1.65;
+              color:#526b77;
+            "
+          >
+            <h1
+              style="
+                margin:0 0 18px;
+                color:#0b2b3b;
+                font-size:25px;
+                line-height:1.28;
+                letter-spacing:-.35px;
+                font-weight:750;
+              "
+            >
+              {{ heading }}
+            </h1>
+
+            <div
+              style="
+                color:#526b77;
+                font-size:15px;
+                line-height:1.65;
+              "
+            >
+              {% block content %}
+              <p style="margin:0 0 18px;">
+                {{ message }}
+              </p>
+              {% endblock %}
+            </div>
+
+            {% if action_url %}
+            <table
+              role="presentation"
+              cellspacing="0"
+              cellpadding="0"
+              border="0"
+              style="margin:25px 0 23px;"
+            >
+              <tr>
+                <td
+                  style="
+                    border-radius:12px;
+                    background:#087eb4;
+                    background-image:linear-gradient(
+                      135deg,
+                      #06a9e7,
+                      #087eb4
+                    );
+                    box-shadow:0 10px 24px rgba(6,169,231,.20);
+                  "
+                >
+                  <a
+                    href="{{ action_url }}"
+                    style="
+                      display:inline-block;
+                      padding:13px 22px;
+                      color:#ffffff;
+                      text-decoration:none;
+                      font-size:14px;
+                      line-height:1.2;
+                      font-weight:700;
+                      border-radius:12px;
+                    "
+                  >
+                    {{ action_label }}
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p
+              style="
+                margin:0;
+                color:#758a94;
+                font-size:12px;
+                line-height:1.55;
+                word-break:break-word;
+              "
+            >
+              &#1045;&#1089;&#1083;&#1080;
+              &#1082;&#1085;&#1086;&#1087;&#1082;&#1072;
+              &#1085;&#1077;
+              &#1088;&#1072;&#1073;&#1086;&#1090;&#1072;&#1077;&#1090;,
+              &#1086;&#1090;&#1082;&#1088;&#1086;&#1081;&#1090;&#1077;
+              &#1089;&#1089;&#1099;&#1083;&#1082;&#1091;:
+              <br>
+
+              <a
+                href="{{ action_url }}"
+                style="
+                  color:#087eb4;
+                  text-decoration:none;
+                  word-break:break-all;
+                "
+              >
+                {{ action_url }}
+              </a>
+            </p>
+            {% endif %}
+
+            {% if security_notice %}
+            <div
+              style="
+                margin:25px 0 0;
+                padding:14px 16px;
+                background:#f3f9fb;
+                border:1px solid #d7e8ee;
+                border-left:4px solid #06a9e7;
+                border-radius:10px;
+                color:#55727f;
+                font-size:12px;
+                line-height:1.55;
+              "
+            >
+              &#1045;&#1089;&#1083;&#1080;
+              &#1101;&#1090;&#1086;
+              &#1076;&#1077;&#1081;&#1089;&#1090;&#1074;&#1080;&#1077;
+              &#1074;&#1099;&#1087;&#1086;&#1083;&#1085;&#1080;&#1083;&#1080;
+              &#1085;&#1077;
+              &#1074;&#1099;,
+              &#1085;&#1077;
+              &#1087;&#1077;&#1088;&#1077;&#1093;&#1086;&#1076;&#1080;&#1090;&#1077;
+              &#1087;&#1086;
+              &#1089;&#1089;&#1099;&#1083;&#1082;&#1077;
+              &#1080;
+              &#1086;&#1073;&#1088;&#1072;&#1090;&#1080;&#1090;&#1077;&#1089;&#1100;
+              &#1074;
+              &#1087;&#1086;&#1076;&#1076;&#1077;&#1088;&#1078;&#1082;&#1091;.
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td
+            align="center"
+            style="
+              padding:19px 36px 23px;
+              background:#f8fbfc;
+              border-top:1px solid #e0ecef;
+              color:#7b9099;
+              font-size:11px;
+              line-height:1.65;
+            "
+          >
+            <strong
+              style="
+                color:#365967;
+                font-weight:700;
+              "
+            >
+              Spyon
+            </strong>
+
+            {% if support_email %}
+            <br>
+
+            <a
+              href="mailto:{{ support_email }}"
+              style="
+                color:#087eb4;
+                text-decoration:none;
+              "
+            >
+              {{ support_email }}
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+
       </table>
-    </td></tr>
-  </table>
+
+      <div
+        style="
+          padding-top:16px;
+          color:#8ca0a8;
+          font-size:10px;
+          line-height:1.5;
+        "
+      >
+        &#1069;&#1090;&#1086;
+        &#1072;&#1074;&#1090;&#1086;&#1084;&#1072;&#1090;&#1080;&#1095;&#1077;&#1089;&#1082;&#1086;&#1077;
+        &#1091;&#1074;&#1077;&#1076;&#1086;&#1084;&#1083;&#1077;&#1085;&#1080;&#1077;
+        Spyon.
+      </div>
+
+    </td>
+  </tr>
+</table>
+
 </body>
 </html>

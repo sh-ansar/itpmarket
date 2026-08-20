@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import smtplib
 import socket
 import ssl
@@ -26,6 +27,11 @@ from storage.postgres_compat import PostgresConnection, connect_database
 
 LOGGER = logging.getLogger(__name__)
 EMAIL_CATEGORIES = ("security", "billing", "marketplaces", "operations")
+EMAIL_ADDRESS_RE = re.compile(
+    r"(?i)[A-Z0-9._%+\-]+@[A-Z0-9.\-]+"
+)
+
+
 SECURITY_TEMPLATES = {
     "verify_email", "password_reset", "password_changed", "user_invitation",
 }
@@ -62,13 +68,33 @@ def mask_recipient(value: str) -> str:
     return f"{local[:1] or '*'}***@{domain}"
 
 
-def safe_error(value: BaseException | str | None) -> str:
-    text = str(value or "email_delivery_failed").replace("\r", " ").replace("\n", " ")
-    # SMTP responses can accidentally echo configuration or a recipient. Keep
-    # operational diagnostics useful without making logs a source of secrets.
-    for marker in ("password", "token", "authorization", "cookie", "secret"):
+def safe_error(
+    value: BaseException | str | None,
+) -> str:
+    text = (
+        str(value or "email_delivery_failed")
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+    # SMTP servers may echo recipient addresses in rejection messages.
+    # Do not persist personal addresses in logs or email_outbox.last_error.
+    text = EMAIL_ADDRESS_RE.sub(
+        "<redacted-email>",
+        text,
+    )
+
+    # Never expose authentication/configuration secrets through SMTP errors.
+    for marker in (
+        "password",
+        "token",
+        "authorization",
+        "cookie",
+        "secret",
+    ):
         if marker in text.casefold():
             return "sensitive_smtp_error"
+
     return text[:240]
 
 
@@ -208,6 +234,16 @@ class EmailService:
     def _context(self, template_key: str, payload: dict[str, Any]) -> dict[str, Any]:
         context = dict(payload)
         context.setdefault("public_url", self.settings.public_url)
+        context.setdefault(
+            "logo_url",
+            str(
+                os.environ.get("ITP_BRAND_LOGO_URL")
+                or (
+                    self.settings.public_url
+                    + "/static/images/spyon-logo.svg"
+                )
+            ).strip(),
+        )
         context.setdefault("support_email", self.settings.reply_to or self.settings.mail_from)
         context.setdefault("recipient_name", "")
         context.setdefault("company_name", "")
@@ -441,45 +477,125 @@ class EmailService:
         except (TypeError, ValueError):
             return None
 
-    def _reclaim_stale(self, conn: Any) -> None:
-        cutoff = datetime.now().astimezone() - timedelta(minutes=15)
-        rows = conn.execute(
-            "SELECT id,updated_at FROM email_outbox WHERE status='sending' ORDER BY id LIMIT 100"
-        ).fetchall()
+    def _reclaim_stale(
+        self,
+        conn: Any,
+    ) -> None:
+        cutoff = (
+            datetime.now().astimezone()
+            - timedelta(minutes=15)
+        )
+
+        query = """
+            SELECT id,updated_at
+            FROM email_outbox
+            WHERE status='sending'
+            ORDER BY id
+            LIMIT 100
+        """
+
+        if hasattr(conn, "raw"):
+            query += " FOR UPDATE SKIP LOCKED"
+
+        rows = conn.execute(query).fetchall()
+        stamp = now_iso()
+
         for row in rows:
-            updated = self._parse_time(row["updated_at"])
+            updated = self._parse_time(
+                row["updated_at"]
+            )
+
             if updated and updated <= cutoff:
                 conn.execute(
-                    """UPDATE email_outbox SET status='retry',next_attempt_at=?,
-                           last_error='worker_restart_recovered',updated_at=?
-                       WHERE id=? AND status='sending'""",
-                    (now_iso(), now_iso(), int(row["id"])),
+                    """
+                    UPDATE email_outbox
+                    SET status='retry',
+                        next_attempt_at=?,
+                        last_error='worker_restart_recovered',
+                        updated_at=?
+                    WHERE id=?
+                      AND status='sending'
+                    """,
+                    (
+                        stamp,
+                        stamp,
+                        int(row["id"]),
+                    ),
                 )
 
-    def _claim_due(self, limit: int) -> list[dict[str, Any]]:
+    def _claim_due(
+        self,
+        limit: int,
+    ) -> list[dict[str, Any]]:
         if not self.settings.enabled:
             return []
+
+        batch_size = max(
+            1,
+            min(int(limit), 100),
+        )
+
         conn = self._connect()
+
         try:
+            # SQLite has no row-level SKIP LOCKED. Serialize the short
+            # select-and-claim transaction instead.
+            if not hasattr(conn, "raw"):
+                conn.execute("BEGIN IMMEDIATE")
+
             self._reclaim_stale(conn)
+
             stamp = now_iso()
+
+            query = """
+                SELECT *
+                FROM email_outbox
+                WHERE status IN ('pending','retry')
+                  AND next_attempt_at<=?
+                ORDER BY id
+                LIMIT ?
+            """
+
+            # PostgreSQL workers claim different rows instead of competing
+            # for the same leading batch.
+            if hasattr(conn, "raw"):
+                query += " FOR UPDATE SKIP LOCKED"
+
             rows = conn.execute(
-                """SELECT * FROM email_outbox
-                   WHERE status IN ('pending','retry') AND next_attempt_at<=?
-                   ORDER BY id LIMIT ?""",
-                (stamp, max(1, min(int(limit), 100))),
+                query,
+                (
+                    stamp,
+                    batch_size,
+                ),
             ).fetchall()
+
             claimed: list[dict[str, Any]] = []
+
             for row in rows:
                 cursor = conn.execute(
-                    """UPDATE email_outbox SET status='sending',updated_at=?
-                       WHERE id=? AND status IN ('pending','retry')""",
-                    (stamp, int(row["id"])),
+                    """
+                    UPDATE email_outbox
+                    SET status='sending',
+                        updated_at=?
+                    WHERE id=?
+                      AND status IN ('pending','retry')
+                    """,
+                    (
+                        stamp,
+                        int(row["id"]),
+                    ),
                 )
-                if int(cursor.rowcount):
+
+                if int(cursor.rowcount) == 1:
                     claimed.append(dict(row))
+
             conn.commit()
             return claimed
+
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
 

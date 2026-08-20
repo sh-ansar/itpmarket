@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -11,6 +12,8 @@ from email_service import (
     EmailService,
     EmailSettings,
     SmtpTlsRequiredError,
+    TEMPLATE_SUBJECTS,
+    safe_error,
 )
 from schema import ensure_database
 
@@ -445,6 +448,275 @@ class EmailAuthFlowTests(unittest.TestCase):
             decrypted["action_url"],
         )
 
+    def test_safe_error_redacts_email_addresses(self):
+        result = safe_error(
+            "550 recipient customer@example.com rejected"
+        )
+
+        self.assertNotIn(
+            "customer@example.com",
+            result,
+        )
+
+        self.assertIn(
+            "<redacted-email>",
+            result,
+        )
+
+        multiple = safe_error(
+            "from sender@example.com to receiver@example.org failed"
+        )
+
+        self.assertNotIn(
+            "sender@example.com",
+            multiple,
+        )
+
+        self.assertNotIn(
+            "receiver@example.org",
+            multiple,
+        )
+
+        self.assertEqual(
+            "sensitive_smtp_error",
+            safe_error(
+                "authentication password leaked"
+            ),
+        )
+
+    def test_outbox_postgres_claim_uses_skip_locked(self):
+        settings = EmailSettings(
+            enabled=True,
+            host="smtp.example.com",
+            port=587,
+            username="",
+            password="",
+            security="starttls",
+            require_tls=True,
+            mail_from="spyon@example.com",
+            mail_from_name="Spyon",
+            reply_to="support@example.com",
+            public_url="https://spyon.example.com",
+            timeout_seconds=5,
+            max_attempts=3,
+        )
+
+        service = EmailService(
+            self.db_path,
+            settings=settings,
+        )
+
+        class FakeCursor:
+            def __init__(
+                self,
+                rows=None,
+                rowcount=0,
+            ):
+                self._rows = rows or []
+                self.rowcount = rowcount
+
+            def fetchall(self):
+                return list(self._rows)
+
+        class FakePostgresConnection:
+            def __init__(self):
+                self.raw = object()
+                self.queries = []
+                self.committed = False
+                self.rolled_back = False
+                self.closed = False
+
+            def execute(
+                self,
+                query,
+                parameters=(),
+            ):
+                normalized = " ".join(
+                    str(query).split()
+                )
+
+                self.queries.append(
+                    normalized
+                )
+
+                if (
+                    "SELECT id,updated_at "
+                    "FROM email_outbox"
+                    in normalized
+                ):
+                    return FakeCursor([])
+
+                if (
+                    "SELECT * FROM email_outbox"
+                    in normalized
+                ):
+                    return FakeCursor([
+                        {
+                            "id": 77,
+                            "status": "pending",
+                            "attempt_count": 0,
+                        }
+                    ])
+
+                if (
+                    "UPDATE email_outbox "
+                    "SET status='sending'"
+                    in normalized
+                ):
+                    return FakeCursor(
+                        rowcount=1
+                    )
+
+                raise AssertionError(
+                    "Unexpected SQL: "
+                    + normalized
+                )
+
+            def commit(self):
+                self.committed = True
+
+            def rollback(self):
+                self.rolled_back = True
+
+            def close(self):
+                self.closed = True
+
+        fake = FakePostgresConnection()
+
+        with patch.object(
+            service,
+            "_connect",
+            return_value=fake,
+        ):
+            claimed = service._claim_due(1)
+
+        self.assertEqual(
+            [77],
+            [
+                int(row["id"])
+                for row in claimed
+            ],
+        )
+
+        due_queries = [
+            query
+            for query in fake.queries
+            if "SELECT * FROM email_outbox"
+            in query
+        ]
+
+        self.assertEqual(
+            1,
+            len(due_queries),
+        )
+
+        self.assertIn(
+            "FOR UPDATE SKIP LOCKED",
+            due_queries[0],
+        )
+
+        stale_queries = [
+            query
+            for query in fake.queries
+            if (
+                "SELECT id,updated_at "
+                "FROM email_outbox"
+                in query
+            )
+        ]
+
+        self.assertEqual(
+            1,
+            len(stale_queries),
+        )
+
+        self.assertIn(
+            "FOR UPDATE SKIP LOCKED",
+            stale_queries[0],
+        )
+
+        self.assertTrue(
+            fake.committed
+        )
+
+        self.assertFalse(
+            fake.rolled_back
+        )
+
+        self.assertTrue(
+            fake.closed
+        )
+
+    def test_all_email_templates_use_spyon_branding(self):
+        settings = EmailSettings(
+            enabled=False,
+            host="smtp.example.com",
+            port=587,
+            username="",
+            password="",
+            security="starttls",
+            require_tls=True,
+            mail_from="spyon@example.com",
+            mail_from_name="Spyon",
+            reply_to="support@example.com",
+            public_url="https://spyon.example.com",
+            timeout_seconds=5,
+            max_attempts=3,
+        )
+
+        service = EmailService(
+            self.db_path,
+            settings=settings,
+        )
+
+        payload = {
+            "recipient_name": "Preview User",
+            "company_name": "ITP Mining",
+            "marketplace": "Kaspi",
+            "message": "Preview message",
+            "action_url": "https://spyon.example.com/action",
+            "action_label": 'Открыть Spyon',
+        }
+
+        for template_key in TEMPLATE_SUBJECTS:
+            subject, plain, html = service.render(
+                template_key,
+                dict(payload),
+            )
+
+            combined = (
+                subject
+                + "\n"
+                + plain
+                + "\n"
+                + html
+            )
+
+            self.assertNotIn(
+                "MARKETPLACE INTELLIGENCE",
+                combined.upper(),
+            )
+
+            self.assertIn(
+                "spyon-logo.svg",
+                html,
+            )
+
+            self.assertIn(
+                "linear-gradient(",
+                html,
+            )
+
+            self.assertIn(
+                "#06a9e7",
+                html,
+            )
+
+            self.assertIn(
+                "#087eb4",
+                html,
+            )
+
     def test_smtp_credentials_require_tls(self):
         settings = EmailSettings(
             enabled=True,
@@ -488,6 +760,20 @@ class EmailAuthFlowTests(unittest.TestCase):
             root / "templates" / "accept_invitation.html",
         ]
 
+        email_template_dir = (
+            root / "templates" / "email"
+        )
+
+        paths.extend(
+            sorted(
+                path
+                for path in email_template_dir.iterdir()
+                if path.is_file()
+                and path.suffix.lower()
+                in {".html", ".txt"}
+            )
+        )
+
         damaged = []
 
         for path in paths:
@@ -501,6 +787,111 @@ class EmailAuthFlowTests(unittest.TestCase):
             "Encoding damage found: " + ", ".join(damaged),
         )
 
+
+    @unittest.skipUnless(
+        os.environ.get("ITP_EMAIL_INTEGRATION_TEST") == "1",
+        "real SMTP preview is disabled",
+    )
+    def test_send_all_email_templates_to_preview_recipient(self):
+        recipient = str(
+            os.environ.get(
+                "ITP_EMAIL_TEST_RECIPIENT"
+            )
+            or ""
+        ).strip()
+
+        self.assertTrue(
+            recipient
+            and "@" in recipient,
+            "Set ITP_EMAIL_TEST_RECIPIENT",
+        )
+
+        settings = EmailSettings.from_environment()
+
+        self.assertTrue(
+            settings.configured,
+            "SMTP is not configured",
+        )
+
+        service = EmailService(
+            self.db_path,
+            settings=settings,
+        )
+
+        service._validate_configuration()
+
+        # For the current mail.itpmining.kz:25 configuration,
+        # credentials must never be sent before STARTTLS.
+        if settings.security == "starttls":
+            probe = service.smtp_probe()
+
+            self.assertEqual(
+                250,
+                int(probe["ehlo_code"]),
+            )
+
+            self.assertTrue(
+                probe["starttls"],
+                "SMTP server does not advertise STARTTLS",
+            )
+
+        total = len(TEMPLATE_SUBJECTS)
+
+        payload = {
+            "recipient_name": "Test User",
+            "company_name": "ITP Mining",
+            "marketplace": "Kaspi",
+            "title": 'Тестовое уведомление Spyon',
+            "message": 'Тестовое уведомление Spyon для проверки внешнего вида и доставки письма.',
+            "action_url": settings.public_url,
+            "action_label": 'Открыть Spyon',
+        }
+
+        sent = []
+
+        for index, (
+            template_key,
+            expected_subject,
+        ) in enumerate(
+            TEMPLATE_SUBJECTS.items(),
+            start=1,
+        ):
+            subject, plain, html = service.render(
+                template_key,
+                dict(payload),
+            )
+
+            self.assertEqual(
+                expected_subject,
+                subject,
+            )
+
+            preview_subject = (
+                f"[PREVIEW {index:02d}/{total:02d}] "
+                f"{subject}"
+            )
+
+            message_id = service._smtp_send(
+                recipient,
+                preview_subject,
+                plain,
+                html,
+            )
+
+            self.assertTrue(message_id)
+
+            sent.append(template_key)
+
+            print(
+                f"SMTP PREVIEW SENT "
+                f"{index}/{total}: "
+                f"{template_key}"
+            )
+
+        self.assertEqual(
+            set(TEMPLATE_SUBJECTS),
+            set(sent),
+        )
 
 if __name__ == "__main__":
     unittest.main()
