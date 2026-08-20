@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from auth_service import AuthService
@@ -224,6 +225,138 @@ class EmailAuthFlowTests(unittest.TestCase):
                 token,
                 "AnotherPassword456!",
             )
+        )
+
+    def test_verify_email_rolls_back_if_flow_fails(self):
+        user = self.create_member()
+
+        token = self.auth.issue_auth_token(
+            int(user["id"]),
+            "verify_email",
+            expires_minutes=60,
+        )
+
+        with patch.object(
+            self.auth,
+            "_event",
+            side_effect=RuntimeError("forced rollback"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.auth.verify_email(token)
+
+        self.assertIsNotNone(
+            self.auth.auth_token_status(
+                token,
+                "verify_email",
+            )
+        )
+
+        stored = self.auth.get_user(
+            int(user["id"])
+        )
+
+        self.assertFalse(
+            stored["email_verified"]
+        )
+
+    def test_password_reset_rolls_back_if_flow_fails(self):
+        user = self.create_member(
+            verified=True
+        )
+
+        before_version = int(
+            user["session_version"]
+        )
+
+        token = self.auth.request_password_reset(
+            "member@example.com"
+        )
+
+        self.assertIsNotNone(token)
+
+        with patch.object(
+            self.auth,
+            "_event",
+            side_effect=RuntimeError("forced rollback"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.auth.reset_password_from_token(
+                    token,
+                    "ChangedGate456!",
+                )
+
+        self.assertIsNotNone(
+            self.auth.auth_token_status(
+                token,
+                "password_reset",
+            )
+        )
+
+        stored = self.auth.get_user(
+            int(user["id"])
+        )
+
+        self.assertEqual(
+            before_version,
+            int(stored["session_version"]),
+        )
+
+        self.assertIsNotNone(
+            self.auth.authenticate(
+                "member@example.com",
+                "SecureGate234!",
+            )
+        )
+
+        self.assertIsNone(
+            self.auth.authenticate(
+                "member@example.com",
+                "ChangedGate456!",
+            )
+        )
+
+    def test_invitation_rolls_back_if_flow_fails(self):
+        user, token = self.auth.create_invitation(
+            email="rollback-invite@example.com",
+            display_name="Rollback Invite",
+            role="viewer",
+            tenant_id=int(
+                self.root["tenant_id"]
+            ),
+            actor_user_id=int(
+                self.root["id"]
+            ),
+        )
+
+        with patch.object(
+            self.auth,
+            "_event",
+            side_effect=RuntimeError("forced rollback"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.auth.accept_invitation(
+                    token,
+                    "SecureJoin789!",
+                )
+
+        self.assertIsNotNone(
+            self.auth.auth_token_status(
+                token,
+                "user_invitation",
+            )
+        )
+
+        stored = self.auth.get_user(
+            int(user["id"])
+        )
+
+        self.assertFalse(
+            stored["email_verified"]
+        )
+
+        self.assertEqual(
+            0,
+            int(stored["session_version"]),
         )
 
     def test_email_outbox_payload_is_encrypted_and_deduplicated(self):

@@ -454,109 +454,400 @@ class AuthService:
             conn.close()
         return raw_token
 
-    def auth_token_status(self, raw_token: str, purpose: str) -> dict[str, Any] | None:
+    def _auth_token_status_with_conn(
+        self,
+        conn: Any,
+        raw_token: str,
+        purpose: str,
+        *,
+        lock: bool = False,
+    ) -> dict[str, Any] | None:
         if not raw_token or not purpose:
             return None
-        conn = self._connect()
+
+        query = """
+            SELECT *
+            FROM auth_tokens
+            WHERE token_hash=? AND purpose=?
+            ORDER BY id DESC
+            LIMIT 1
+        """
+
+        # PostgreSQL row locking prevents two workers from completing
+        # the same one-use security action concurrently. SQLite uses
+        # BEGIN IMMEDIATE in the write paths below.
+        if lock and hasattr(conn, "raw"):
+            query += " FOR UPDATE"
+
+        row = conn.execute(
+            query,
+            (
+                hash_auth_token(raw_token),
+                str(purpose),
+            ),
+        ).fetchone()
+
+        if not row or row["consumed_at"] is not None:
+            return None
+
+        expires = parse_iso(row["expires_at"])
+
+        if (
+            not expires
+            or expires <= datetime.now().astimezone()
+        ):
+            return None
+
+        value = dict(row)
+
         try:
-            row = conn.execute(
-                """SELECT * FROM auth_tokens WHERE token_hash=? AND purpose=?
-                   ORDER BY id DESC LIMIT 1""",
-                (hash_auth_token(raw_token), str(purpose)),
-            ).fetchone()
-            if not row or row["consumed_at"] is not None:
-                return None
-            expires = parse_iso(row["expires_at"])
-            if not expires or expires <= datetime.now().astimezone():
-                return None
-            value = dict(row)
-            try:
-                value["metadata"] = json.loads(value.pop("metadata_json") or "{}")
-            except json.JSONDecodeError:
-                value["metadata"] = {}
-            return value
+            value["metadata"] = json.loads(
+                value.pop("metadata_json") or "{}"
+            )
+        except json.JSONDecodeError:
+            value["metadata"] = {}
+
+        return value
+
+    def auth_token_status(
+        self,
+        raw_token: str,
+        purpose: str,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+
+        try:
+            return self._auth_token_status_with_conn(
+                conn,
+                raw_token,
+                purpose,
+            )
         finally:
             conn.close()
 
-    def consume_auth_token(self, raw_token: str, purpose: str) -> dict[str, Any] | None:
-        status = self.auth_token_status(raw_token, purpose)
-        if not status:
-            return None
-        stamp = now_iso()
+    def consume_auth_token(
+        self,
+        raw_token: str,
+        purpose: str,
+    ) -> dict[str, Any] | None:
         conn = self._connect()
+
         try:
             if not hasattr(conn, "raw"):
                 conn.execute("BEGIN IMMEDIATE")
-            cursor = conn.execute(
-                """UPDATE auth_tokens SET consumed_at=?
-                   WHERE id=? AND purpose=? AND token_hash=? AND consumed_at IS NULL""",
-                (stamp, int(status["id"]), str(purpose), hash_auth_token(raw_token)),
+
+            status = self._auth_token_status_with_conn(
+                conn,
+                raw_token,
+                purpose,
+                lock=True,
             )
+
+            if not status:
+                conn.rollback()
+                return None
+
+            stamp = now_iso()
+
+            cursor = conn.execute(
+                """
+                UPDATE auth_tokens
+                SET consumed_at=?
+                WHERE id=?
+                  AND purpose=?
+                  AND token_hash=?
+                  AND consumed_at IS NULL
+                """,
+                (
+                    stamp,
+                    int(status["id"]),
+                    str(purpose),
+                    hash_auth_token(raw_token),
+                ),
+            )
+
             if int(cursor.rowcount) != 1:
                 conn.rollback()
                 return None
-            self._event(conn, int(status["user_id"]), f"{purpose}_consumed", "user", str(status["user_id"]), {})
-            conn.commit()
-        finally:
-            conn.close()
-        return self.get_user(int(status["user_id"]))
 
-    def verify_email(self, raw_token: str) -> dict[str, Any] | None:
-        user = self.consume_auth_token(raw_token, "verify_email")
-        if not user:
-            return None
-        conn = self._connect()
-        try:
-            stamp = now_iso()
-            conn.execute(
-                """UPDATE app_users SET email_verified_at=COALESCE(email_verified_at,?),
-                       updated_at=? WHERE id=?""",
-                (stamp, stamp, int(user["id"])),
+            self._event(
+                conn,
+                int(status["user_id"]),
+                f"{purpose}_consumed",
+                "user",
+                str(status["user_id"]),
+                {},
             )
-            self._event(conn, int(user["id"]), "email_verified", "user", str(user["id"]), {})
+
             conn.commit()
+
+            user_id = int(status["user_id"])
+
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
-        return self.get_user(int(user["id"]))
 
-    def request_password_reset(self, email: str, request_ip: str = "") -> str | None:
-        user = self.get_user_by_email(email, include_secret=True)
+        return self.get_user(user_id)
+
+    def verify_email(
+        self,
+        raw_token: str,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+
+        try:
+            if not hasattr(conn, "raw"):
+                conn.execute("BEGIN IMMEDIATE")
+
+            status = self._auth_token_status_with_conn(
+                conn,
+                raw_token,
+                "verify_email",
+                lock=True,
+            )
+
+            if not status:
+                conn.rollback()
+                return None
+
+            stamp = now_iso()
+            user_id = int(status["user_id"])
+
+            consumed = conn.execute(
+                """
+                UPDATE auth_tokens
+                SET consumed_at=?
+                WHERE id=?
+                  AND purpose='verify_email'
+                  AND token_hash=?
+                  AND consumed_at IS NULL
+                """,
+                (
+                    stamp,
+                    int(status["id"]),
+                    hash_auth_token(raw_token),
+                ),
+            )
+
+            if int(consumed.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            updated = conn.execute(
+                """
+                UPDATE app_users
+                SET email_verified_at=COALESCE(
+                        email_verified_at,
+                        ?
+                    ),
+                    updated_at=?
+                WHERE id=?
+                  AND is_active=1
+                """,
+                (
+                    stamp,
+                    stamp,
+                    user_id,
+                ),
+            )
+
+            if int(updated.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            self._event(
+                conn,
+                user_id,
+                "verify_email_consumed",
+                "user",
+                str(user_id),
+                {},
+            )
+
+            self._event(
+                conn,
+                user_id,
+                "email_verified",
+                "user",
+                str(user_id),
+                {},
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
+        return self.get_user(user_id)
+
+    def request_password_reset(
+        self,
+        email: str,
+        request_ip: str = "",
+    ) -> str | None:
+        user = self.get_user_by_email(
+            email,
+            include_secret=True,
+        )
+
         if not user or not user.get("is_active"):
             return None
+
         return self.issue_auth_token(
-            int(user["id"]), "password_reset", expires_minutes=30,
+            int(user["id"]),
+            "password_reset",
+            expires_minutes=30,
             request_ip=request_ip,
         )
 
-    def reset_password_from_token(self, raw_token: str, new_password: str) -> dict[str, Any] | None:
-        status = self.auth_token_status(raw_token, "password_reset")
-        if not status:
-            return None
-        user = self.get_user(int(status["user_id"]))
-        if not user or not user.get("is_active"):
-            return None
-        validate_password(new_password, str(user.get("email") or ""), str(user.get("display_name") or ""))
-        consumed = self.consume_auth_token(raw_token, "password_reset")
-        if not consumed:
-            return None
-        stamp = now_iso()
+    def reset_password_from_token(
+        self,
+        raw_token: str,
+        new_password: str,
+    ) -> dict[str, Any] | None:
         conn = self._connect()
+
         try:
-            conn.execute(
-                """UPDATE app_users SET password_hash=?,password_changed_at=?,
-                       session_version=COALESCE(session_version,0)+1,updated_at=? WHERE id=?""",
-                (hash_secret(new_password), stamp, stamp, int(consumed["id"])),
+            if not hasattr(conn, "raw"):
+                conn.execute("BEGIN IMMEDIATE")
+
+            status = self._auth_token_status_with_conn(
+                conn,
+                raw_token,
+                "password_reset",
+                lock=True,
             )
-            conn.execute(
-                """UPDATE auth_tokens SET consumed_at=? WHERE user_id=?
-                   AND purpose='password_reset' AND consumed_at IS NULL""",
-                (stamp, int(consumed["id"])),
+
+            if not status:
+                conn.rollback()
+                return None
+
+            user_id = int(status["user_id"])
+
+            user_query = """
+                SELECT email,display_name,is_active
+                FROM app_users
+                WHERE id=?
+                LIMIT 1
+            """
+
+            if hasattr(conn, "raw"):
+                user_query += " FOR UPDATE"
+
+            user = conn.execute(
+                user_query,
+                (user_id,),
+            ).fetchone()
+
+            if not user or not bool(user["is_active"]):
+                conn.rollback()
+                return None
+
+            validate_password(
+                new_password,
+                str(user["email"] or ""),
+                str(user["display_name"] or ""),
             )
-            self._event(conn, int(consumed["id"]), "password_reset", "user", str(consumed["id"]), {})
+
+            new_password_hash = hash_secret(
+                new_password
+            )
+
+            stamp = now_iso()
+
+            consumed = conn.execute(
+                """
+                UPDATE auth_tokens
+                SET consumed_at=?
+                WHERE id=?
+                  AND purpose='password_reset'
+                  AND token_hash=?
+                  AND consumed_at IS NULL
+                """,
+                (
+                    stamp,
+                    int(status["id"]),
+                    hash_auth_token(raw_token),
+                ),
+            )
+
+            if int(consumed.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            updated = conn.execute(
+                """
+                UPDATE app_users
+                SET password_hash=?,
+                    password_changed_at=?,
+                    session_version=
+                        COALESCE(session_version,0)+1,
+                    updated_at=?
+                WHERE id=?
+                  AND is_active=1
+                """,
+                (
+                    new_password_hash,
+                    stamp,
+                    stamp,
+                    user_id,
+                ),
+            )
+
+            if int(updated.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            # Invalidate any other reset token that may still exist.
+            conn.execute(
+                """
+                UPDATE auth_tokens
+                SET consumed_at=?
+                WHERE user_id=?
+                  AND purpose='password_reset'
+                  AND consumed_at IS NULL
+                """,
+                (
+                    stamp,
+                    user_id,
+                ),
+            )
+
+            self._event(
+                conn,
+                user_id,
+                "password_reset_consumed",
+                "user",
+                str(user_id),
+                {},
+            )
+
+            self._event(
+                conn,
+                user_id,
+                "password_reset",
+                "user",
+                str(user_id),
+                {},
+            )
+
             conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
-        return self.get_user(int(consumed["id"]))
+
+        return self.get_user(user_id)
 
     def create_invitation(
         self,
@@ -590,31 +881,170 @@ class AuthService:
         )
         return user, token
 
-    def accept_invitation(self, raw_token: str, new_password: str) -> dict[str, Any] | None:
-        status = self.auth_token_status(raw_token, "user_invitation")
-        if not status:
-            return None
-        user = self.get_user(int(status["user_id"]))
-        metadata = status.get("metadata") if isinstance(status.get("metadata"), dict) else {}
-        if not user or int(user.get("tenant_id") or 0) != int(metadata.get("tenant_id") or 0):
-            return None
-        validate_password(new_password, str(user.get("email") or ""), str(user.get("display_name") or ""))
-        consumed = self.consume_auth_token(raw_token, "user_invitation")
-        if not consumed:
-            return None
-        stamp = now_iso()
+    def accept_invitation(
+        self,
+        raw_token: str,
+        new_password: str,
+    ) -> dict[str, Any] | None:
         conn = self._connect()
+
         try:
-            conn.execute(
-                """UPDATE app_users SET password_hash=?,password_changed_at=?,email_verified_at=?,
-                       session_version=COALESCE(session_version,0)+1,updated_at=? WHERE id=?""",
-                (hash_secret(new_password), stamp, stamp, stamp, int(consumed["id"])),
+            if not hasattr(conn, "raw"):
+                conn.execute("BEGIN IMMEDIATE")
+
+            status = self._auth_token_status_with_conn(
+                conn,
+                raw_token,
+                "user_invitation",
+                lock=True,
             )
-            self._event(conn, int(consumed["id"]), "invitation_accepted", "user", str(consumed["id"]), {})
+
+            if not status:
+                conn.rollback()
+                return None
+
+            metadata = (
+                status.get("metadata")
+                if isinstance(
+                    status.get("metadata"),
+                    dict,
+                )
+                else {}
+            )
+
+            try:
+                tenant_id = int(
+                    metadata.get("tenant_id") or 0
+                )
+            except (TypeError, ValueError):
+                conn.rollback()
+                return None
+
+            if tenant_id <= 0:
+                conn.rollback()
+                return None
+
+            user_id = int(status["user_id"])
+
+            user_query = """
+                SELECT
+                    u.email,
+                    u.display_name,
+                    u.is_active,
+                    tu.tenant_id
+                FROM app_users u
+                JOIN tenant_users tu
+                  ON tu.user_id=u.id
+                 AND tu.tenant_id=?
+                 AND tu.is_active=1
+                WHERE u.id=?
+                LIMIT 1
+            """
+
+            if hasattr(conn, "raw"):
+                user_query += " FOR UPDATE"
+
+            user = conn.execute(
+                user_query,
+                (
+                    tenant_id,
+                    user_id,
+                ),
+            ).fetchone()
+
+            if (
+                not user
+                or not bool(user["is_active"])
+            ):
+                conn.rollback()
+                return None
+
+            validate_password(
+                new_password,
+                str(user["email"] or ""),
+                str(user["display_name"] or ""),
+            )
+
+            new_password_hash = hash_secret(
+                new_password
+            )
+
+            stamp = now_iso()
+
+            consumed = conn.execute(
+                """
+                UPDATE auth_tokens
+                SET consumed_at=?
+                WHERE id=?
+                  AND purpose='user_invitation'
+                  AND token_hash=?
+                  AND consumed_at IS NULL
+                """,
+                (
+                    stamp,
+                    int(status["id"]),
+                    hash_auth_token(raw_token),
+                ),
+            )
+
+            if int(consumed.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            updated = conn.execute(
+                """
+                UPDATE app_users
+                SET password_hash=?,
+                    password_changed_at=?,
+                    email_verified_at=?,
+                    session_version=
+                        COALESCE(session_version,0)+1,
+                    updated_at=?
+                WHERE id=?
+                  AND is_active=1
+                  AND email_verified_at IS NULL
+                """,
+                (
+                    new_password_hash,
+                    stamp,
+                    stamp,
+                    stamp,
+                    user_id,
+                ),
+            )
+
+            if int(updated.rowcount) != 1:
+                conn.rollback()
+                return None
+
+            self._event(
+                conn,
+                user_id,
+                "user_invitation_consumed",
+                "user",
+                str(user_id),
+                {},
+            )
+
+            self._event(
+                conn,
+                user_id,
+                "invitation_accepted",
+                "user",
+                str(user_id),
+                {},
+            )
+
             conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
-        return self.get_user(int(consumed["id"]))
+
+        return self.get_user(user_id)
 
     def list_users(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
         conn = self._connect()
