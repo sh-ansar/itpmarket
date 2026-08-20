@@ -31,6 +31,7 @@
       "market_search_runs",
       "market_seller_offers",
       "metadata",
+      "schema_migrations",
       "offer_scans",
       "offers",
       "operation_schedules",

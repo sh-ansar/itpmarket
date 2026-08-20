@@ -165,3 +165,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 - PostgreSQL недоступна либо схема не готова;
 - порт занят посторонним процессом, Scheduled Task/Caddy не запущены;
 - browser-профиль отсутствует: это блокирует только соответствующую live-интеграцию, но не должно маскироваться как её успешная проверка.
+
+## Automatic production migrations
+
+Production deployment automatically handles safe PostgreSQL schema updates.
+
+The deployment sequence is:
+
+1. Fast-forward the production checkout.
+2. Synchronize Python dependencies.
+3. Inspect pending PostgreSQL migrations.
+4. Create a verified PostgreSQL backup when a migration is pending.
+5. Apply safe append-only migrations under an advisory lock.
+6. Verify the PostgreSQL schema.
+7. Restart Spyon.
+8. Require successful /health, /ready and / responses.
+
+Applied migrations are recorded in app.schema_migrations with the migration
+filename, SHA-256 checksum and application timestamp.
+
+New automatically applied migrations must contain SPYON-AUTO-MIGRATION and
+must use BEGIN/COMMIT. Destructive operations such as DROP, DELETE and TRUNCATE
+are rejected by the automatic deployment path.
+
+An already applied migration file must never be edited. A new migration must be
+created instead.

@@ -118,3 +118,14 @@ Backend предоставляет отдельные проверки прав 
 Read-only соединение с production PostgreSQL и каталог tenant на 15 825 строк проверены: прогретая страница сократилась с 1.100 до 0.262 секунды, а четыре одновременных холодных чтения — с 3.911 до 1.973 секунды. Не подтверждены live-сессии нескольких Kaspi/Ozon seller, полный сетевой сбор и конкурентный write/deadlock stress. Это внешние эксплуатационные проверки, а не подтверждённые дефекты кода.
 
 Экспериментальными/операционно хрупкими следует считать browser automation Ozon/Kaspi, внешний API fallback и standalone `CredentialVault` до его подключения к runtime. Изменения HTML, антибот-защиты или публичных API маркетплейсов могут потребовать адаптации сборщиков.
+
+## Secure password recovery
+
+Password recovery uses a time-limited single-use email token. Only the token
+hash is persisted. The reset form requires the new password twice.
+
+A successful reset consumes the token atomically, replaces the password hash
+and increments session_version so previously issued sessions become invalid.
+
+Production schema changes are tracked by checksum and safe additive migrations
+can be applied automatically during deployment after a verified backup.

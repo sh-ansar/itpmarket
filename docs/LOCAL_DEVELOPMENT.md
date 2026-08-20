@@ -106,3 +106,14 @@ Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru ис�
 - `/health` отвечает, `/ready` нет: процесс жив, но выбранная БД недоступна или не инициализирована.
 - Exit code 2 у сборщика: операция частичная/заблокированная; смотрите task log и не трактуйте её как success.
 - Порт 8765 занят: выясните владельца процесса; не останавливайте неизвестный процесс. Для dev задайте другой `ITP_PORT`.
+
+## Production migration development
+
+New PostgreSQL migrations belong in migrations/ and use ordered
+YYYYMMDD_name.sql filenames.
+
+Safe automatic migrations must contain SPYON-AUTO-MIGRATION, start with BEGIN
+and end with COMMIT. Run tests/test_postgres_migrations.py before release.
+
+The password reset regression test verifies the complete flow from requesting
+an email link through changing the password and consuming the one-use token.
