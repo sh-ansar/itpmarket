@@ -298,6 +298,24 @@ class EmailService:
         stamp = now_iso()
         conn = self._connect()
         try:
+            if (
+                template_key == "password_reset"
+                and user_id is not None
+            ):
+                conn.execute(
+                    """UPDATE email_outbox
+                       SET status='failed',
+                           last_error='superseded_by_new_password_reset',
+                           updated_at=?
+                       WHERE user_id=?
+                         AND template_key='password_reset'
+                         AND status IN ('pending','retry')""",
+                    (
+                        stamp,
+                        int(user_id),
+                    ),
+                )
+
             if not self._email_allowed(conn, user_id, category_value, is_security):
                 return None
             cursor = conn.execute(
@@ -552,7 +570,18 @@ class EmailService:
                 FROM email_outbox
                 WHERE status IN ('pending','retry')
                   AND next_attempt_at<=?
-                ORDER BY id
+                ORDER BY
+                    CASE
+                        WHEN template_key IN (
+                            'password_reset',
+                            'verify_email',
+                            'user_invitation',
+                            'password_changed'
+                        )
+                        THEN 0
+                        ELSE 1
+                    END,
+                    id
                 LIMIT ?
             """
 
@@ -636,7 +665,7 @@ class EmailService:
             delivery_id, attempts, "failed" if final else "retry", safe_error(error),
         )
 
-    def deliver_due_once(self, limit: int = 20) -> int:
+    def deliver_due_once(self, limit: int = 1) -> int:
         delivered = 0
         for row in self._claim_due(limit):
             delivery_id = int(row["id"])

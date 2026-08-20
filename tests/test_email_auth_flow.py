@@ -448,6 +448,130 @@ class EmailAuthFlowTests(unittest.TestCase):
             decrypted["action_url"],
         )
 
+
+    def test_new_password_reset_supersedes_unsent_email(self):
+        user = self.create_member(
+            verified=True
+        )
+
+        settings = EmailSettings(
+            enabled=False,
+            host="smtp.example.com",
+            port=587,
+            username="spyon@example.com",
+            password="test-only-password",
+            security="starttls",
+            require_tls=True,
+            mail_from="spyon@example.com",
+            mail_from_name="Spyon",
+            reply_to="support@example.com",
+            public_url="https://spyon.example.com",
+            timeout_seconds=5,
+            max_attempts=3,
+        )
+
+        service = EmailService(
+            self.db_path,
+            settings=settings,
+        )
+
+        first_id = service.queue_for_user(
+            user_id=int(user["id"]),
+            tenant_id=int(user["tenant_id"]),
+            template_key="password_reset",
+            security=True,
+            payload={
+                "action_url": (
+                    "https://spyon.example.com/"
+                    "reset-password/old-token"
+                ),
+            },
+            dedupe_key="reset-old",
+        )
+
+        second_id = service.queue_for_user(
+            user_id=int(user["id"]),
+            tenant_id=int(user["tenant_id"]),
+            template_key="password_reset",
+            security=True,
+            payload={
+                "action_url": (
+                    "https://spyon.example.com/"
+                    "reset-password/new-token"
+                ),
+            },
+            dedupe_key="reset-new",
+        )
+
+        conn = self.connection()
+
+        try:
+            first = conn.execute(
+                """
+                SELECT status,last_error
+                FROM email_outbox
+                WHERE id=?
+                """,
+                (int(first_id),),
+            ).fetchone()
+
+            second = conn.execute(
+                """
+                SELECT status,last_error
+                FROM email_outbox
+                WHERE id=?
+                """,
+                (int(second_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            "failed",
+            first["status"],
+        )
+
+        self.assertEqual(
+            "superseded_by_new_password_reset",
+            first["last_error"],
+        )
+
+        self.assertEqual(
+            "pending",
+            second["status"],
+        )
+
+    def test_email_delivery_default_batch_is_one(self):
+        settings = EmailSettings(
+            enabled=True,
+            host="smtp.example.com",
+            port=587,
+            username="",
+            password="",
+            security="starttls",
+            require_tls=True,
+            mail_from="spyon@example.com",
+            mail_from_name="Spyon",
+            reply_to="",
+            public_url="https://spyon.example.com",
+            timeout_seconds=5,
+            max_attempts=3,
+        )
+
+        service = EmailService(
+            self.db_path,
+            settings=settings,
+        )
+
+        with patch.object(
+            service,
+            "_claim_due",
+            return_value=[],
+        ) as claim:
+            service.deliver_due_once()
+
+        claim.assert_called_once_with(1)
+
     def test_safe_error_redacts_email_addresses(self):
         result = safe_error(
             "550 recipient customer@example.com rejected"
