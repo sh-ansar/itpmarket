@@ -102,6 +102,8 @@
     "company_registration_number": "Регистрационный номер / БИН",
     "company_email": "Email компании",
     "company_phone": "Телефон компании",
+    "company_legal_address": "Юридический адрес",
+    "company_actual_address": "Фактический адрес",
     "company_contact_name": "Контактное лицо",
     "register_eyebrow": "РЕГИСТРАЦИЯ",
     "register_title": "Создайте компанию.",

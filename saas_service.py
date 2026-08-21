@@ -28,6 +28,33 @@ from tenant_security import (
 
 INTEGRATION_CATALOG = marketplace_catalog()
 
+PUBLIC_MARKETPLACE_SOURCE_EXAMPLES = {
+    "kaspi": [
+        "12345678",
+        "https://kaspi.kz/shop/m/12345678/products",
+    ],
+    "ozon": [
+        "example-store-123",
+        "https://www.ozon.ru/seller/example-store-123/",
+    ],
+    "ozon_kz": [
+        "example-store-456",
+        "https://ozon.kz/seller/example-store-456/",
+    ],
+    "halyk_market": [
+        "12345",
+        "https://halykmarket.kz/merchant/12345",
+    ],
+    "forte_market": [
+        "example-merchant-123",
+        "https://market.forte.kz/merchant/example-merchant-123?type=all",
+    ],
+    "wildberries": [
+        "123456789",
+        "https://global.wildberries.ru/seller/123456789",
+    ],
+}
+
 WORKSPACE_TEMPLATES = [
     {
         "code": "tire",
@@ -804,8 +831,6 @@ class SaaSService:
                 raise ValueError("Компания не найдена.")
             if not company_is_approved(row["status"]):
                 raise ValueError("Компания ещё не подтверждена.")
-            if not bool(row["is_allowed"]):
-                raise PermissionError("Эта площадка не разрешена вашей компании.")
         finally:
             conn.close()
         identifier = str(source.get("seller_identifier") or "")
@@ -993,6 +1018,36 @@ class SaaSService:
                     str(review_note or "").strip(), stamp, int(tenant_id), code,
                 ),
             )
+            # MARKETPLACE_APPROVAL_AUTO_GRANT_V1
+            if target == "approved":
+                conn.execute(
+                    """INSERT INTO tenant_marketplace_access(
+                           tenant_id,
+                           marketplace_code,
+                           is_allowed,
+                           granted_by,
+                           granted_at,
+                           updated_at
+                       )
+                       VALUES(?,?,1,?,?,?)
+                       ON CONFLICT(
+                           tenant_id,
+                           marketplace_code
+                       ) DO UPDATE SET
+                           is_allowed=1,
+                           granted_by=excluded.granted_by,
+                           granted_at=excluded.granted_at,
+                           updated_at=excluded.updated_at
+                    """,
+                    (
+                        int(tenant_id),
+                        code,
+                        int(actor_user_id),
+                        stamp,
+                        stamp,
+                    ),
+                )
+
             self._audit(
                 conn, actor_user_id, f"tenant_marketplace_{target}", int(tenant_id),
                 "tenant_marketplace_seller", str(seller_row["id"]),
@@ -1013,7 +1068,17 @@ class SaaSService:
         for raw in INTEGRATION_CATALOG:
             item = dict(raw)
             rule = rules.get(str(item["code"]), {})
-            examples = [str(value) for value in rule.get("examples", []) if str(value).strip()]
+            examples = list(
+                PUBLIC_MARKETPLACE_SOURCE_EXAMPLES.get(
+                    str(item["code"]),
+                    [
+                        str(value)
+                        for value
+                        in rule.get("examples", [])
+                        if str(value).strip()
+                    ],
+                )
+            )
             fields = [dict(field) for field in item.get("connection_fields", [])]
             if fields:
                 fields[0].update({
@@ -1188,6 +1253,12 @@ class SaaSService:
         email = str(payload.get("email") or "").strip().casefold()
         registration_number = str(payload.get("registration_number") or "").strip()
         phone = str(payload.get("phone") or "").strip()
+        legal_address = str(
+            payload.get("legal_address") or ""
+        ).strip()
+        actual_address = str(
+            payload.get("actual_address") or ""
+        ).strip()
         locale = str(payload.get("locale") or "ru").casefold()
         locale = locale if locale in {"ru", "kk", "en"} else "ru"
         known_capabilities = {item["code"] for item in PUBLIC_CAPABILITIES}
@@ -1201,8 +1272,40 @@ class SaaSService:
         ]
         if not registration_number:
             raise ValueError("Укажите регистрационный номер / БИН.")
-        if not phone:
-            raise ValueError("Укажите телефон компании.")
+        phone = re.sub(
+            r"[^\d+]",
+            "",
+            phone,
+        )
+
+        if not re.fullmatch(
+            r"\+\d{7,15}",
+            phone,
+        ):
+            raise ValueError(
+                "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                "\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 "
+                "\u0442\u0435\u043b\u0435\u0444\u043e\u043d "
+                "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438."
+            )
+
+        if (
+            str(payload.get("source_page") or "")
+            == "public_registration"
+        ):
+            if len(legal_address) < 5:
+                raise ValueError(
+                    "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                    "\u044e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u0439 "
+                    "\u0430\u0434\u0440\u0435\u0441."
+                )
+
+            if len(actual_address) < 5:
+                raise ValueError(
+                    "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                    "\u0444\u0430\u043a\u0442\u0438\u0447\u0435\u0441\u043a\u0438\u0439 "
+                    "\u0430\u0434\u0440\u0435\u0441."
+                )
         if len(company) < 2:
             raise ValueError("Укажите название компании.")
         if len(contact) < 2:
@@ -1213,10 +1316,38 @@ class SaaSService:
             raise ValueError("Необходимо согласие с Политикой конфиденциальности.")
         if not bool(payload.get("terms_consent")):
             raise ValueError("Необходимо принять Условия использования.")
-        try:
-            estimated = max(0, min(int(payload.get("estimated_products") or 0), 10_000_000))
-        except (TypeError, ValueError):
-            estimated = 0
+        raw_estimated = str(
+            payload.get("estimated_products")
+            if payload.get("estimated_products")
+            not in (None, "")
+            else "0"
+        ).strip()
+
+        if not re.fullmatch(
+            r"\d{1,8}",
+            raw_estimated,
+        ):
+            raise ValueError(
+                "\u041f\u0440\u0438\u043c\u0435\u0440\u043d\u043e\u0435 "
+                "\u0447\u0438\u0441\u043b\u043e "
+                "\u0442\u043e\u0432\u0430\u0440\u043e\u0432 "
+                "\u0434\u043e\u043b\u0436\u043d\u043e "
+                "\u0431\u044b\u0442\u044c "
+                "\u0446\u0435\u043b\u044b\u043c "
+                "\u0447\u0438\u0441\u043b\u043e\u043c."
+            )
+
+        estimated = int(
+            raw_estimated
+        )
+
+        if estimated > 10_000_000:
+            raise ValueError(
+                "\u0421\u043b\u0438\u0448\u043a\u043e\u043c "
+                "\u0431\u043e\u043b\u044c\u0448\u043e\u0435 "
+                "\u0447\u0438\u0441\u043b\u043e "
+                "\u0442\u043e\u0432\u0430\u0440\u043e\u0432."
+            )
         profile = self.workspace_profile_for_payload(payload)
         if not profile["selected_integrations"]:
             raise ValueError("Выберите хотя бы один маркетплейс для заявки.")
@@ -1254,10 +1385,11 @@ class SaaSService:
                 """
                 INSERT INTO registration_requests(
                     company_name,registration_number,contact_name,email,phone,
+                    legal_address,actual_address,
                     integrations_json,capabilities_json,estimated_products,comment,status,
                     consent_version,consent_at,locale,source_page,workspace_profile_json,
                     created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?,?,?)
                 """,
                 (
                     company,
@@ -1265,6 +1397,8 @@ class SaaSService:
                     contact,
                     email,
                     phone,
+                    legal_address,
+                    actual_address,
                     json.dumps(profile["selected_integrations"], ensure_ascii=False),
                     json.dumps(capabilities, ensure_ascii=False),
                     estimated,
@@ -1338,10 +1472,11 @@ class SaaSService:
             cur = conn.execute(
                 """
                 INSERT INTO tenants(
-                    name,slug,registration_number,status,plan_code,contact_email,contact_phone,
+                    name,slug,registration_number,status,plan_code,
+                    contact_email,contact_phone,legal_address,actual_address,
                     workspace_profile_json,created_at,updated_at,approved_at
                 )
-                VALUES(?,?,?,? ,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     row["company_name"],
@@ -1351,6 +1486,8 @@ class SaaSService:
                     profile["template_code"],
                     row["email"],
                     row["phone"],
+                    str(row["legal_address"] or ""),
+                    str(row["actual_address"] or ""),
                     json.dumps(profile, ensure_ascii=False),
                     stamp,
                     stamp,
@@ -1660,6 +1797,38 @@ class SaaSService:
             row = conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
             if not row:
                 raise ValueError("Компания не найдена.")
+            legal_address = str(
+                payload.get("legal_address")
+                if "legal_address" in payload
+                else row["legal_address"] or ""
+            ).strip()
+
+            actual_address = str(
+                payload.get("actual_address")
+                if "actual_address" in payload
+                else row["actual_address"] or ""
+            ).strip()
+
+            if (
+                "legal_address" in payload
+                and len(legal_address) < 5
+            ):
+                raise ValueError(
+                    "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                    "\u044e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u0439 "
+                    "\u0430\u0434\u0440\u0435\u0441."
+                )
+
+            if (
+                "actual_address" in payload
+                and len(actual_address) < 5
+            ):
+                raise ValueError(
+                    "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                    "\u0444\u0430\u043a\u0442\u0438\u0447\u0435\u0441\u043a\u0438\u0439 "
+                    "\u0430\u0434\u0440\u0435\u0441."
+                )
+
             if isinstance(conn, PostgresConnection):
                 conn.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"bin:{registration_number.casefold()}",))
                 conn.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"email:{contact_email}",))
@@ -1676,10 +1845,25 @@ class SaaSService:
             conn.execute(
                 """
                 UPDATE tenants
-                SET name=?, registration_number=?, contact_email=?, contact_phone=?, updated_at=?
+                SET name=?,
+                    registration_number=?,
+                    contact_email=?,
+                    contact_phone=?,
+                    legal_address=?,
+                    actual_address=?,
+                    updated_at=?
                 WHERE id=?
                 """,
-                (name, registration_number, contact_email, contact_phone, stamp, int(tenant_id)),
+                (
+                    name,
+                    registration_number,
+                    contact_email,
+                    contact_phone,
+                    legal_address,
+                    actual_address,
+                    stamp,
+                    int(tenant_id),
+                ),
             )
             self._audit(
                 conn,
@@ -1693,6 +1877,8 @@ class SaaSService:
                     "registration_number": registration_number,
                     "contact_email": contact_email,
                     "contact_phone": contact_phone,
+                    "legal_address": legal_address,
+                    "actual_address": actual_address,
                 },
             )
             conn.commit()

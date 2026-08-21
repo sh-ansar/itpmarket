@@ -38,7 +38,7 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "product_url_template": "",
         "seller_name_template": "{seller_id}",
         "bare_id_pattern": r"^[A-Za-z0-9._-]{2,160}$",
-        "examples": ["12917020", "https://kaspi.kz/shop/m/12917020/products?masterSku=123271857"],
+        "examples": ["12345678", "https://kaspi.kz/shop/m/12345678/products"],
     },
     "ozon": {
         "allowed_hosts": ["ozon.ru", "www.ozon.ru"],
@@ -50,7 +50,7 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "product_url_template": "",
         "seller_name_template": "{seller_id_human}",
         "bare_id_pattern": r"^[A-Za-z0-9._-]{2,160}$",
-        "examples": ["ridial", "https://www.ozon.ru/seller/ridial/"],
+        "examples": ["example-store-123", "https://www.ozon.ru/seller/example-store-123/"],
     },
     "ozon_kz": {
         "allowed_hosts": ["ozon.kz", "www.ozon.kz"],
@@ -62,7 +62,7 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "product_url_template": "",
         "seller_name_template": "{seller_id_human}",
         "bare_id_pattern": r"^[A-Za-z0-9._-]{2,160}$",
-        "examples": ["ridial", "https://ozon.kz/seller/ridial/"],
+        "examples": ["example-store-456", "https://ozon.kz/seller/example-store-456/"],
     },
     "halyk_market": {
         "allowed_hosts": ["halykmarket.kz", "www.halykmarket.kz"],
@@ -76,7 +76,7 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "product_url_template": "",
         "seller_name_template": "{seller_id}",
         "bare_id_pattern": r"^[A-Za-z0-9._-]{2,160}$",
-        "examples": ["24955", "https://halykmarket.kz/merchant/24955?f=merchantName%3AMechta.kz"],
+        "examples": ["12345", "https://halykmarket.kz/merchant/12345"],
     },
     "forte_market": {
         "allowed_hosts": ["market.forte.kz", "forte.kz", "www.forte.kz"],
@@ -92,8 +92,8 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "seller_name_template": "{seller_id}",
         "bare_id_pattern": r"^[A-Za-z0-9._-]{2,160}$",
         "examples": [
-            "B8pXMdkk110XZRswXw",
-            "https://market.forte.kz/merchant/B8pXMdkk110XZRswXw?productId=c681a9d9-6ef7-11ed-9013-92962dec7f6b&type=all",
+            "example-merchant-123",
+            "https://market.forte.kz/merchant/example-merchant-123?type=all",
         ],
     },
     "wildberries": {
@@ -111,8 +111,8 @@ DEFAULT_MARKETPLACE_SOURCE_RULES: dict[str, dict[str, Any]] = {
         "seller_name_template": "Продавец {seller_id}",
         "bare_id_pattern": r"^\d{3,12}$",
         "examples": [
-            "250000260",
-            "https://global.wildberries.ru/seller/250000260",
+            "123456789",
+            "https://global.wildberries.ru/seller/123456789",
         ],
     },
 }

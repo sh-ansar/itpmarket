@@ -450,22 +450,107 @@ class SubscriptionService:
         finally:
             conn.close()
 
-    def _active_subscription(self, conn: sqlite3.Connection, tenant_id: int) -> dict[str, Any] | None:
+    def _active_subscription(
+        self,
+        conn: sqlite3.Connection,
+        tenant_id: int,
+    ) -> dict[str, Any] | None:
         now = datetime.now().astimezone()
-        rows = conn.execute(
-            """SELECT s.*,p.code plan_code,p.name plan_name,p.description plan_description,
-                      p.daily_operation_limit,p.position_limit
-               FROM tenant_subscriptions s JOIN subscription_plans p ON p.id=s.plan_id
-               WHERE s.tenant_id=? AND s.status='active' ORDER BY s.reviewed_at DESC,s.id DESC""",
-            (int(tenant_id),),
-        ).fetchall()
-        for row in rows:
-            value = dict(row)
-            starts = _parse_time(value.get("starts_at"))
-            ends = _parse_time(value.get("ends_at"))
-            if (starts is None or starts <= now) and (ends is None or ends >= now):
-                return value
-        return None
+
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT s.*,
+                          p.code plan_code,
+                          p.name plan_name,
+                          p.description plan_description,
+                          p.daily_operation_limit,
+                          p.position_limit
+                   FROM tenant_subscriptions s
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+                   WHERE s.tenant_id=?
+                     AND s.status IN (
+                         'active',
+                         'scheduled'
+                     )
+                   ORDER BY
+                     COALESCE(
+                         s.starts_at,
+                         s.reviewed_at,
+                         s.requested_at
+                     ) DESC,
+                     s.id DESC""",
+                (int(tenant_id),),
+            ).fetchall()
+        ]
+
+        selected = None
+
+        for value in rows:
+            starts = _parse_time(
+                value.get("starts_at")
+            )
+            ends = _parse_time(
+                value.get("ends_at")
+            )
+
+            if starts and starts > now:
+                continue
+
+            if ends and ends <= now:
+                continue
+
+            selected = value
+            break
+
+        if selected is None:
+            return None
+
+        if selected.get("status") == "scheduled":
+            stamp = now_iso()
+
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='expired',
+                       updated_at=?
+                   WHERE tenant_id=?
+                     AND status='active'
+                     AND id<>?""",
+                (
+                    stamp,
+                    int(tenant_id),
+                    int(selected["id"]),
+                ),
+            )
+
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='active',
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    stamp,
+                    int(selected["id"]),
+                ),
+            )
+
+            conn.execute(
+                """UPDATE tenants
+                   SET plan_code=?,
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    str(selected["plan_code"]),
+                    stamp,
+                    int(tenant_id),
+                ),
+            )
+
+            conn.commit()
+            selected["status"] = "active"
+
+        return selected
 
     def entitlement(self, tenant_id: int) -> dict[str, Any]:
         conn = self._connect()
@@ -681,11 +766,24 @@ class SubscriptionService:
                 (int(tenant_id),),
             ).fetchone():
                 raise SubscriptionError("Бесплатный пробный период уже использован этой компанией.")
+            self._active_subscription(
+                conn,
+                int(tenant_id),
+            )
+
             if conn.execute(
-                "SELECT 1 FROM tenant_subscriptions WHERE tenant_id=? AND status='pending'",
+                """SELECT 1
+                   FROM tenant_subscriptions
+                   WHERE tenant_id=?
+                     AND status IN (
+                         'pending',
+                         'scheduled'
+                     )""",
                 (int(tenant_id),),
             ).fetchone():
-                raise SubscriptionError("Заявка на пакет уже ожидает подтверждения.")
+                raise SubscriptionError(
+                    "Заявка или следующая смена пакета уже существует."
+                )
             stamp = now_iso()
             snapshot = json.dumps(self._plan_row(conn, int(plan["id"])), ensure_ascii=False, default=str)
             cursor = conn.execute(
@@ -707,75 +805,456 @@ class SubscriptionService:
             conn.close()
 
     def review_subscription(
-        self, subscription_id: int, decision: str, actor_user_id: int,
-        *, term_days: int | None = None, price_amount: float | None = None,
+        self,
+        subscription_id: int,
+        decision: str,
+        actor_user_id: int,
+        *,
+        term_days: int | None = None,
+        price_amount: float | None = None,
+        starts_at: str | None = None,
+        ends_at: str | None = None,
         review_note: str = "",
     ) -> dict[str, Any]:
-        decision = str(decision).strip().casefold()
-        if decision not in {"approved", "rejected"}:
-            raise SubscriptionError("Решение должно быть approved или rejected.")
+        decision = str(
+            decision
+        ).strip().casefold()
+
+        if decision not in {
+            "approved",
+            "rejected",
+        }:
+            raise SubscriptionError(
+                "Решение должно быть approved "
+                "или rejected."
+            )
+
         conn = self._connect()
+
         try:
             row = conn.execute(
-                "SELECT * FROM tenant_subscriptions WHERE id=?", (int(subscription_id),)
+                """SELECT *
+                   FROM tenant_subscriptions
+                   WHERE id=?""",
+                (int(subscription_id),),
             ).fetchone()
+
             if not row:
-                raise SubscriptionError("Заявка на пакет не найдена.")
+                raise SubscriptionError(
+                    "Заявка на пакет не найдена."
+                )
+
             if str(row["status"]) != "pending":
-                raise SubscriptionError("Заявка уже обработана.")
+                raise SubscriptionError(
+                    "Заявка уже обработана."
+                )
+
             stamp = now_iso()
+
             if decision == "approved":
-                days = int(term_days or row["term_days"])
+                now = datetime.now().astimezone()
+
+                days = int(
+                    term_days
+                    or row["term_days"]
+                )
+
                 if not 1 <= days <= 3650:
-                    raise SubscriptionError("Срок должен быть от 1 до 3650 дней.")
-                price = float(row["price_amount"] if price_amount is None else price_amount)
+                    raise SubscriptionError(
+                        "Срок должен быть "
+                        "от 1 до 3650 дней."
+                    )
+
+                price = float(
+                    row["price_amount"]
+                    if price_amount is None
+                    else price_amount
+                )
+
                 if price < 0:
-                    raise SubscriptionError("Цена не может быть отрицательной.")
-                ends = (datetime.now().astimezone() + timedelta(days=days)).isoformat(timespec="seconds")
-                conn.execute(
-                    """UPDATE tenant_subscriptions SET status='cancelled',updated_at=?
-                       WHERE tenant_id=? AND status='active'""",
-                    (stamp, int(row["tenant_id"])),
+                    raise SubscriptionError(
+                        "Цена не может быть "
+                        "отрицательной."
+                    )
+
+                current = self._active_subscription(
+                    conn,
+                    int(row["tenant_id"]),
                 )
+
+                # Legacy is only a compatibility entitlement for companies
+                # created before commercial subscription assignment.
+                # The first real package must replace it immediately.
+                if (
+                    current
+                    and str(
+                        current.get("plan_code")
+                        or ""
+                    ).casefold()
+                    == "legacy"
+                ):
+                    current = None
+
+                explicit_start = (
+                    _parse_time(starts_at)
+                    if starts_at
+                    else None
+                )
+
+                if starts_at and explicit_start is None:
+                    raise SubscriptionError(
+                        "Некорректная дата "
+                        "начала пакета."
+                    )
+
+                if explicit_start:
+                    start_dt = explicit_start
+                else:
+                    current_end = (
+                        _parse_time(
+                            current.get("ends_at")
+                        )
+                        if current
+                        else None
+                    )
+
+                    start_dt = (
+                        current_end
+                        if (
+                            current_end
+                            and current_end > now
+                        )
+                        else now
+                    )
+
+                explicit_end = (
+                    _parse_time(ends_at)
+                    if ends_at
+                    else None
+                )
+
+                if ends_at and explicit_end is None:
+                    raise SubscriptionError(
+                        "Некорректная дата "
+                        "окончания пакета."
+                    )
+
+                end_dt = (
+                    explicit_end
+                    or (
+                        start_dt
+                        + timedelta(days=days)
+                    )
+                )
+
+                if end_dt <= start_dt:
+                    raise SubscriptionError(
+                        "Дата окончания должна "
+                        "быть позже даты начала."
+                    )
+
+                if explicit_end:
+                    seconds = (
+                        end_dt - start_dt
+                    ).total_seconds()
+
+                    days = max(
+                        1,
+                        int(
+                            (
+                                seconds
+                                + 86399
+                            )
+                            // 86400
+                        ),
+                    )
+
+                starts = start_dt.isoformat(
+                    timespec="seconds"
+                )
+
+                ends = end_dt.isoformat(
+                    timespec="seconds"
+                )
+
+                new_status = (
+                    "scheduled"
+                    if start_dt > now
+                    else "active"
+                )
+
+                if new_status == "active":
+                    conn.execute(
+                        """UPDATE tenant_subscriptions
+                           SET status='cancelled',
+                               updated_at=?
+                           WHERE tenant_id=?
+                             AND status IN (
+                                 'active',
+                                 'scheduled'
+                             )
+                             AND id<>?""",
+                        (
+                            stamp,
+                            int(row["tenant_id"]),
+                            int(subscription_id),
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE tenant_subscriptions
+                           SET status='cancelled',
+                               updated_at=?
+                           WHERE tenant_id=?
+                             AND status='scheduled'
+                             AND id<>?""",
+                        (
+                            stamp,
+                            int(row["tenant_id"]),
+                            int(subscription_id),
+                        ),
+                    )
+
                 conn.execute(
-                    """UPDATE tenant_subscriptions SET status='active',reviewed_by=?,reviewed_at=?,
-                           starts_at=?,ends_at=?,term_days=?,price_amount=?,review_note=?,updated_at=?
+                    """UPDATE tenant_subscriptions
+                       SET status=?,
+                           reviewed_by=?,
+                           reviewed_at=?,
+                           starts_at=?,
+                           ends_at=?,
+                           term_days=?,
+                           price_amount=?,
+                           review_note=?,
+                           updated_at=?
                        WHERE id=?""",
-                    (int(actor_user_id), stamp, stamp, ends, days, price, review_note, stamp, int(subscription_id)),
+                    (
+                        new_status,
+                        int(actor_user_id),
+                        stamp,
+                        starts,
+                        ends,
+                        days,
+                        price,
+                        review_note,
+                        stamp,
+                        int(subscription_id),
+                    ),
                 )
-                plan_code = str(conn.execute(
-                    "SELECT code FROM subscription_plans WHERE id=?", (int(row["plan_id"]),)
-                ).fetchone()[0])
-                conn.execute(
-                    "UPDATE tenants SET plan_code=?,updated_at=? WHERE id=?",
-                    (plan_code, stamp, int(row["tenant_id"])),
+
+                plan_code = str(
+                    conn.execute(
+                        """SELECT code
+                           FROM subscription_plans
+                           WHERE id=?""",
+                        (int(row["plan_id"]),),
+                    ).fetchone()[0]
                 )
+
+                if new_status == "active":
+                    conn.execute(
+                        """UPDATE tenants
+                           SET plan_code=?,
+                               updated_at=?
+                           WHERE id=?""",
+                        (
+                            plan_code,
+                            stamp,
+                            int(row["tenant_id"]),
+                        ),
+                    )
+
                 conn.execute(
                     """INSERT INTO subscription_payments(
-                           tenant_id,subscription_id,amount,currency,status,paid_at,
-                           period_start,period_end,term_days,months_count,confirmed_by,note,created_at
-                       ) VALUES(?,?,?,?,'confirmed',?,?,?,?,?,?,?,?)
-                       ON CONFLICT(subscription_id) DO NOTHING""",
+                           tenant_id,
+                           subscription_id,
+                           amount,
+                           currency,
+                           status,
+                           paid_at,
+                           period_start,
+                           period_end,
+                           term_days,
+                           months_count,
+                           confirmed_by,
+                           note,
+                           created_at
+                       )
+                       VALUES(
+                           ?,?,?,?,
+                           'confirmed',
+                           ?,?,?,?,?,?,?,?
+                       )
+                       ON CONFLICT(
+                           subscription_id
+                       ) DO NOTHING""",
                     (
-                        int(row["tenant_id"]), int(subscription_id), price,
-                        str(row["currency"]), stamp, stamp, ends, days,
-                        round(days / 30, 2), int(actor_user_id),
-                        review_note or ("Бесплатный trial" if plan_code == "trial" else "Оплата подтверждена вручную"),
+                        int(row["tenant_id"]),
+                        int(subscription_id),
+                        price,
+                        str(row["currency"]),
+                        stamp,
+                        starts,
+                        ends,
+                        days,
+                        round(days / 30, 2),
+                        int(actor_user_id),
+                        (
+                            review_note
+                            or (
+                                "Бесплатный trial"
+                                if plan_code == "trial"
+                                else
+                                "Оплата подтверждена вручную"
+                            )
+                        ),
                         stamp,
                     ),
                 )
+
             else:
                 conn.execute(
-                    """UPDATE tenant_subscriptions SET status='rejected',reviewed_by=?,
-                           reviewed_at=?,review_note=?,updated_at=? WHERE id=?""",
-                    (int(actor_user_id), stamp, review_note, stamp, int(subscription_id)),
+                    """UPDATE tenant_subscriptions
+                       SET status='rejected',
+                           reviewed_by=?,
+                           reviewed_at=?,
+                           review_note=?,
+                           updated_at=?
+                       WHERE id=?""",
+                    (
+                        int(actor_user_id),
+                        stamp,
+                        review_note,
+                        stamp,
+                        int(subscription_id),
+                    ),
                 )
+
             conn.commit()
-            return dict(conn.execute(
-                "SELECT * FROM tenant_subscriptions WHERE id=?", (int(subscription_id),)
-            ).fetchone())
+
+            return dict(
+                conn.execute(
+                    """SELECT *
+                       FROM tenant_subscriptions
+                       WHERE id=?""",
+                    (int(subscription_id),),
+                ).fetchone()
+            )
+
         finally:
             conn.close()
+
+    def assign_plan(
+        self,
+        tenant_id: int,
+        plan_code: str,
+        actor_user_id: int,
+        *,
+        starts_at: str | None = None,
+        ends_at: str | None = None,
+        price_amount: float | None = None,
+        review_note: str = "",
+    ) -> dict[str, Any]:
+        code = str(
+            plan_code or ""
+        ).strip().casefold()
+
+        conn = self._connect()
+
+        try:
+            plan = conn.execute(
+                """SELECT *
+                   FROM subscription_plans
+                   WHERE code=?
+                     AND is_active=1""",
+                (code,),
+            ).fetchone()
+
+            if not plan or code == "legacy":
+                raise SubscriptionError(
+                    "Пакет недоступен "
+                    "для назначения."
+                )
+
+            stamp = now_iso()
+
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='cancelled',
+                       updated_at=?
+                   WHERE tenant_id=?
+                     AND status='pending'""",
+                (
+                    stamp,
+                    int(tenant_id),
+                ),
+            )
+
+            snapshot = json.dumps(
+                self._plan_row(
+                    conn,
+                    int(plan["id"]),
+                ),
+                ensure_ascii=False,
+                default=str,
+            )
+
+            cursor = conn.execute(
+                """INSERT INTO tenant_subscriptions(
+                       tenant_id,
+                       plan_id,
+                       status,
+                       requested_by,
+                       requested_at,
+                       price_amount,
+                       currency,
+                       term_days,
+                       plan_snapshot_json,
+                       review_note,
+                       created_at,
+                       updated_at
+                   )
+                   VALUES(
+                       ?,?,
+                       'pending',
+                       ?,?,?,?,?,?,?,?,?
+                   )""",
+                (
+                    int(tenant_id),
+                    int(plan["id"]),
+                    int(actor_user_id),
+                    stamp,
+                    float(
+                        plan["price_amount"]
+                        if price_amount is None
+                        else price_amount
+                    ),
+                    str(plan["currency"]),
+                    int(plan["term_days"]),
+                    snapshot,
+                    str(review_note or ""),
+                    stamp,
+                    stamp,
+                ),
+            )
+
+            request_id = int(
+                cursor.lastrowid
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+        return self.review_subscription(
+            request_id,
+            "approved",
+            int(actor_user_id),
+            starts_at=starts_at,
+            ends_at=ends_at,
+            price_amount=price_amount,
+            review_note=review_note,
+        )
 
     def request_addon(
         self, tenant_id: int, addon_code: str, marketplace_code: str,

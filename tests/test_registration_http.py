@@ -63,7 +63,10 @@ class RegistrationHttpTests(unittest.TestCase):
                 "registration_number": "BIN-HTTP-001",
                 "contact_name": "HTTP Owner",
                 "email": "http-owner@example.com",
-                "phone": "+7 700 123 45 67",
+                "phone_country_code": "+7",
+                "phone": "700 123 45 67",
+                "legal_address": "Astana, Legal Street 10",
+                "actual_address": "Astana, Office Street 20",
                 "estimated_products": "250",
                 "marketplaces": ["kaspi", "ozon_kz"],
                 "password": "SafeVaultNumber927!",
@@ -100,10 +103,16 @@ class RegistrationHttpTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         prefix = "window.ITP_PUBLIC_LOCALES="
         self.assertTrue(source.startswith(prefix))
-        translations = json.loads(source[len(prefix):source.index(";")])
+        payload = source[len(prefix):]
+        translations, parsed_end = json.JSONDecoder().raw_decode(payload)
+        self.assertTrue(
+            payload[parsed_end:].lstrip().startswith(";")
+        )
         keys = (
             "register_title", "register_intro", "register_submit",
             "company_registration_number", "company_contact_name",
+            "phone_country_code", "phone_number",
+            "company_legal_address", "company_actual_address",
         )
         for language in ("ru", "kk", "en"):
             for key in keys:

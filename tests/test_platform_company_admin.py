@@ -200,6 +200,53 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         )
         self.assertEqual(200, accepted.status_code)
 
+    def test_superadmin_can_update_company_addresses(self) -> None:
+        self.login(int(self.root["id"]))
+
+        response = self.client.put(
+            f"/api/platform/tenants/{self.tenant_b}",
+            json={
+                "name": "Company B",
+                "registration_number": "BIN-B",
+                "contact_email":
+                    "company-b@example.com",
+                "contact_phone":
+                    "+7 700 000 00 02",
+                "legal_address":
+                    "Astana, Legal Street 10",
+                "actual_address":
+                    "Astana, Office Street 20",
+                "status": "approved",
+            },
+            headers=self.headers,
+        )
+
+        self.assertEqual(
+            200,
+            response.status_code,
+        )
+
+        detail = self.client.get(
+            f"/api/platform/tenants/"
+            f"{self.tenant_b}/detail"
+        )
+
+        self.assertEqual(
+            200,
+            detail.status_code,
+        )
+
+        tenant = detail.get_json()["tenant"]
+
+        self.assertEqual(
+            "Astana, Legal Street 10",
+            tenant["legal_address"],
+        )
+        self.assertEqual(
+            "Astana, Office Street 20",
+            tenant["actual_address"],
+        )
+
     def test_company_sees_only_marketplaces_granted_by_superadmin(self) -> None:
         self.login(int(self.root["id"]))
         response = self.client.put(
@@ -234,6 +281,145 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         session_user = self.client.get("/api/session").get_json()["user"]
         self.assertEqual({}, session_user["marketplaces"])
         self.assertEqual({"kaspi": True, "ozon": True}, session_user["available_marketplaces"])
+
+    def test_company_can_request_ungranted_marketplace(self) -> None:
+        self.login(int(self.root["id"]))
+
+        response = self.client.put(
+            f"/api/platform/tenants/{self.tenant_b}/marketplaces",
+            json={
+                "marketplaces": ["kaspi"],
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(
+            200,
+            response.status_code,
+        )
+
+        self.login(
+            int(self.company_admin["id"])
+        )
+
+        regular = self.client.get(
+            "/api/tenant"
+        )
+        self.assertEqual(
+            200,
+            regular.status_code,
+        )
+        self.assertEqual(
+            {"kaspi"},
+            {
+                item["code"]
+                for item
+                in regular.get_json()[
+                    "marketplace_access"
+                ]
+            },
+        )
+
+        expanded = self.client.get(
+            "/api/tenant"
+            "?include_unavailable=1"
+        )
+        self.assertEqual(
+            200,
+            expanded.status_code,
+        )
+
+        access = expanded.get_json()[
+            "marketplace_access"
+        ]
+
+        ozon_kz = next(
+            item
+            for item in access
+            if item["code"] == "ozon_kz"
+        )
+
+        self.assertFalse(
+            ozon_kz["is_allowed"]
+        )
+
+        checked = self.client.post(
+            "/api/tenant/marketplaces/check",
+            json={
+                "marketplace_code":
+                    "ozon_kz",
+                "source":
+                    "future-store-456",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(
+            200,
+            checked.status_code,
+        )
+
+        submitted = self.client.post(
+            "/api/tenant/marketplaces/connect",
+            json={
+                "marketplace_code":
+                    "ozon_kz",
+                "source":
+                    "future-store-456",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(
+            200,
+            submitted.status_code,
+        )
+        self.assertEqual(
+            "pending",
+            submitted.get_json()[
+                "result"
+            ]["approval_status"],
+        )
+
+        self.login(int(self.root["id"]))
+
+        approved = self.client.post(
+            f"/api/platform/tenants/"
+            f"{self.tenant_b}/marketplaces/"
+            "ozon_kz/approved",
+            json={},
+            headers=self.headers,
+        )
+        self.assertEqual(
+            200,
+            approved.status_code,
+        )
+
+        self.login(
+            int(self.company_admin["id"])
+        )
+
+        after = self.client.get(
+            "/api/tenant"
+        )
+        self.assertEqual(
+            200,
+            after.status_code,
+        )
+
+        access = after.get_json()[
+            "marketplace_access"
+        ]
+
+        ozon_kz = next(
+            item
+            for item in access
+            if item["code"] == "ozon_kz"
+        )
+
+        self.assertTrue(
+            ozon_kz["is_allowed"]
+        )
+        self.assertTrue(
+            ozon_kz["is_connected"]
+        )
 
     def test_operation_commands_use_the_requesting_company_connection(self) -> None:
         self.saas.set_marketplace_access(

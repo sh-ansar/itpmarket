@@ -90,6 +90,79 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertFalse(entitlement["marketplaces"]["wildberries"]["enabled"])
         self.assertEqual(2, entitlement["marketplaces"]["kaspi"]["position_limit"])
 
+    def test_plan_change_waits_for_current_period_end(self) -> None:
+        self._create_limited_plan()
+
+        current = self._activate(
+            "test_limited"
+        )
+
+        request = self.service.request_plan(
+            self.tenant_id,
+            "starter",
+            int(self.admin["id"]),
+        )
+
+        scheduled = (
+            self.service.review_subscription(
+                int(request["id"]),
+                "approved",
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertEqual(
+            "scheduled",
+            scheduled["status"],
+        )
+
+        self.assertEqual(
+            current["ends_at"],
+            scheduled["starts_at"],
+        )
+
+        entitlement = (
+            self.service.entitlement(
+                self.tenant_id
+            )
+        )
+
+        self.assertEqual(
+            "test_limited",
+            entitlement["subscription"][
+                "plan_code"
+            ],
+        )
+
+    def test_admin_can_assign_future_package_dates(self) -> None:
+        assigned = self.service.assign_plan(
+            self.tenant_id,
+            "starter",
+            int(self.admin["id"]),
+            starts_at=(
+                "2030-01-01T10:00:00+05:00"
+            ),
+            ends_at=(
+                "2030-02-01T10:00:00+05:00"
+            ),
+            review_note="Admin schedule",
+        )
+
+        self.assertEqual(
+            "scheduled",
+            assigned["status"],
+        )
+
+        self.assertEqual(
+            "2030-01-01T10:00:00+05:00",
+            assigned["starts_at"],
+        )
+
+        self.assertEqual(
+            "2030-02-01T10:00:00+05:00",
+            assigned["ends_at"],
+        )
+
     def test_daily_operation_limit_is_enforced_and_release_is_recoverable(self) -> None:
         self._create_limited_plan()
         self._activate("test_limited")

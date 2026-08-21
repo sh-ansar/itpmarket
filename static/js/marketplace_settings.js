@@ -48,9 +48,9 @@
 
   async function load() {
     try {
-      const data = await request('/api/tenant');
-      const allowed = (data.marketplace_access || []).filter(item => item.is_allowed);
-      host.innerHTML = allowed.length ? allowed.map(card).join('') : `<div class="empty">${esc(t('marketplace_no_access','Супер-администратор ещё не выдал компании доступные площадки.'))}</div>`;
+      const data = await request('/api/tenant?include_unavailable=1');
+      const marketplaces = data.marketplace_access || [];
+      host.innerHTML = marketplaces.length ? marketplaces.map(card).join('') : `<div class="empty">${esc(t('marketplace_no_access','Супер-администратор ещё не выдал компании доступные площадки.'))}</div>`;
       window.ITPUI?.translateTree(host);
     } catch (error) { host.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
   }

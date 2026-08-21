@@ -91,6 +91,12 @@
     const entitlement=data.subscription?.entitlement||{};
     const currentPlan=entitlement.subscription||{};
     const quotaRows=Object.entries(entitlement.marketplaces||{}).map(([code,value])=>`<div class="company-connection ${value.enabled?'connected':''}"><div><b>${esc(code)}</b><span>${value.enabled?'Доступна':'Выключена'}</span></div><small>Позиции ${Number(value.positions_used||0)} / ${value.position_limit==null?'∞':Number(value.position_limit)} · запуски ${Number(value.daily_operations_used||0)} / ${value.daily_operation_limit==null?'∞':Number(value.daily_operation_limit)}</small></div>`).join('');
+    const packagePlans=(data.subscription?.plans||[]).filter(plan=>plan.code!=='legacy');
+    const scheduledPackage=(data.subscription?.requests||[]).find(item=>item.status==='scheduled');
+    const packageCode=scheduledPackage?.plan_code||currentPlan.plan_code||packagePlans[0]?.code||'';
+    const packageOptions=packagePlans.map(plan=>`<option value="${esc(plan.code)}" ${plan.code===packageCode?'selected':''}>${esc(plan.name)} · ${Number(plan.price_amount||0).toLocaleString()} ${esc(plan.currency||'KZT')}</option>`).join('');
+    const packageStart=String(scheduledPackage?.starts_at||currentPlan.ends_at||'').slice(0,16);
+    const packageEnd=String(scheduledPackage?.ends_at||'').slice(0,16);
     title.textContent = tenant.name || t('company_profile', 'Компания');
     body.innerHTML = `
       <section class="detail-section platform-company-editor">
@@ -101,11 +107,24 @@
           <label>${esc(t('company_registration_number', 'Регистрационный номер / БИН'))}<input name="registration_number" value="${esc(tenant.registration_number)}" required></label>
           <label>${esc(t('company_email', 'Email компании'))}<input name="contact_email" type="email" value="${esc(tenant.contact_email)}" required></label>
           <label>${esc(t('company_phone', 'Телефон компании'))}<input name="contact_phone" value="${esc(tenant.contact_phone)}" required></label>
+          <label>${esc(t('company_legal_address', 'Legal address'))}<input name="legal_address" value="${esc(tenant.legal_address || '')}"></label>
+          <label>${esc(t('company_actual_address', 'Actual address'))}<input name="actual_address" value="${esc(tenant.actual_address || '')}"></label>
           <label>${esc(t('status', 'Статус'))}<select name="status"><option value="pending" ${tenant.status === 'pending' ? 'selected' : ''}>${esc(t('company_pending', 'На рассмотрении'))}</option><option value="approved" ${tenant.status === 'approved' ? 'selected' : ''}>${esc(t('company_approved', 'Подтверждена'))}</option><option value="rejected" ${tenant.status === 'rejected' ? 'selected' : ''}>${esc(t('company_rejected', 'Отклонена'))}</option><option value="blocked" ${tenant.status === 'blocked' ? 'selected' : ''}>${esc(t('company_blocked', 'Заблокирована'))}</option></select></label>
           <button class="primary" type="submit">${esc(t('save', 'Сохранить'))}</button>
         </form>
       </section>
-      <section class="detail-section"><div class="platform-section-title"><div><h3>Пакет и лимиты</h3><p>${entitlement.active?`${esc(currentPlan.plan_name||currentPlan.plan_code)} · ${Number(currentPlan.price_amount||0).toLocaleString()} ${esc(currentPlan.currency||'KZT')} · до ${esc(currentPlan.ends_at||'—')}`:esc(entitlement.message||'Нет активного пакета')}</p></div></div><div class="company-connections">${quotaRows||'<div>Лимиты ещё не назначены.</div>'}</div></section>
+      <section class="detail-section">
+        <div class="platform-section-title"><div><h3>Пакет и лимиты</h3><p>${entitlement.active?`${esc(currentPlan.plan_name||currentPlan.plan_code)} · ${Number(currentPlan.price_amount||0).toLocaleString()} ${esc(currentPlan.currency||'KZT')} · до ${esc(currentPlan.ends_at||'—')}`:esc(entitlement.message||'Нет активного пакета')}</p>${scheduledPackage?`<small>Следующий пакет: ${esc(scheduledPackage.plan_name||scheduledPackage.plan_code)} · с ${esc(scheduledPackage.starts_at||'—')} до ${esc(scheduledPackage.ends_at||'—')}</small>`:''}</div></div>
+        <form id="platformSubscriptionForm" class="platform-form-grid">
+          <label>Пакет<select name="plan_code" required>${packageOptions}</select></label>
+          <label>Действует с<input name="starts_at" type="datetime-local" value="${esc(packageStart)}"></label>
+          <label>Действует до<input name="ends_at" type="datetime-local" value="${esc(packageEnd)}"></label>
+          <label>Цена<input name="price_amount" type="number" min="0" step="0.01"></label>
+          <label class="wide">Комментарий<input name="review_note"></label>
+          <button class="primary" type="submit">Применить / запланировать</button>
+        </form>
+        <div class="company-connections">${quotaRows||'<div>Лимиты ещё не назначены.</div>'}</div>
+      </section>
       <section class="detail-section">
         <div class="platform-section-title"><div><h3>${esc(t('platform_available_marketplaces', 'Доступные площадки'))}</h3><p>${esc(t('platform_available_marketplaces_help', 'Это разрешения компании. Подключение выполняет её администратор по ссылке на магазин.'))}</p><small>${esc(t('platform_requested_marketplaces', 'Запрошено при регистрации'))}: ${esc((tenant.workspace_profile?.selected_integration_names || []).join(', ') || '—')}</small></div></div>
         ${approved ? '' : `<div class="platform-warning">${esc(t('platform_confirm_company_first', 'Сначала подтвердите компанию.'))}</div>`}
@@ -139,6 +158,21 @@
   });
 
   body.addEventListener('submit', async event => {
+    if (event.target.matches('#platformSubscriptionForm')) {
+      event.preventDefault();
+      try {
+        await api(`/api/platform/tenants/${currentTenantId}/subscription`, {
+          method:'PUT',
+          body:Object.fromEntries(new FormData(event.target))
+        });
+        toast('Пакет и период сохранены.');
+        await window.PlatformAdmin.load();
+        await openTenant(currentTenantId);
+      } catch (error) {
+        toast(error.message, true);
+      }
+      return;
+    }
     if (!event.target.matches('#platformCompanyForm')) return;
     event.preventDefault();
     try {

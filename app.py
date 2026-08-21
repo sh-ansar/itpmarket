@@ -2139,12 +2139,48 @@ def registration() -> Any:
         if password != str(request.form.get("password_confirm") or ""):
             flash("Пароли не совпадают.", "error")
             return render_template("register.html", **template_data), 400
+        phone_country_code = str(
+            request.form.get(
+                "phone_country_code"
+            )
+            or "+7"
+        ).strip()
+
+        raw_phone = str(
+            request.form.get("phone")
+            or ""
+        ).strip()
+
+        if raw_phone.startswith("+"):
+            phone_value = re.sub(
+                r"[^\d+]",
+                "",
+                raw_phone,
+            )
+        else:
+            phone_value = (
+                phone_country_code
+                + re.sub(
+                    r"\D",
+                    "",
+                    raw_phone,
+                )
+            )
+
         payload = {
             "company_name": request.form.get("company_name", ""),
             "registration_number": request.form.get("registration_number", ""),
             "contact_name": request.form.get("contact_name", ""),
             "email": email,
-            "phone": request.form.get("phone", ""),
+            "phone": phone_value,
+            "legal_address": request.form.get(
+                "legal_address",
+                "",
+            ),
+            "actual_address": request.form.get(
+                "actual_address",
+                "",
+            ),
             "capabilities": request.form.getlist("capabilities"),
             "marketplaces": request.form.getlist("marketplaces"),
             "estimated_products": request.form.get("estimated_products", "0"),
@@ -3249,8 +3285,21 @@ def api_users_recovery(user_id: int) -> Any:
 @permission_required("view_settings")
 def api_tenant_get() -> Any:
     user = current_user() or {}
+    include_unavailable = (
+        str(
+            request.args.get("include_unavailable")
+            or ""
+        ).strip().casefold()
+        in {"1", "true", "yes", "on"}
+        and has_permission(
+            user,
+            "manage_marketplaces",
+        )
+    )
+
     marketplace_access = SAAS.marketplace_access(
-        int(user["tenant_id"]), include_unavailable=False
+        int(user["tenant_id"]),
+        include_unavailable=include_unavailable,
     )
     return json_ok(
         tenant=current_tenant(),
@@ -3545,11 +3594,97 @@ def api_platform_subscription_review(subscription_id: int, decision: str) -> Any
             subscription_id, decision, int((current_user() or {})["id"]),
             term_days=(int(payload["term_days"]) if payload.get("term_days") not in (None, "") else None),
             price_amount=(float(payload["price_amount"]) if payload.get("price_amount") not in (None, "") else None),
+            starts_at=str(
+                payload.get("starts_at") or ""
+            ).strip() or None,
+            ends_at=str(
+                payload.get("ends_at") or ""
+            ).strip() or None,
             review_note=str(payload.get("review_note") or ""),
         )
         return json_ok(subscription=result)
     except (SubscriptionError, TypeError, ValueError) as exc:
         return json_error(str(exc), 409)
+
+
+@app.put("/api/platform/tenants/<int:tenant_id>/subscription")
+@platform_roles_required("superadmin")
+def api_platform_tenant_subscription_assign(
+    tenant_id: int,
+) -> Any:
+    payload = json_payload()
+
+    try:
+        result = (
+            subscription_service()
+            .assign_plan(
+                tenant_id=tenant_id,
+                plan_code=str(
+                    payload.get(
+                        "plan_code"
+                    )
+                    or ""
+                ),
+                actor_user_id=int(
+                    (current_user() or {})[
+                        "id"
+                    ]
+                ),
+                starts_at=str(
+                    payload.get(
+                        "starts_at"
+                    )
+                    or ""
+                ).strip() or None,
+                ends_at=str(
+                    payload.get(
+                        "ends_at"
+                    )
+                    or ""
+                ).strip() or None,
+                price_amount=(
+                    float(
+                        payload[
+                            "price_amount"
+                        ]
+                    )
+                    if payload.get(
+                        "price_amount"
+                    )
+                    not in (
+                        None,
+                        "",
+                    )
+                    else None
+                ),
+                review_note=str(
+                    payload.get(
+                        "review_note"
+                    )
+                    or ""
+                ),
+            )
+        )
+
+        return json_ok(
+            subscription=result,
+            snapshot=(
+                subscription_service()
+                .tenant_snapshot(
+                    tenant_id
+                )
+            ),
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
 
 
 @app.post("/api/platform/subscription-addons/requests/<int:request_id>/<decision>")
@@ -3652,7 +3787,14 @@ def api_platform_tenant_update(tenant_id: int) -> Any:
         actor_id = int((current_user() or {})["id"])
         if any(
             key in payload
-            for key in ("name", "registration_number", "contact_email", "contact_phone")
+            for key in (
+                "name",
+                "registration_number",
+                "contact_email",
+                "contact_phone",
+                "legal_address",
+                "actual_address",
+            )
         ):
             SAAS.update_tenant_profile(tenant_id, payload, actor_id)
         tenant = SAAS.update_tenant(tenant_id, payload, actor_id)

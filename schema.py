@@ -352,6 +352,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     workspace_profile_json TEXT NOT NULL DEFAULT '{}',
     contact_email TEXT,
     contact_phone TEXT,
+    legal_address TEXT NOT NULL DEFAULT '',
+    actual_address TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     approved_at TEXT
@@ -809,6 +811,8 @@ CREATE TABLE IF NOT EXISTS registration_requests (
     contact_name TEXT NOT NULL,
     email TEXT NOT NULL,
     phone TEXT,
+    legal_address TEXT NOT NULL DEFAULT '',
+    actual_address TEXT NOT NULL DEFAULT '',
     integrations_json TEXT NOT NULL DEFAULT '[]',
     workspace_profile_json TEXT NOT NULL DEFAULT '{}',
     estimated_products INTEGER NOT NULL DEFAULT 0,
@@ -1347,6 +1351,14 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE tenants ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
         if "workspace_profile_json" not in _columns(conn, "registration_requests"):
             conn.execute("ALTER TABLE registration_requests ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
+        if "legal_address" not in _columns(conn, "tenants"):
+            conn.execute("ALTER TABLE tenants ADD COLUMN legal_address TEXT NOT NULL DEFAULT ''")
+        if "actual_address" not in _columns(conn, "tenants"):
+            conn.execute("ALTER TABLE tenants ADD COLUMN actual_address TEXT NOT NULL DEFAULT ''")
+        if "legal_address" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN legal_address TEXT NOT NULL DEFAULT ''")
+        if "actual_address" not in _columns(conn, "registration_requests"):
+            conn.execute("ALTER TABLE registration_requests ADD COLUMN actual_address TEXT NOT NULL DEFAULT ''")
         if "run_date" not in _columns(conn, "operation_schedules"):
             conn.execute("ALTER TABLE operation_schedules ADD COLUMN run_date TEXT")
         if "tenant_seller_id" not in _columns(conn, "operation_schedules"):

@@ -60,8 +60,77 @@
           <label><span data-pi18n="company_registration_number">Регистрационный номер / БИН</span><input name="registration_number" required autocomplete="off"></label>
           <label><span data-pi18n="company_contact_name">Контактное лицо</span><input name="contact_name" required minlength="2" autocomplete="name"></label>
           <label><span data-pi18n="company_email">Email компании</span><input name="email" type="email" required autocomplete="email"></label>
-          <label><span data-pi18n="company_phone">Телефон компании</span><input name="phone" required autocomplete="tel" placeholder="+7 ..."></label>
-          <label><span data-pi18n="register_products_count">Примерное число товаров</span><input name="estimated_products" type="number" min="0" value="0"></label>
+          <label>
+            <span data-pi18n="phone_country_code">&#1050;&#1086;&#1076; &#1089;&#1090;&#1088;&#1072;&#1085;&#1099;</span>
+            <select
+              name="phone_country_code"
+              required
+              autocomplete="tel-country-code"
+            >
+              <option value="+7" selected>KZ +7</option>
+              <option value="+7">RU +7</option>
+              <option value="+998">UZ +998</option>
+              <option value="+996">KG +996</option>
+              <option value="+992">TJ +992</option>
+              <option value="+993">TM +993</option>
+              <option value="+994">AZ +994</option>
+              <option value="+374">AM +374</option>
+              <option value="+995">GE +995</option>
+              <option value="+375">BY +375</option>
+              <option value="+380">UA +380</option>
+              <option value="+90">TR +90</option>
+              <option value="+971">AE +971</option>
+              <option value="+86">CN +86</option>
+              <option value="+1">US/CA +1</option>
+              <option value="+44">GB +44</option>
+              <option value="+49">DE +49</option>
+            </select>
+          </label>
+
+          <label>
+            <span data-pi18n="phone_number">&#1053;&#1086;&#1084;&#1077;&#1088; &#1090;&#1077;&#1083;&#1077;&#1092;&#1086;&#1085;&#1072;</span>
+            <input
+              name="phone"
+              required
+              autocomplete="tel-national"
+              inputmode="tel"
+              placeholder="700 123 45 67"
+            >
+          </label>
+
+          <label class="wide">
+            <span data-pi18n="company_legal_address">&#1070;&#1088;&#1080;&#1076;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span>
+            <input
+              name="legal_address"
+              required
+              minlength="5"
+              autocomplete="street-address"
+            >
+          </label>
+
+          <label class="wide">
+            <span data-pi18n="company_actual_address">&#1060;&#1072;&#1082;&#1090;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span>
+            <input
+              name="actual_address"
+              required
+              minlength="5"
+              autocomplete="street-address"
+            >
+          </label>
+
+          <label>
+            <span data-pi18n="register_products_count">&#1055;&#1088;&#1080;&#1084;&#1077;&#1088;&#1085;&#1086;&#1077; &#1095;&#1080;&#1089;&#1083;&#1086; &#1090;&#1086;&#1074;&#1072;&#1088;&#1086;&#1074;</span>
+            <input
+              name="estimated_products"
+              type="number"
+              min="0"
+              max="10000000"
+              step="1"
+              inputmode="numeric"
+              required
+              placeholder="500"
+            >
+          </label>
           <label class="comment-field"><span data-pi18n="register_comment">Комментарий</span><textarea name="comment" rows="3" placeholder="Что продаёте и какие площадки нужны"></textarea></label>
         </div>
       </section>
