@@ -102,6 +102,8 @@
     "company_registration_number": "Тіркеу нөмірі / БСН",
     "company_email": "Компания email",
     "company_phone": "Компания телефоны",
+    "company_legal_address": "Заңды мекенжай",
+    "company_actual_address": "Нақты мекенжай",
     "company_contact_name": "Байланыс тұлғасы",
     "register_eyebrow": "ТІРКЕУ",
     "register_title": "Компания құрыңыз.",

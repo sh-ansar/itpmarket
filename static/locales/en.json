@@ -102,6 +102,8 @@
     "company_registration_number": "Registration number",
     "company_email": "Company email",
     "company_phone": "Company phone",
+    "company_legal_address": "Legal address",
+    "company_actual_address": "Actual address",
     "company_contact_name": "Contact person",
     "register_eyebrow": "REGISTRATION",
     "register_title": "Create a company.",

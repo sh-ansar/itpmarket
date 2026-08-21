@@ -116,7 +116,7 @@
     if(!$('#subscriptionPlans'))return;
     $('#subscriptionPlans').innerHTML=plans.filter(plan=>plan.code!=='legacy').map(plan=>planEditor(plan,features,marketplaces)).join('')+planEditor({},features,marketplaces);
     $('#subscriptionAddons').innerHTML=addons.map(addonEditor).join('')+addonEditor();
-    const pending=(data.pending_subscriptions||[]).map(item=>`<article class="subscription-review-row"><div><b>${esc(item.tenant_name)} · ${esc(item.plan_name)}</b><small>${esc(formatDate(item.requested_at))}</small></div><label>Цена<input data-review-price type="number" min="0" value="${item.price_amount}"></label><label>Срок<input data-review-term type="number" min="1" value="${item.term_days}"></label><button class="approve" data-subscription-review="${item.id}" data-decision="approved">Подтвердить</button><button class="decline" data-subscription-review="${item.id}" data-decision="rejected">Отклонить</button></article>`);
+    const pending=(data.pending_subscriptions||[]).map(item=>`<article class="subscription-review-row"><div><b>${esc(item.tenant_name)} · ${esc(item.plan_name)}</b><small>${esc(formatDate(item.requested_at))}</small></div><label>Цена<input data-review-price type="number" min="0" value="${item.price_amount}"></label><label>Срок<input data-review-term type="number" min="1" value="${item.term_days}"></label><label>С даты<input data-review-start type="datetime-local"></label><label>По дату<input data-review-end type="datetime-local"></label><button class="approve" data-subscription-review="${item.id}" data-decision="approved">Подтвердить</button><button class="decline" data-subscription-review="${item.id}" data-decision="rejected">Отклонить</button></article>`);
     const pendingAddons=(data.pending_addons||[]).map(item=>`<article class="subscription-review-row"><div><b>${esc(item.tenant_name)} · ${esc(item.addon_name)} · ${esc(marketplaceNames[item.marketplace_code]||item.marketplace_code)}</b><small>+${formatNumber(Number(item.extra_positions||0)*Number(item.quantity||1))} позиций · ${formatNumber(item.price_amount)} ${esc(item.currency)}</small></div><button class="approve" data-addon-review="${item.id}" data-decision="approved">Подтвердить</button><button class="decline" data-addon-review="${item.id}" data-decision="rejected">Отклонить</button></article>`);
     $('#subscriptionRequests').innerHTML=[...pending,...pendingAddons].join('')||'<div class="loading">Нет заявок на подтверждение.</div>';
   }
@@ -206,7 +206,7 @@
     }
     if(subscriptionReview){
       const row=subscriptionReview.closest('.subscription-review-row');
-      try{await api(`/api/platform/subscriptions/${subscriptionReview.dataset.subscriptionReview}/${subscriptionReview.dataset.decision}`,{method:'POST',body:{price_amount:row.querySelector('[data-review-price]')?.value,term_days:row.querySelector('[data-review-term]')?.value}});toast('Заявка на пакет обработана');await load();}catch(error){toast(error.message,true)}
+      try{await api(`/api/platform/subscriptions/${subscriptionReview.dataset.subscriptionReview}/${subscriptionReview.dataset.decision}`,{method:'POST',body:{price_amount:row.querySelector('[data-review-price]')?.value,term_days:row.querySelector('[data-review-term]')?.value,starts_at:row.querySelector('[data-review-start]')?.value,ends_at:row.querySelector('[data-review-end]')?.value}});toast('Заявка на пакет обработана');await load();}catch(error){toast(error.message,true)}
       return;
     }
     if(addonReview){
