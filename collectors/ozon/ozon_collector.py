@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -216,8 +216,14 @@ class Collector:
                     if not response.get("ok"):
                         blocked = str(response.get("status")).startswith("BLOCKED")
                         metrics["items_blocked" if blocked else "items_failed"] += 1
-                        source_status = "BLOCKED" if blocked else "PARTIAL"
-                        status = "PARTIAL"
+                        if blocked:
+                            source_status = "BLOCKED"
+                            status = "BLOCKED"
+                            stop_all = True
+                        else:
+                            source_status = "PARTIAL"
+                            if status != "BLOCKED":
+                                status = "PARTIAL"
                         print(f"Источник пропущен: {response.get('status')}")
                         break
                     metrics["pages_loaded"] += 1
@@ -590,29 +596,91 @@ class Collector:
 
     def sync_catalog(self, limit: int | None = None) -> dict[str, Any]:
         discovery = self.discover()
+
+        if result_exit_code(discovery) != 0:
+            discovery_status = str(
+                discovery.get("status") or "PARTIAL"
+            ).upper()
+
+            print(
+                "Discovery ???????? ???????????. "
+                "??????????? ? ?????????? ??? ?????????."
+            )
+
+            return {
+                "status": discovery_status,
+                "discovery": discovery,
+                "details": None,
+            }
+
         remaining = self.registry.select_articles(
-            "enrich-new", limit or 0, self.settings.stale_days, self.settings.max_task_attempts
+            "enrich-new",
+            limit or 0,
+            self.settings.stale_days,
+            self.settings.max_task_attempts,
         )
+
         if not remaining:
-            print("Новых или неполных карточек нет. Обновляем цены известных товаров.")
-            details = self.process("refresh-prices", limit)
+            print(
+                "????? ??? ???????? ???????? ???. "
+                "????????? ???? ????????? ???????."
+            )
+
+            details = self.process(
+                "refresh-prices",
+                limit,
+            )
         else:
-            details = self.process("enrich-new", limit)
+            details = self.process(
+                "enrich-new",
+                limit,
+            )
+
         return {
-            "status": combined_status(discovery, details),
+            "status": combined_status(
+                discovery,
+                details,
+            ),
             "discovery": discovery,
             "details": details,
         }
 
     def full_sync(self, limit: int | None = None) -> dict[str, Any]:
-        # Keep the same Selenium attachment alive for every stage.  Separate
-        # CLI processes detach from the debug target and can leave the next
-        # stage without an Ozon tab.
         catalog = self.sync_catalog(limit)
-        prices = self.process("refresh-prices", limit)
+
+        if result_exit_code(catalog) != 0:
+            return {
+                "status": str(
+                    catalog.get("status") or "PARTIAL"
+                ).upper(),
+                "catalog": catalog,
+                "prices": None,
+                "market": None,
+            }
+
+        prices = self.process(
+            "refresh-prices",
+            limit,
+        )
+
+        if result_exit_code(prices) != 0:
+            return {
+                "status": str(
+                    prices.get("status") or "PARTIAL"
+                ).upper(),
+                "catalog": catalog,
+                "prices": prices,
+                "market": None,
+            }
+
         market = self.market_search(limit)
+
         return {
-            "status": combined_status(catalog, prices, market),
+            "status": combined_status(
+                catalog,
+                prices,
+                market,
+            ),
             "catalog": catalog,
             "prices": prices,
             "market": market,
@@ -843,7 +911,10 @@ def main() -> int:
             print(settings.exports_dir)
         elif args.command == "stats":
             print(json.dumps(collector.registry.counts(), ensure_ascii=False, indent=2))
-        if args.command not in {"open-browser", "stats"}:
+        if (
+            args.command not in {"open-browser", "stats"}
+            and result_exit_code(result) == 0
+        ):
             materialize_tenant_catalog(
                 settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon",
                 tenant_seller_id=int(args.tenant_seller_id or 0) or None,

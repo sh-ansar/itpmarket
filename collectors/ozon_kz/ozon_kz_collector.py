@@ -243,6 +243,10 @@ def main() -> int:
     try:
         if args.action in {"sync-catalog", "full-sync"}:
             discovered = collector.discover(limit, int(args.pages))
+            require_success(
+                discovered,
+                "sync-catalog",
+            )
             if int(discovered.get("items_total") or 0) <= 0:
                 raise RuntimeError(
                     "Ozon.kz не отдал карточки продавца. Проверьте открытую вкладку "

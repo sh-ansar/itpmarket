@@ -571,6 +571,16 @@ class BrowserSession:
                     best_next_page = next_page
                 blocked = self.blocked_state(title, text, page_html)
                 saw_block = saw_block or blocked
+
+                if blocked:
+                    events.append(
+                        {
+                            "event": "blocked_detected",
+                            "unique_products": len(unique),
+                        }
+                    )
+                    break
+
                 scroll_state = self.driver.execute_script(
                     """
                     const root = document.scrollingElement || document.documentElement || document.body;
@@ -628,18 +638,53 @@ class BrowserSession:
         started = time.monotonic()
         events: list[dict[str, Any]] = []
         last_title = last_text = last_html = ""
+
         if navigate:
             try:
                 self.driver.get(url)
             except Exception as exc:
-                events.append({"event": "get_error", "error": f"{type(exc).__name__}: {exc}"})
+                events.append(
+                    {
+                        "event": "get_error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+
         for attempt in range(reloads + 1):
-            products, next_page, title, text, page_html, saw_block = self._collect_catalog_snapshot(
+            (
+                products,
+                next_page,
+                title,
+                text,
+                page_html,
+                saw_block,
+            ) = self._collect_catalog_snapshot(
                 url,
                 wait_seconds,
                 events,
             )
-            last_title, last_text, last_html = title, text, page_html
+
+            last_title = title
+            last_text = text
+            last_html = page_html
+
+            # Never retry or refresh an explicit challenge page.
+            if saw_block or self.blocked_state(
+                title,
+                text,
+                page_html,
+            ):
+                return {
+                    "ok": False,
+                    "status": "BLOCKED_CHALLENGE",
+                    "title": title,
+                    "html": page_html,
+                    "elapsed_ms": round(
+                        (time.monotonic() - started) * 1000
+                    ),
+                    "events": events,
+                }
+
             if products:
                 return {
                     "ok": True,
@@ -648,45 +693,89 @@ class BrowserSession:
                     "next_page": next_page,
                     "html": page_html,
                     "title": title,
-                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "elapsed_ms": round(
+                        (time.monotonic() - started) * 1000
+                    ),
                     "events": events,
                 }
+
             if attempt < reloads:
                 try:
                     self.driver.refresh()
                 except Exception as exc:
-                    events.append({"event": "refresh_error", "error": f"{type(exc).__name__}: {exc}"})
-                time.sleep(15 if saw_block else 8)
-        status = "BLOCKED_AFTER_RETRIES" if self.blocked_state(last_title, last_text, last_html) else "NO_CATALOG"
+                    events.append(
+                        {
+                            "event": "refresh_error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+
+                time.sleep(8)
+
+        status = (
+            "BLOCKED_AFTER_RETRIES"
+            if self.blocked_state(
+                last_title,
+                last_text,
+                last_html,
+            )
+            else "NO_CATALOG"
+        )
+
         return {
             "ok": False,
             "status": status,
             "title": last_title,
             "html": last_html,
-            "elapsed_ms": round((time.monotonic() - started) * 1000),
+            "elapsed_ms": round(
+                (time.monotonic() - started) * 1000
+            ),
             "events": events,
         }
 
-    def load_product_api(self, article: str, wait_seconds: int, reloads: int) -> dict[str, Any]:
+    def load_product_api(
+        self,
+        article: str,
+        wait_seconds: int,
+        reloads: int,
+    ) -> dict[str, Any]:
         assert self.driver is not None
+
         url = (
             f"{self.site_root}/api/composer-api.bx/page/json/v2"
             f"?url=/product/{article}&__rr=1"
         )
+
         started = time.monotonic()
         events: list[dict[str, Any]] = []
         last_title = last_text = last_html = ""
+
         try:
             self.driver.get(url)
         except Exception as exc:
-            events.append({"event": "get_error", "error": f"{type(exc).__name__}: {exc}"})
+            events.append(
+                {
+                    "event": "get_error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+
         for attempt in range(reloads + 1):
             deadline = time.monotonic() + wait_seconds
-            saw_block = False
+
             while time.monotonic() < deadline:
                 try:
-                    data, title, text, page_html = self._extract_json()
-                    last_title, last_text, last_html = title, text, page_html
+                    (
+                        data,
+                        title,
+                        text,
+                        page_html,
+                    ) = self._extract_json()
+
+                    last_title = title
+                    last_text = text
+                    last_html = page_html
+
                     if data is not None:
                         return {
                             "ok": True,
@@ -694,28 +783,82 @@ class BrowserSession:
                             "json": data,
                             "url": url,
                             "title": title,
-                            "elapsed_ms": round((time.monotonic() - started) * 1000),
+                            "elapsed_ms": round(
+                                (time.monotonic() - started)
+                                * 1000
+                            ),
                             "events": events,
                         }
-                    blocked = self.blocked_state(title, text, page_html)
-                    saw_block = saw_block or blocked
-                    events.append({"event": "poll", "attempt": attempt + 1, "blocked": blocked})
+
+                    blocked = self.blocked_state(
+                        title,
+                        text,
+                        page_html,
+                    )
+
+                    events.append(
+                        {
+                            "event": "poll",
+                            "attempt": attempt + 1,
+                            "blocked": blocked,
+                        }
+                    )
+
+                    # Explicit challenge => fail fast.
+                    if blocked:
+                        return {
+                            "ok": False,
+                            "status": "BLOCKED_CHALLENGE",
+                            "url": url,
+                            "title": title,
+                            "elapsed_ms": round(
+                                (time.monotonic() - started)
+                                * 1000
+                            ),
+                            "events": events,
+                        }
+
                 except Exception as exc:
-                    events.append({"event": "poll_error", "error": f"{type(exc).__name__}: {exc}"})
+                    events.append(
+                        {
+                            "event": "poll_error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+
                 time.sleep(2.5)
+
             if attempt < reloads:
                 try:
                     self.driver.refresh()
                 except Exception as exc:
-                    events.append({"event": "refresh_error", "error": f"{type(exc).__name__}: {exc}"})
-                time.sleep(15 if saw_block else 8)
-        status = "BLOCKED_AFTER_RETRIES" if self.blocked_state(last_title, last_text, last_html) else "NO_JSON"
+                    events.append(
+                        {
+                            "event": "refresh_error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+
+                time.sleep(8)
+
+        status = (
+            "BLOCKED_AFTER_RETRIES"
+            if self.blocked_state(
+                last_title,
+                last_text,
+                last_html,
+            )
+            else "NO_JSON"
+        )
+
         return {
             "ok": False,
             "status": status,
             "url": url,
             "title": last_title,
-            "elapsed_ms": round((time.monotonic() - started) * 1000),
+            "elapsed_ms": round(
+                (time.monotonic() - started) * 1000
+            ),
             "events": events,
         }
 

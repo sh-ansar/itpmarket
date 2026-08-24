@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import ssl
@@ -438,39 +438,176 @@ def save_offers(conn: sqlite3.Connection, run_id: str, product_id: str, offers: 
 
 def sync_catalog(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> tuple[int, int, int]:
     page = 1 if catalog_category_id(args) else 0
-    loaded = 0
     total_reported = 0
-    offers_seen = 0
     stamp = now_iso()
-    conn.execute(
-        "UPDATE halyk_products SET active=0 WHERE lower(seller_name)=lower(?)",
-        (str(args.seller_name),),
-    )
+
+    # Last-good-snapshot policy.
+    # Network/catalog errors must not modify the currently active catalog.
+    staged_products: dict[str, dict[str, Any]] = {}
+
     while True:
-        data = halyk_get_json(catalog_path(args), catalog_params(args, page), args.timeout)
-        products = data.get("products") if isinstance(data.get("products"), list) else []
-        total_reported = int(data.get("products_total") or total_reported or len(products))
+        data = halyk_get_json(
+            catalog_path(args),
+            catalog_params(args, page),
+            args.timeout,
+        )
+
+        products = (
+            data.get("products")
+            if isinstance(data.get("products"), list)
+            else []
+        )
+
+        total_reported = int(
+            data.get("products_total")
+            or total_reported
+            or len(products)
+        )
+
         if not products:
+            loaded = len(staged_products)
+
+            if (
+                total_reported > 0
+                and loaded < total_reported
+                and not (
+                    args.max_products
+                    and loaded >= args.max_products
+                )
+            ):
+                raise RuntimeError(
+                    "Halyk Market ?????? ???????? ???????: "
+                    f"???????? {loaded} ?? {total_reported}. "
+                    "????????? ???????? ?????? ????????."
+                )
+
             break
-        with conn:
-            for product in products:
-                if not isinstance(product, dict):
-                    continue
-                product_id = clean_text(product.get("id") or product.get("_id"))
-                if not product_id:
-                    continue
-                upsert_product(conn, product, args.seller_name, stamp)
-                offers_seen += save_offers(conn, run_id, product_id, extract_offers(product, args.seller_name), stamp)
-                loaded += 1
-                if args.max_products and loaded >= args.max_products:
-                    break
-        print(f"Halyk каталог: {loaded}/{total_reported}", flush=True)
-        if args.max_products and loaded >= args.max_products:
+
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+
+            product_id = clean_text(
+                product.get("id")
+                or product.get("_id")
+            )
+
+            if not product_id:
+                continue
+
+            staged_products[product_id] = product
+
+            if (
+                args.max_products
+                and len(staged_products) >= args.max_products
+            ):
+                break
+
+        loaded = len(staged_products)
+
+        print(
+            f"Halyk ???????: {loaded}/{total_reported}",
+            flush=True,
+        )
+
+        if (
+            args.max_products
+            and loaded >= args.max_products
+        ):
             break
-        if loaded >= total_reported:
+
+        if (
+            total_reported > 0
+            and loaded >= total_reported
+        ):
             break
+
         page += 1
         time.sleep(max(0.0, args.sleep))
+
+    loaded = len(staged_products)
+
+    intentionally_truncated = bool(
+        args.max_products
+        and loaded >= args.max_products
+        and total_reported > loaded
+    )
+
+    complete_snapshot = bool(
+        loaded > 0
+        and (
+            total_reported <= 0
+            or loaded >= total_reported
+        )
+    )
+
+    if (
+        total_reported > 0
+        and loaded < total_reported
+        and not intentionally_truncated
+    ):
+        raise RuntimeError(
+            "Halyk Market ?????? ???????? ???????: "
+            f"???????? {loaded} ?? {total_reported}. "
+            "????????? ???????? ?????? ????????."
+        )
+
+    if not staged_products:
+        print(
+            "Halyk Market ?? ?????? ??????. "
+            "????????? ???????? ?????? ????????.",
+            flush=True,
+        )
+        return total_reported, 0, 0
+
+    offers_seen = 0
+
+    # Database changes begin only after the network snapshot is ready.
+    # If a DB operation fails, the transaction is rolled back.
+    with conn:
+        for product in staged_products.values():
+            product_id = clean_text(
+                product.get("id")
+                or product.get("_id")
+            )
+
+            upsert_product(
+                conn,
+                product,
+                args.seller_name,
+                stamp,
+            )
+
+            offers_seen += save_offers(
+                conn,
+                run_id,
+                product_id,
+                extract_offers(
+                    product,
+                    args.seller_name,
+                ),
+                stamp,
+            )
+
+        # Only a complete marketplace snapshot is allowed to deactivate
+        # products that disappeared from the latest catalog.
+        if complete_snapshot:
+            conn.execute(
+                """
+                UPDATE halyk_products
+                SET active=0
+                WHERE lower(seller_name)=lower(?)
+                  AND (
+                      last_catalog_at IS NULL
+                      OR last_catalog_at<>?
+                  )
+                """,
+                (
+                    str(args.seller_name),
+                    stamp,
+                ),
+            )
+
     return total_reported, loaded, offers_seen
 
 
