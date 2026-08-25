@@ -1274,6 +1274,61 @@ CREATE TABLE IF NOT EXISTS subscription_payments (
 CREATE INDEX IF NOT EXISTS idx_subscription_payments_time
 ON subscription_payments(paid_at DESC,tenant_id);
 
+CREATE TABLE IF NOT EXISTS billing_sequences (
+    sequence_year INTEGER PRIMARY KEY,
+    last_value INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS subscription_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    subscription_id INTEGER NOT NULL,
+    invoice_number TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'issued',
+    months_count INTEGER NOT NULL,
+    unit_price REAL NOT NULL DEFAULT 0,
+    subtotal_amount REAL NOT NULL DEFAULT 0,
+    vat_rate REAL NOT NULL DEFAULT 0,
+    vat_amount REAL NOT NULL DEFAULT 0,
+    total_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    seller_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    buyer_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    line_items_json TEXT NOT NULL DEFAULT '[]',
+    issued_at TEXT NOT NULL,
+    due_at TEXT,
+    pdf_path TEXT NOT NULL DEFAULT '',
+    pdf_sha256 TEXT NOT NULL DEFAULT '',
+    created_by INTEGER,
+    cancelled_by INTEGER,
+    cancelled_at TEXT,
+    cancel_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id)
+        REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(subscription_id)
+        REFERENCES tenant_subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by)
+        REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(cancelled_by)
+        REFERENCES app_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_invoices_tenant
+ON subscription_invoices(
+    tenant_id,status,issued_at DESC
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_invoices_subscription
+ON subscription_invoices(
+    subscription_id,issued_at DESC
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invoices_open
+ON subscription_invoices(subscription_id)
+WHERE status<>'cancelled';
+
 CREATE TABLE IF NOT EXISTS tenant_subscription_addons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,
