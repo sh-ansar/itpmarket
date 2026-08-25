@@ -1,37 +1,440 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Spyon — Компания создана</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/public_onboarding.css') }}?v={{ version }}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Spyon - Application status</title>
+
+<script>
+(function(){
+  var p=localStorage.getItem('itp_theme')||'system',
+      d=p==='system'
+        ?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')
+        :p;
+  document.documentElement.dataset.theme=d;
+  document.documentElement.style.colorScheme=d;
+}());
+</script>
+
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}"
+>
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='css/public_onboarding.css') }}?v={{ version }}"
+>
 </head>
+
 <body class="completion-page">
+
+<header class="site-header compact">
+  <a
+    class="site-brand"
+    href="{{ url_for('landing') }}"
+  >
+    <img
+      src="{{ url_for('static', filename='images/spyon-logo.svg') }}"
+      alt="Spyon"
+    >
+    <span>Spyon</span>
+  </a>
+
+  <div class="site-tools">
+    <button
+      class="site-theme"
+      data-public-theme
+      aria-label="Theme"
+    >
+      <img
+        class="light-icon"
+        src="{{ url_for('static', filename='icons/sun.svg') }}"
+        alt=""
+      >
+      <img
+        class="dark-icon"
+        src="{{ url_for('static', filename='icons/moon.svg') }}"
+        alt=""
+      >
+    </button>
+
+    <div class="site-languages">
+      <button data-public-lang="ru">RU</button>
+      <button data-public-lang="kk">KZ</button>
+      <button data-public-lang="en">EN</button>
+    </div>
+  </div>
+</header>
+
 <main class="completion-layout">
+
   <section class="completion-hero">
     <div class="completion-card">
-      <span class="eyebrow">ЗАЯВКА ОТПРАВЛЕНА</span>
-      <h1>Компания {{ result.company_name }} ожидает подтверждения.</h1>
-      <p>Вы уже вошли в рабочее пространство. До решения супер-администратора операции и подключения площадок будут недоступны.</p>
-      <div class="completion-details">
-        <div class="completion-detail"><span>Компания</span><strong>{{ result.tenant.name }}</strong></div>
-        <div class="completion-detail"><span>Заявка</span><strong>#{{ result.request_id }}</strong></div>
-        <div class="completion-detail"><span>Статус</span><strong>На рассмотрении</strong></div>
-        <div class="completion-detail"><span>Email</span><strong>{{ result.user.email }}</strong></div>
-      </div>
-      <div class="credential-box">
-        <span>Код восстановления — сохраните в безопасном месте</span>
-        <code>{{ result.recovery_code }}</code>
-      </div>
-      <div class="completion-actions">
-        <a class="site-button primary" href="{{ url_for('app_index') }}">Открыть систему</a>
-        <a class="site-button secondary" href="{{ url_for('landing') }}">На главную</a>
-      </div>
+
+      <span
+        class="eyebrow"
+        data-pi18n="completion_eyebrow"
+      >
+        APPLICATION SENT
+      </span>
+
+      {% if result %}
+        <h1 data-pi18n="completion_title">
+          Your application has been received.
+        </h1>
+
+        <p data-pi18n="completion_intro">
+          Our team will review the company information,
+          selected marketplaces and subscription plan.
+        </p>
+
+        <div class="completion-details">
+
+          <div class="completion-detail">
+            <span data-pi18n="completion_company">
+              Company
+            </span>
+
+            <strong>
+              {{ result.tenant.name }}
+            </strong>
+          </div>
+
+          <div class="completion-detail">
+            <span data-pi18n="completion_request">
+              Application
+            </span>
+
+            <strong>
+              #{{ result.request_id }}
+            </strong>
+          </div>
+
+          <div
+            class="completion-detail"
+            {% if result.plan %}
+              data-plan-code="{{ result.plan.code }}"
+            {% endif %}
+          >
+            <span data-pi18n="completion_plan">
+              Plan
+            </span>
+
+            <strong>
+              {% if result.plan %}
+                {{ result.plan.name }}
+                &middot;
+                {{ '{:,.0f}'.format(
+                    result.plan.price_amount
+                ).replace(',', ' ') }}
+                {{ result.plan.currency }}
+              {% else %}
+                &middot;
+              {% endif %}
+            </strong>
+          </div>
+
+          <div class="completion-detail">
+            <span data-pi18n="completion_status">
+              Status
+            </span>
+
+            <strong data-pi18n="completion_status_review">
+              Under review
+            </strong>
+          </div>
+
+          <div class="completion-detail">
+            <span data-pi18n="completion_email">
+              Account email
+            </span>
+
+            <strong>
+              {{ result.user.email }}
+            </strong>
+          </div>
+
+        </div>
+
+        <div class="completion-marketplaces">
+          <span
+            class="completion-section-label"
+            data-pi18n="completion_marketplaces"
+          >
+            Requested marketplaces
+          </span>
+
+          <div class="completion-badges">
+            {% for marketplace in result.marketplaces %}
+              <span
+                class="completion-badge"
+                data-marketplace-code="{{ marketplace.code }}"
+              >
+                {{ marketplace.name }}
+              </span>
+            {% endfor %}
+          </div>
+        </div>
+
+        <section
+          class="application-timeline"
+          aria-label="Application progress"
+        >
+          <div
+            class="application-step is-complete"
+            data-state="complete"
+          >
+            <span class="application-step-marker">
+              &#10003;
+            </span>
+
+            <div>
+              <strong
+                data-pi18n="completion_step_submitted"
+              >
+                Application submitted
+              </strong>
+
+              <small
+                data-pi18n="completion_step_submitted_hint"
+              >
+                The application has been recorded.
+              </small>
+            </div>
+          </div>
+
+          <div
+            class="application-step is-current"
+            data-state="current"
+          >
+            <span class="application-step-marker">
+              2
+            </span>
+
+            <div>
+              <strong
+                data-pi18n="completion_step_review"
+              >
+                Review by our team
+              </strong>
+
+              <small
+                data-pi18n="completion_step_review_hint"
+              >
+                Company information is being reviewed.
+              </small>
+            </div>
+          </div>
+
+          <div
+            class="application-step"
+            data-state="pending"
+          >
+            <span class="application-step-marker">
+              3
+            </span>
+
+            <div>
+              <strong
+                data-pi18n="completion_step_company_approval"
+              >
+                Company approval
+              </strong>
+
+              <small
+                data-pi18n="completion_step_company_approval_hint"
+              >
+                Marketplace access will be confirmed.
+              </small>
+            </div>
+          </div>
+
+          <div
+            class="application-step{% if not result.payment_required %} is-skipped{% endif %}"
+            data-state="{% if result.payment_required %}pending{% else %}skipped{% endif %}"
+          >
+            <span class="application-step-marker">
+              4
+            </span>
+
+            <div>
+              <strong
+                data-pi18n="completion_step_payment"
+              >
+                Payment
+              </strong>
+
+              {% if result.payment_required %}
+                <small
+                  data-pi18n="completion_step_payment_hint"
+                >
+                  Payment becomes available after approval.
+                </small>
+              {% else %}
+                <small
+                  data-pi18n="completion_step_payment_trial"
+                >
+                  Payment is not required for the trial plan.
+                </small>
+              {% endif %}
+            </div>
+          </div>
+
+          <div
+            class="application-step"
+            data-state="pending"
+          >
+            <span class="application-step-marker">
+              5
+            </span>
+
+            <div>
+              <strong
+                data-pi18n="completion_step_activation"
+              >
+                Access activation
+              </strong>
+
+              <small
+                data-pi18n="completion_step_activation_hint"
+              >
+                Access will be activated after all required steps.
+              </small>
+            </div>
+          </div>
+        </section>
+
+        <div class="completion-next-action">
+          <strong
+            data-pi18n="completion_next_action"
+          >
+            Next action
+          </strong>
+
+          {% if result.payment_required %}
+            <p
+              data-pi18n="completion_next_action_paid"
+            >
+              Wait for company approval.
+              The payment step will follow after review.
+            </p>
+          {% else %}
+            <p
+              data-pi18n="completion_next_action_trial"
+            >
+              Wait for company approval.
+              The trial plan does not require payment.
+            </p>
+          {% endif %}
+        </div>
+
+        {% if result.recovery_code %}
+          <div class="credential-box">
+            <span
+              data-pi18n="completion_recovery"
+            >
+              Recovery code &mdash; store it securely
+            </span>
+
+            <code>
+              {{ result.recovery_code }}
+            </code>
+          </div>
+        {% endif %}
+
+        <div class="completion-actions">
+          <a
+            class="site-button primary"
+            href="{{ url_for('app_index') }}"
+            data-pi18n="completion_open_system"
+          >
+            Open system
+          </a>
+
+          <a
+            class="site-button secondary"
+            href="{{ url_for('landing') }}"
+            data-pi18n="completion_home"
+          >
+            Home
+          </a>
+        </div>
+
+      {% else %}
+
+        <h1 data-pi18n="completion_title">
+          Your application has been received.
+        </h1>
+
+        {% if request_id %}
+          <div class="completion-code">
+            <span data-pi18n="completion_request">
+              Application
+            </span>
+            <strong>#{{ request_id }}</strong>
+          </div>
+        {% endif %}
+
+        <p data-pi18n="completion_return_hint">
+          Return to the system to view the current company status.
+        </p>
+
+        <div class="completion-actions">
+          <a
+            class="site-button primary"
+            href="{{ url_for('login') }}"
+            data-pi18n="public_login"
+          >
+            Login
+          </a>
+
+          <a
+            class="site-button secondary"
+            href="{{ url_for('landing') }}"
+            data-pi18n="completion_home"
+          >
+            Home
+          </a>
+        </div>
+
+      {% endif %}
     </div>
   </section>
+
   <aside class="completion-side">
-    <div class="side-card"><h3>Что дальше</h3><ul><li>Супер-администратор проверит компанию.</li><li>После подтверждения он выдаст доступные площадки.</li><li>Администратор компании подключит каждую площадку обычной ссылкой на магазин.</li></ul></div>
+    <div class="side-card">
+      <h3 data-pi18n="completion_what_next">
+        What happens next
+      </h3>
+
+      <ul>
+        <li data-pi18n="completion_next_review">
+          Our team reviews the company details.
+        </li>
+
+        <li data-pi18n="completion_next_marketplaces">
+          Requested marketplaces are verified.
+        </li>
+
+        <li data-pi18n="completion_next_activation">
+          Access is activated after the required workflow is completed.
+        </li>
+      </ul>
+    </div>
   </aside>
+
 </main>
+
+<script
+  src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"
+></script>
+<script
+  src="{{ url_for('static', filename='js/public_i18n_runtime.js') }}?v={{ version }}"
+></script>
+<script
+  src="{{ url_for('static', filename='js/public.js') }}?v={{ version }}"
+></script>
+
 </body>
 </html>

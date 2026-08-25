@@ -2253,10 +2253,81 @@ def registration() -> Any:
             if locale not in {"ru", "kk", "en"}:
                 locale = "ru"
             DATA.save_preferences(int(user["id"]), {"locale": locale, "theme": str(profile.get("theme") or "system")})
-            subscription_service().request_plan(
-                int(provision["tenant_id"]),
-                str(payload["subscription_plan_code"]),
-                int(user["id"]),
+            subscription_request = (
+                subscription_service().request_plan(
+                    int(provision["tenant_id"]),
+                    str(payload["subscription_plan_code"]),
+                    int(user["id"]),
+                )
+            )
+
+            selected_plan = next(
+                (
+                    dict(item)
+                    for item in template_data[
+                        "subscription_plans"
+                    ]
+                    if str(
+                        item.get("code") or ""
+                    ).strip().casefold()
+                    == str(
+                        payload[
+                            "subscription_plan_code"
+                        ]
+                    ).strip().casefold()
+                ),
+                {},
+            )
+
+            marketplace_names = {
+                str(
+                    item.get("code") or ""
+                ): str(
+                    item.get("name")
+                    or item.get("code")
+                    or ""
+                )
+                for item in template_data[
+                    "public_integrations"
+                ]
+            }
+
+            selected_marketplaces = [
+                {
+                    "code": str(code),
+                    "name": marketplace_names.get(
+                        str(code),
+                        str(code),
+                    ),
+                }
+                for code in profile.get(
+                    "selected_integrations",
+                    [],
+                )
+            ]
+
+            completion_result.update(
+                {
+                    "subscription_request":
+                        subscription_request,
+                    "plan": selected_plan,
+                    "marketplaces":
+                        selected_marketplaces,
+                    "payment_required": (
+                        str(
+                            selected_plan.get("code")
+                            or ""
+                        ).casefold()
+                        != "trial"
+                        and float(
+                            selected_plan.get(
+                                "price_amount"
+                            )
+                            or 0
+                        )
+                        > 0
+                    ),
+                }
             )
             if verification_required:
                 try:
