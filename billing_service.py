@@ -32,6 +32,76 @@ def now_iso() -> str:
     )
 
 
+BILLING_SUPPLIER_SETTING_KEY = "billing_supplier"
+
+DEFAULT_BILLING_SUPPLIER = {
+    "name": "",
+    "registration_number": "",
+    "legal_address": "",
+    "iban": "",
+    "bank_name": "",
+    "bic": "",
+    "kbe": "",
+    "payment_purpose_code": "",
+    "vat_enabled": False,
+    "vat_rate": 0.0,
+    "invoice_due_days": 5,
+    "invoice_prefix": "SPY",
+    "service_name": (
+        "\u0410\u0431\u043e\u043d\u0435\u043d\u0442\u0441\u043a\u0430\u044f "
+        "\u043f\u043b\u0430\u0442\u0430 "
+        "\u043f\u043e "
+        "\u0441\u043e\u043f\u0440\u043e\u0432\u043e\u0436\u0434\u0435\u043d\u0438\u044e "
+        "\u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u043d\u043e\u0433\u043e "
+        "\u043f\u0440\u043e\u0434\u0443\u043a\u0442\u0430"
+    ),
+    "agreement_basis": "",
+    "executor_name": "",
+}
+
+BILLING_SUPPLIER_REQUIRED_FIELDS = (
+    "name",
+    "registration_number",
+    "legal_address",
+    "iban",
+    "bank_name",
+    "bic",
+)
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return False
+
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    text = str(value).strip().casefold()
+
+    if text in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+
+    if text in {
+        "",
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return False
+
+    raise SubscriptionError(
+        "???????????? ?????????? ????????."
+    )
+
+
 class BillingService:
     """Invoice and payment-domain operations for subscriptions."""
 
@@ -199,6 +269,398 @@ class BillingService:
 
         finally:
             conn.close()
+
+    @staticmethod
+    def _supplier_status(
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        missing = [
+            field
+            for field
+            in BILLING_SUPPLIER_REQUIRED_FIELDS
+            if not str(
+                value.get(field)
+                or ""
+            ).strip()
+        ]
+
+        result = dict(value)
+
+        result["is_complete"] = (
+            not missing
+        )
+
+        result["missing_fields"] = (
+            missing
+        )
+
+        return result
+
+    def supplier_settings(
+        self,
+    ) -> dict[str, Any]:
+        value = dict(
+            DEFAULT_BILLING_SUPPLIER
+        )
+
+        conn = self._connect()
+
+        try:
+            row = conn.execute(
+                """SELECT value_json
+                   FROM platform_settings
+                   WHERE setting_key=?""",
+                (
+                    BILLING_SUPPLIER_SETTING_KEY,
+                ),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row:
+            try:
+                stored = json.loads(
+                    str(
+                        row["value_json"]
+                        or "{}"
+                    )
+                )
+            except json.JSONDecodeError:
+                stored = {}
+
+            if isinstance(
+                stored,
+                dict,
+            ):
+                for key in (
+                    DEFAULT_BILLING_SUPPLIER
+                ):
+                    if key in stored:
+                        value[key] = (
+                            stored[key]
+                        )
+
+        try:
+            value[
+                "invoice_due_days"
+            ] = int(
+                value.get(
+                    "invoice_due_days",
+                    5,
+                )
+                or 5
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            value[
+                "invoice_due_days"
+            ] = 5
+
+        try:
+            value[
+                "vat_rate"
+            ] = float(
+                value.get(
+                    "vat_rate",
+                    0,
+                )
+                or 0
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            value[
+                "vat_rate"
+            ] = 0.0
+
+        try:
+            value[
+                "vat_enabled"
+            ] = _as_bool(
+                value.get(
+                    "vat_enabled",
+                    False,
+                )
+            )
+        except SubscriptionError:
+            value[
+                "vat_enabled"
+            ] = False
+
+        return self._supplier_status(
+            value
+        )
+
+    def update_supplier_settings(
+        self,
+        payload: dict[str, Any],
+        actor_user_id: int,
+    ) -> dict[str, Any]:
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise SubscriptionError(
+                "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0435 "
+                "\u0440\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b "
+                "\u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430."
+            )
+
+        current = (
+            self.supplier_settings()
+        )
+
+        # Derived fields are never persisted.
+        current.pop(
+            "is_complete",
+            None,
+        )
+        current.pop(
+            "missing_fields",
+            None,
+        )
+
+        text_fields = {
+            "name",
+            "registration_number",
+            "legal_address",
+            "iban",
+            "bank_name",
+            "bic",
+            "kbe",
+            "payment_purpose_code",
+            "invoice_prefix",
+            "service_name",
+            "agreement_basis",
+            "executor_name",
+        }
+
+        for key in text_fields:
+            if key not in payload:
+                continue
+
+            current[key] = str(
+                payload.get(key)
+                or ""
+            ).strip()
+
+        if "vat_enabled" in payload:
+            current[
+                "vat_enabled"
+            ] = _as_bool(
+                payload.get(
+                    "vat_enabled"
+                )
+            )
+
+        if "vat_rate" in payload:
+            try:
+                vat_rate = float(
+                    payload.get(
+                        "vat_rate"
+                    )
+                    or 0
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                raise SubscriptionError(
+                    "\u0421\u0442\u0430\u0432\u043a\u0430 "
+                    "\u041d\u0414\u0421 "
+                    "\u0434\u043e\u043b\u0436\u043d\u0430 "
+                    "\u0431\u044b\u0442\u044c "
+                    "\u0447\u0438\u0441\u043b\u043e\u043c."
+                )
+
+            if not 0 <= vat_rate <= 100:
+                raise SubscriptionError(
+                    "\u0421\u0442\u0430\u0432\u043a\u0430 "
+                    "\u041d\u0414\u0421 "
+                    "\u0434\u043e\u043b\u0436\u043d\u0430 "
+                    "\u0431\u044b\u0442\u044c "
+                    "\u043e\u0442 0 "
+                    "\u0434\u043e 100."
+                )
+
+            current[
+                "vat_rate"
+            ] = vat_rate
+
+        if "invoice_due_days" in payload:
+            raw_due_days = payload.get(
+                "invoice_due_days"
+            )
+
+            if raw_due_days in (
+                None,
+                "",
+            ):
+                raw_due_days = 5
+
+            try:
+                due_days = int(
+                    raw_due_days
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                raise SubscriptionError(
+                    "\u0421\u0440\u043e\u043a "
+                    "\u043e\u043f\u043b\u0430\u0442\u044b "
+                    "\u0441\u0447\u0451\u0442\u0430 "
+                    "\u0434\u043e\u043b\u0436\u0435\u043d "
+                    "\u0431\u044b\u0442\u044c "
+                    "\u0447\u0438\u0441\u043b\u043e\u043c."
+                )
+
+            if not 1 <= due_days <= 90:
+                raise SubscriptionError(
+                    "\u0421\u0440\u043e\u043a "
+                    "\u043e\u043f\u043b\u0430\u0442\u044b "
+                    "\u0441\u0447\u0451\u0442\u0430 "
+                    "\u0434\u043e\u043b\u0436\u0435\u043d "
+                    "\u0431\u044b\u0442\u044c "
+                    "\u043e\u0442 1 "
+                    "\u0434\u043e 90 "
+                    "\u0434\u043d\u0435\u0439."
+                )
+
+            current[
+                "invoice_due_days"
+            ] = due_days
+
+        prefix = str(
+            current.get(
+                "invoice_prefix"
+            )
+            or "SPY"
+        ).strip().upper()
+
+        prefix = "".join(
+            char
+            for char in prefix
+            if (
+                char.isascii()
+                and (
+                    char.isalnum()
+                    or char in {"-", "_"}
+                )
+            )
+        )
+
+        if not 2 <= len(prefix) <= 12:
+            raise SubscriptionError(
+                "\u041f\u0440\u0435\u0444\u0438\u043a\u0441 "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u0434\u043e\u043b\u0436\u0435\u043d "
+                "\u0441\u043e\u0434\u0435\u0440\u0436\u0430\u0442\u044c "
+                "\u043e\u0442 2 "
+                "\u0434\u043e 12 "
+                "\u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432."
+            )
+
+        current[
+            "invoice_prefix"
+        ] = prefix
+
+        if not current.get(
+            "vat_enabled"
+        ):
+            current[
+                "vat_rate"
+            ] = 0.0
+
+        stamp = now_iso()
+
+        conn = self._connect()
+
+        try:
+            conn.execute(
+                """INSERT INTO platform_settings(
+                       setting_key,
+                       value_json,
+                       updated_by,
+                       updated_at
+                   )
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(setting_key)
+                   DO UPDATE SET
+                       value_json=excluded.value_json,
+                       updated_by=excluded.updated_by,
+                       updated_at=excluded.updated_at""",
+                (
+                    BILLING_SUPPLIER_SETTING_KEY,
+                    json.dumps(
+                        current,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    int(actor_user_id),
+                    stamp,
+                ),
+            )
+
+            conn.execute(
+                """INSERT INTO platform_audit_log(
+                       actor_user_id,
+                       action,
+                       tenant_id,
+                       entity_type,
+                       entity_id,
+                       details_json,
+                       created_at
+                   )
+                   VALUES(
+                       ?,?,
+                       NULL,
+                       ?,?,?,?
+                   )""",
+                (
+                    int(actor_user_id),
+                    "billing_supplier_settings_updated",
+                    "platform_settings",
+                    BILLING_SUPPLIER_SETTING_KEY,
+                    json.dumps(
+                        {
+                            "updated_fields":
+                                sorted(
+                                    key
+                                    for key
+                                    in payload
+                                    if key
+                                    in DEFAULT_BILLING_SUPPLIER
+                                ),
+                            "is_complete":
+                                self._supplier_status(
+                                    current
+                                )[
+                                    "is_complete"
+                                ],
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    stamp,
+                ),
+            )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
+        return self._supplier_status(
+            current
+        )
 
     @staticmethod
     def allowed_billing_periods() -> list[int]:

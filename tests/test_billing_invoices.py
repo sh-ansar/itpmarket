@@ -468,6 +468,306 @@ class BillingInvoiceTests(unittest.TestCase):
             second["total_amount"],
         )
 
+    def test_supplier_settings_have_safe_defaults(self) -> None:
+        settings = (
+            self.billing
+            .supplier_settings()
+        )
+
+        self.assertFalse(
+            settings["is_complete"]
+        )
+
+        self.assertEqual(
+            "SPY",
+            settings[
+                "invoice_prefix"
+            ],
+        )
+
+        self.assertEqual(
+            5,
+            settings[
+                "invoice_due_days"
+            ],
+        )
+
+        self.assertEqual(
+            0.0,
+            settings["vat_rate"],
+        )
+
+        self.assertIn(
+            "name",
+            settings[
+                "missing_fields"
+            ],
+        )
+
+    def test_supplier_settings_are_persisted_and_audited(self) -> None:
+        updated = (
+            self.billing
+            .update_supplier_settings(
+                {
+                    "name":
+                        "ITP Mining",
+                    "registration_number":
+                        "161240002661",
+                    "legal_address":
+                        "Astana",
+                    "iban":
+                        "KZ20722S000001855383",
+                    "bank_name":
+                        "KASPI BANK",
+                    "bic":
+                        "CASPKZKA",
+                    "kbe":
+                        "17",
+                    "payment_purpose_code":
+                        "851",
+                    "vat_enabled":
+                        True,
+                    "vat_rate":
+                        16,
+                    "invoice_due_days":
+                        7,
+                    "invoice_prefix":
+                        "spy",
+                    "agreement_basis":
+                        "Contract",
+                    "executor_name":
+                        "Executor",
+                },
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertTrue(
+            updated["is_complete"]
+        )
+
+        self.assertEqual(
+            "SPY",
+            updated[
+                "invoice_prefix"
+            ],
+        )
+
+        self.assertEqual(
+            16.0,
+            updated[
+                "vat_rate"
+            ],
+        )
+
+        self.assertEqual(
+            7,
+            updated[
+                "invoice_due_days"
+            ],
+        )
+
+        reloaded = BillingService(
+            self.db_path
+        ).supplier_settings()
+
+        self.assertEqual(
+            "ITP Mining",
+            reloaded["name"],
+        )
+
+        self.assertEqual(
+            "KZ20722S000001855383",
+            reloaded["iban"],
+        )
+
+        self.assertTrue(
+            reloaded["is_complete"]
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        try:
+            stored = conn.execute(
+                """SELECT
+                       value_json,
+                       updated_by
+                   FROM platform_settings
+                   WHERE setting_key=
+                       'billing_supplier'"""
+            ).fetchone()
+
+            audit = conn.execute(
+                """SELECT
+                       action,
+                       entity_type,
+                       entity_id,
+                       details_json
+                   FROM platform_audit_log
+                   WHERE action=
+                       'billing_supplier_settings_updated'
+                   ORDER BY id DESC
+                   LIMIT 1"""
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(
+            stored
+        )
+
+        self.assertEqual(
+            int(self.admin["id"]),
+            int(stored[1]),
+        )
+
+        self.assertIsNotNone(
+            audit
+        )
+
+        self.assertEqual(
+            "platform_settings",
+            audit[1],
+        )
+
+        self.assertEqual(
+            "billing_supplier",
+            audit[2],
+        )
+
+        # Audit tracks changed field names,
+        # not full banking values.
+        self.assertNotIn(
+            "KZ20722S000001855383",
+            str(audit[3]),
+        )
+
+    def test_supplier_settings_validation(self) -> None:
+        with self.assertRaisesRegex(
+            SubscriptionError,
+            "\u041d\u0414\u0421",
+        ):
+            self.billing.update_supplier_settings(
+                {
+                    "vat_enabled": True,
+                    "vat_rate": 101,
+                },
+                int(self.admin["id"]),
+            )
+
+        with self.assertRaisesRegex(
+            SubscriptionError,
+            "\u043e\u0442 1 "
+            "\u0434\u043e 90",
+        ):
+            self.billing.update_supplier_settings(
+                {
+                    "invoice_due_days": 0,
+                },
+                int(self.admin["id"]),
+            )
+
+        with self.assertRaisesRegex(
+            SubscriptionError,
+            "\u041f\u0440\u0435\u0444\u0438\u043a\u0441",
+        ):
+            self.billing.update_supplier_settings(
+                {
+                    "invoice_prefix": "!",
+                },
+                int(self.admin["id"]),
+            )
+
+    def test_supplier_boolean_values_are_normalized(self) -> None:
+        disabled = (
+            self.billing
+            .update_supplier_settings(
+                {
+                    "vat_enabled": "false",
+                    "vat_rate": 16,
+                },
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertFalse(
+            disabled["vat_enabled"]
+        )
+
+        self.assertEqual(
+            0.0,
+            disabled["vat_rate"],
+        )
+
+        enabled = (
+            self.billing
+            .update_supplier_settings(
+                {
+                    "vat_enabled": "true",
+                    "vat_rate": 16,
+                },
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertTrue(
+            enabled["vat_enabled"]
+        )
+
+        self.assertEqual(
+            16.0,
+            enabled["vat_rate"],
+        )
+
+        with self.assertRaises(
+            SubscriptionError,
+        ):
+            self.billing.update_supplier_settings(
+                {
+                    "vat_enabled":
+                        "definitely",
+                },
+                int(self.admin["id"]),
+            )
+
+    def test_disabled_vat_is_stored_as_zero(self) -> None:
+        first = (
+            self.billing
+            .update_supplier_settings(
+                {
+                    "vat_enabled": True,
+                    "vat_rate": 16,
+                },
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertEqual(
+            16.0,
+            first["vat_rate"],
+        )
+
+        second = (
+            self.billing
+            .update_supplier_settings(
+                {
+                    "vat_enabled": False,
+                },
+                int(self.admin["id"]),
+            )
+        )
+
+        self.assertFalse(
+            second["vat_enabled"]
+        )
+
+        self.assertEqual(
+            0.0,
+            second["vat_rate"],
+        )
+
     def test_billing_service_restores_runtime_schema(self) -> None:
         conn = sqlite3.connect(
             self.db_path
