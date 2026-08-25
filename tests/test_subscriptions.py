@@ -71,10 +71,97 @@ class SubscriptionServiceTests(unittest.TestCase):
         request = self.service.request_plan(
             self.tenant_id, plan_code, int(self.admin["id"])
         )
-        return self.service.review_subscription(
-            int(request["id"]), "approved", int(self.admin["id"]),
-            term_days=31, price_amount=12000,
+
+        reviewed = self.service.review_subscription(
+            int(request["id"]),
+            "approved",
+            int(self.admin["id"]),
+            term_days=31,
+            price_amount=(
+                0
+                if plan_code == "trial"
+                else 12000
+            ),
         )
+
+        if plan_code == "trial":
+            return reviewed
+
+        self.assertEqual(
+            "awaiting_invoice",
+            reviewed["status"],
+        )
+
+        return self.service.review_subscription(
+            int(reviewed["id"]),
+            "approved",
+            int(self.admin["id"]),
+            _payment_confirmed=True,
+        )
+
+    def test_paid_plan_approval_waits_for_billing(self) -> None:
+        requested = self.service.request_plan(
+            self.tenant_id,
+            "starter",
+            int(self.admin["id"]),
+        )
+
+        reviewed = self.service.review_subscription(
+            int(requested["id"]),
+            "approved",
+            int(self.admin["id"]),
+        )
+
+        self.assertEqual(
+            "awaiting_invoice",
+            reviewed["status"],
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        try:
+            payment_count = int(
+                conn.execute(
+                    """SELECT COUNT(*)
+                       FROM subscription_payments
+                       WHERE subscription_id=?""",
+                    (int(reviewed["id"]),),
+                ).fetchone()[0]
+            )
+
+            tenant_plan = str(
+                conn.execute(
+                    """SELECT plan_code
+                       FROM tenants
+                       WHERE id=?""",
+                    (int(self.tenant_id),),
+                ).fetchone()[0]
+                or ""
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            0,
+            payment_count,
+        )
+
+        self.assertNotEqual(
+            "starter",
+            tenant_plan,
+        )
+
+        with self.assertRaisesRegex(
+            Exception,
+            "\u043d\u0435\u0437\u0430\u0432\u0435\u0440\u0448",
+        ):
+            self.service.request_plan(
+                self.tenant_id,
+                "growth",
+                int(self.admin["id"]),
+            )
 
     def test_plan_approval_snapshots_price_term_features_and_marketplaces(self) -> None:
         self._create_limited_plan()
@@ -103,12 +190,22 @@ class SubscriptionServiceTests(unittest.TestCase):
             int(self.admin["id"]),
         )
 
-        scheduled = (
-            self.service.review_subscription(
-                int(request["id"]),
-                "approved",
-                int(self.admin["id"]),
-            )
+        reviewed = self.service.review_subscription(
+            int(request["id"]),
+            "approved",
+            int(self.admin["id"]),
+        )
+
+        self.assertEqual(
+            "awaiting_invoice",
+            reviewed["status"],
+        )
+
+        scheduled = self.service.review_subscription(
+            int(reviewed["id"]),
+            "approved",
+            int(self.admin["id"]),
+            _payment_confirmed=True,
         )
 
         self.assertEqual(
@@ -121,10 +218,8 @@ class SubscriptionServiceTests(unittest.TestCase):
             scheduled["starts_at"],
         )
 
-        entitlement = (
-            self.service.entitlement(
-                self.tenant_id
-            )
+        entitlement = self.service.entitlement(
+            self.tenant_id
         )
 
         self.assertEqual(
@@ -135,7 +230,7 @@ class SubscriptionServiceTests(unittest.TestCase):
         )
 
     def test_admin_can_assign_future_package_dates(self) -> None:
-        assigned = self.service.assign_plan(
+        reviewed = self.service.assign_plan(
             self.tenant_id,
             "starter",
             int(self.admin["id"]),
@@ -146,6 +241,18 @@ class SubscriptionServiceTests(unittest.TestCase):
                 "2030-02-01T10:00:00+05:00"
             ),
             review_note="Admin schedule",
+        )
+
+        self.assertEqual(
+            "awaiting_invoice",
+            reviewed["status"],
+        )
+
+        assigned = self.service.review_subscription(
+            int(reviewed["id"]),
+            "approved",
+            int(self.admin["id"]),
+            _payment_confirmed=True,
         )
 
         self.assertEqual(

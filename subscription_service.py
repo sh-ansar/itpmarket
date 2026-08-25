@@ -777,12 +777,16 @@ class SubscriptionService:
                    WHERE tenant_id=?
                      AND status IN (
                          'pending',
+                         'awaiting_invoice',
+                         'awaiting_payment',
+                         'payment_review',
+                         'payment_rejected',
                          'scheduled'
                      )""",
                 (int(tenant_id),),
             ).fetchone():
                 raise SubscriptionError(
-                    "Заявка или следующая смена пакета уже существует."
+                    "У компании уже есть незавершённая заявка на пакет."
                 )
             stamp = now_iso()
             snapshot = json.dumps(self._plan_row(conn, int(plan["id"])), ensure_ascii=False, default=str)
@@ -815,6 +819,7 @@ class SubscriptionService:
         starts_at: str | None = None,
         ends_at: str | None = None,
         review_note: str = "",
+        _payment_confirmed: bool = False,
     ) -> dict[str, Any]:
         decision = str(
             decision
@@ -844,7 +849,13 @@ class SubscriptionService:
                     "Заявка на пакет не найдена."
                 )
 
-            if str(row["status"]) != "pending":
+            expected_status = (
+                "awaiting_invoice"
+                if _payment_confirmed
+                else "pending"
+            )
+
+            if str(row["status"]) != expected_status:
                 raise SubscriptionError(
                     "Заявка уже обработана."
                 )
@@ -853,6 +864,28 @@ class SubscriptionService:
 
             if decision == "approved":
                 now = datetime.now().astimezone()
+
+                tenant = conn.execute(
+                    """SELECT status
+                       FROM tenants
+                       WHERE id=?""",
+                    (int(row["tenant_id"]),),
+                ).fetchone()
+
+                if (
+                    not tenant
+                    or str(tenant["status"])
+                    not in {
+                        "approved",
+                        "active",
+                    }
+                ):
+                    raise SubscriptionError(
+                        "Сначала "
+                        "необходимо "
+                        "подтвердить "
+                        "компанию."
+                    )
 
                 days = int(
                     term_days
@@ -877,6 +910,15 @@ class SubscriptionService:
                         "отрицательной."
                     )
 
+                plan_code = str(
+                    conn.execute(
+                        """SELECT code
+                           FROM subscription_plans
+                           WHERE id=?""",
+                        (int(row["plan_id"]),),
+                    ).fetchone()[0]
+                )
+
                 current = self._active_subscription(
                     conn,
                     int(row["tenant_id"]),
@@ -895,13 +937,19 @@ class SubscriptionService:
                 ):
                     current = None
 
+                start_value = (
+                    starts_at
+                    if starts_at not in (None, "")
+                    else row["starts_at"]
+                )
+
                 explicit_start = (
-                    _parse_time(starts_at)
-                    if starts_at
+                    _parse_time(start_value)
+                    if start_value
                     else None
                 )
 
-                if starts_at and explicit_start is None:
+                if start_value and explicit_start is None:
                     raise SubscriptionError(
                         "Некорректная дата "
                         "начала пакета."
@@ -927,16 +975,93 @@ class SubscriptionService:
                         else now
                     )
 
+                end_value = (
+                    ends_at
+                    if ends_at not in (None, "")
+                    else row["ends_at"]
+                )
+
                 explicit_end = (
-                    _parse_time(ends_at)
-                    if ends_at
+                    _parse_time(end_value)
+                    if end_value
                     else None
                 )
 
-                if ends_at and explicit_end is None:
+                if end_value and explicit_end is None:
                     raise SubscriptionError(
                         "Некорректная дата "
                         "окончания пакета."
+                    )
+
+                if (
+                    plan_code != "trial"
+                    and not _payment_confirmed
+                ):
+                    if (
+                        explicit_start
+                        and explicit_end
+                        and explicit_end <= explicit_start
+                    ):
+                        raise SubscriptionError(
+                            "Дата "
+                            "окончания "
+                            "должна "
+                            "быть "
+                            "позже "
+                            "даты "
+                            "начала."
+                        )
+
+                    approved_start = (
+                        explicit_start.isoformat(
+                            timespec="seconds"
+                        )
+                        if explicit_start
+                        else None
+                    )
+
+                    approved_end = (
+                        explicit_end.isoformat(
+                            timespec="seconds"
+                        )
+                        if explicit_end
+                        else None
+                    )
+
+                    conn.execute(
+                        """UPDATE tenant_subscriptions
+                           SET status='awaiting_invoice',
+                               reviewed_by=?,
+                               reviewed_at=?,
+                               starts_at=?,
+                               ends_at=?,
+                               term_days=?,
+                               price_amount=?,
+                               review_note=?,
+                               updated_at=?
+                           WHERE id=?""",
+                        (
+                            int(actor_user_id),
+                            stamp,
+                            approved_start,
+                            approved_end,
+                            days,
+                            price,
+                            review_note,
+                            stamp,
+                            int(subscription_id),
+                        ),
+                    )
+
+                    conn.commit()
+
+                    return dict(
+                        conn.execute(
+                            """SELECT *
+                               FROM tenant_subscriptions
+                               WHERE id=?""",
+                            (int(subscription_id),),
+                        ).fetchone()
                     )
 
                 end_dt = (
@@ -1039,15 +1164,6 @@ class SubscriptionService:
                         stamp,
                         int(subscription_id),
                     ),
-                )
-
-                plan_code = str(
-                    conn.execute(
-                        """SELECT code
-                           FROM subscription_plans
-                           WHERE id=?""",
-                        (int(row["plan_id"]),),
-                    ).fetchone()[0]
                 )
 
                 if new_status == "active":
