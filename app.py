@@ -2140,11 +2140,15 @@ def registration() -> Any:
             flash("Пароли не совпадают.", "error")
             return render_template("register.html", **template_data), 400
         phone_country_code = str(
-            request.form.get(
-                "phone_country_code"
-            )
-            or "+7"
+            request.form.get("phone_country_code") or ""
         ).strip()
+
+        if not re.fullmatch(r"\+\d{1,4}", phone_country_code):
+            flash("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0434 \u0441\u0442\u0440\u0430\u043d\u044b.", "error")
+            return render_template(
+                "register.html",
+                **template_data,
+            ), 400
 
         raw_phone = str(
             request.form.get("phone")
@@ -2166,6 +2170,29 @@ def registration() -> Any:
                     raw_phone,
                 )
             )
+
+        plan_code = str(
+            request.form.get("plan_code") or ""
+        ).strip().casefold()
+
+        public_plan_codes = {
+            str(item.get("code") or "").strip().casefold()
+            for item in template_data["subscription_plans"]
+        }
+
+        if not plan_code:
+            flash("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u0430\u043a\u0435\u0442.", "error")
+            return render_template(
+                "register.html",
+                **template_data,
+            ), 400
+
+        if plan_code not in public_plan_codes:
+            flash("\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0439 \u043f\u0430\u043a\u0435\u0442 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d.", "error")
+            return render_template(
+                "register.html",
+                **template_data,
+            ), 400
 
         payload = {
             "company_name": request.form.get("company_name", ""),
@@ -2192,7 +2219,7 @@ def registration() -> Any:
             "template_code": request.form.get("template_code", ""),
             "theme": request.form.get("theme", ""),
             "source_page": "public_registration",
-            "subscription_plan_code": request.form.get("plan_code", "starter"),
+            "subscription_plan_code": plan_code,
         }
         try:
             validate_password(password, email, str(payload["contact_name"] or payload["company_name"]))
@@ -2228,7 +2255,7 @@ def registration() -> Any:
             DATA.save_preferences(int(user["id"]), {"locale": locale, "theme": str(profile.get("theme") or "system")})
             subscription_service().request_plan(
                 int(provision["tenant_id"]),
-                str(payload.get("subscription_plan_code") or "starter"),
+                str(payload["subscription_plan_code"]),
                 int(user["id"]),
             )
             if verification_required:

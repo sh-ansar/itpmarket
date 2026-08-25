@@ -1316,10 +1316,23 @@ class SaaSService:
             raise ValueError("Необходимо согласие с Политикой конфиденциальности.")
         if not bool(payload.get("terms_consent")):
             raise ValueError("Необходимо принять Условия использования.")
+        raw_estimated_value = payload.get("estimated_products")
+        is_public_registration = (
+            str(payload.get("source_page") or "")
+            == "public_registration"
+        )
+
+        if (
+            is_public_registration
+            and raw_estimated_value in (None, "")
+        ):
+            raise ValueError(
+                "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0440\u0438\u043c\u0435\u0440\u043d\u043e\u0435 \u0447\u0438\u0441\u043b\u043e \u0442\u043e\u0432\u0430\u0440\u043e\u0432."
+            )
+
         raw_estimated = str(
-            payload.get("estimated_products")
-            if payload.get("estimated_products")
-            not in (None, "")
+            raw_estimated_value
+            if raw_estimated_value not in (None, "")
             else "0"
         ).strip()
 
@@ -1340,6 +1353,11 @@ class SaaSService:
         estimated = int(
             raw_estimated
         )
+
+        if is_public_registration and estimated < 1:
+            raise ValueError(
+                "\u041f\u0440\u0438\u043c\u0435\u0440\u043d\u043e\u0435 \u0447\u0438\u0441\u043b\u043e \u0442\u043e\u0432\u0430\u0440\u043e\u0432 \u0434\u043e\u043b\u0436\u043d\u043e \u0431\u044b\u0442\u044c \u043d\u0435 \u043c\u0435\u043d\u044c\u0448\u0435 1."
+            )
 
         if estimated > 10_000_000:
             raise ValueError(

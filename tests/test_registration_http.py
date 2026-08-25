@@ -68,6 +68,7 @@ class RegistrationHttpTests(unittest.TestCase):
                 "legal_address": "Astana, Legal Street 10",
                 "actual_address": "Astana, Office Street 20",
                 "estimated_products": "250",
+                "plan_code": "growth",
                 "marketplaces": ["kaspi", "ozon_kz"],
                 "password": "SafeVaultNumber927!",
                 "password_confirm": "SafeVaultNumber927!",
@@ -96,6 +97,126 @@ class RegistrationHttpTests(unittest.TestCase):
         self.assertEqual(("pending", "BIN-HTTP-001"), tenant)
         self.assertEqual(("pending", tenant_id), request_row)
         self.assertFalse(any(item["is_allowed"] for item in self.saas.marketplace_access(tenant_id)))
+
+    def test_registration_rejects_missing_required_commercial_fields(self) -> None:
+        def csrf_token() -> str:
+            page = self.client.get("/register")
+            self.assertEqual(200, page.status_code)
+            match = re.search(
+                r'name="csrf_token" value="([^"]+)"',
+                page.get_data(as_text=True),
+            )
+            self.assertIsNotNone(match)
+            return match.group(1)
+
+        def valid_form(email: str, registration_number: str) -> dict:
+            return {
+                "csrf_token": csrf_token(),
+                "company_name": "Validation Company",
+                "registration_number": registration_number,
+                "contact_name": "Validation Owner",
+                "email": email,
+                "phone_country_code": "+7",
+                "phone": "700 123 45 67",
+                "legal_address": "Astana, Legal Street 10",
+                "actual_address": "Astana, Office Street 20",
+                "estimated_products": "250",
+                "plan_code": "growth",
+                "marketplaces": ["kaspi"],
+                "password": "SafeVaultNumber927!",
+                "password_confirm": "SafeVaultNumber927!",
+                "privacy_consent": "1",
+                "terms_consent": "1",
+                "locale": "ru",
+            }
+
+        missing_plan = valid_form(
+            "missing-plan@example.com",
+            "BIN-MISSING-PLAN",
+        )
+        missing_plan.pop("plan_code")
+
+        response = self.client.post(
+            "/register",
+            data=missing_plan,
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn(
+            "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u0430\u043a\u0435\u0442",
+            response.get_data(as_text=True),
+        )
+        self.assertIsNone(
+            self.auth.get_user_by_email(
+                "missing-plan@example.com"
+            )
+        )
+
+        invalid_plan = valid_form(
+            "invalid-plan@example.com",
+            "BIN-INVALID-PLAN",
+        )
+        invalid_plan["plan_code"] = "does-not-exist"
+
+        response = self.client.post(
+            "/register",
+            data=invalid_plan,
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn(
+            "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d",
+            response.get_data(as_text=True),
+        )
+        self.assertIsNone(
+            self.auth.get_user_by_email(
+                "invalid-plan@example.com"
+            )
+        )
+
+        missing_country = valid_form(
+            "missing-country@example.com",
+            "BIN-MISSING-COUNTRY",
+        )
+        missing_country.pop("phone_country_code")
+
+        response = self.client.post(
+            "/register",
+            data=missing_country,
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn(
+            "\u043a\u043e\u0434 \u0441\u0442\u0440\u0430\u043d\u044b",
+            response.get_data(as_text=True),
+        )
+        self.assertIsNone(
+            self.auth.get_user_by_email(
+                "missing-country@example.com"
+            )
+        )
+
+        zero_products = valid_form(
+            "zero-products@example.com",
+            "BIN-ZERO-PRODUCTS",
+        )
+        zero_products["estimated_products"] = "0"
+
+        response = self.client.post(
+            "/register",
+            data=zero_products,
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(
+            "\u043d\u0435 \u043c\u0435\u043d\u044c\u0448\u0435 1",
+            response.get_data(as_text=True),
+        )
+        self.assertIsNone(
+            self.auth.get_user_by_email(
+                "zero-products@example.com"
+            )
+        )
 
     def test_registration_public_bundle_has_complete_utf8_translations(self) -> None:
         source = (
