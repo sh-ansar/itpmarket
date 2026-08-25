@@ -50,7 +50,7 @@ class RegistrationHttpTests(unittest.TestCase):
         page = self.client.get("/register")
         self.assertEqual(200, page.status_code)
         html = page.get_data(as_text=True)
-        token = re.search(r'name="csrf_token" value="([^"]+)"', html)
+        token = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', html)
         self.assertIsNotNone(token)
         self.assertIn('name="registration_number"', html)
         self.assertNotIn('name="launch_mode"', html)
@@ -103,7 +103,7 @@ class RegistrationHttpTests(unittest.TestCase):
             page = self.client.get("/register")
             self.assertEqual(200, page.status_code)
             match = re.search(
-                r'name="csrf_token" value="([^"]+)"',
+                r'name="csrf_token"[^>]*value="([^"]+)"',
                 page.get_data(as_text=True),
             )
             self.assertIsNotNone(match)

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Spyon — Регистрация компании</title>
+<title>Spyon - Company registration</title>
 <script>(function(){var p=localStorage.getItem('itp_theme')||'system',d=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.dataset.theme=d;document.documentElement.style.colorScheme=d;}());</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/public_onboarding.css') }}?v={{ version }}">
@@ -15,204 +15,683 @@
   <a class="site-brand" href="{{ url_for('landing') }}">
     <img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span>Spyon</span>
   </a>
+
   <div class="site-tools">
     <button class="site-theme" data-public-theme aria-label="Theme">
       <img class="light-icon" src="{{ url_for('static', filename='icons/sun.svg') }}" alt="">
       <img class="dark-icon" src="{{ url_for('static', filename='icons/moon.svg') }}" alt="">
     </button>
+
     <div class="site-languages">
-      <button data-public-lang="ru">RU</button><button data-public-lang="kk">KZ</button><button data-public-lang="en">EN</button>
+      <button data-public-lang="ru">RU</button>
+      <button data-public-lang="kk">KZ</button>
+      <button data-public-lang="en">EN</button>
     </div>
-    <a class="site-button secondary" href="{{ url_for('login') }}" data-pi18n="public_login">Войти</a>
+
+    <a
+      class="site-button secondary"
+      href="{{ url_for('login') }}"
+      data-pi18n="public_login"
+    >Login</a>
   </div>
 </header>
 
-<main class="onboarding-layout" id="registrationApp">
+<main
+  class="onboarding-layout registration-wizard-layout"
+  id="registrationApp"
+>
   <section class="onboarding-hero reveal">
-    <span class="eyebrow" data-pi18n="register_eyebrow">РЕГИСТРАЦИЯ</span>
-    <h1 data-pi18n="register_title">Создайте компанию.</h1>
-    <p data-pi18n="register_intro">После отправки компания получит статус «На рассмотрении». Супер-администратор проверит данные и откроет нужные площадки.</p>
+    <span class="eyebrow" data-pi18n="register_eyebrow">
+      REGISTRATION
+    </span>
+
+    <h1 data-pi18n="register_title">
+      Create a company.
+    </h1>
+
+    <p data-pi18n="register_intro">
+      Submit the application for review by our team.
+    </p>
+
     <div class="onboarding-points">
-      <span data-pi18n="register_point_company">Все реквизиты компании обязательны</span>
-      <span data-pi18n="register_point_review">До подтверждения сбор данных недоступен</span>
-      <span data-pi18n="register_point_access">Площадки выдаются на уровне компании</span>
+      <span data-pi18n="register_point_company">
+        Company details are required
+      </span>
+      <span data-pi18n="register_point_review">
+        Data collection is unavailable before approval
+      </span>
+      <span data-pi18n="register_point_access">
+        Marketplace access is assigned to the company
+      </span>
     </div>
   </section>
 
   <section class="onboarding-card">
-    <form id="registrationForm" class="onboarding-form" method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="locale" id="registrationLocale" value="ru">
-      <input type="hidden" name="template_code" value="{{ default_workspace_template_code }}">
-      <input type="hidden" name="theme" value="system">
+    <form
+      id="registrationForm"
+      class="onboarding-form registration-wizard-form"
+      method="post"
+    >
+      <input
+        type="hidden"
+        name="csrf_token"
+        value="{{ csrf_token }}"
+      >
+      <input
+        type="hidden"
+        name="locale"
+        id="registrationLocale"
+        value="{{ request.form.get('locale', 'ru') }}"
+      >
+      <input
+        type="hidden"
+        name="template_code"
+        value="{{ default_workspace_template_code }}"
+      >
+      <input
+        type="hidden"
+        name="theme"
+        value="system"
+      >
 
       {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, message in messages %}<div class="form-alert {{ category }}">{{ message }}</div>{% endfor %}
+        {% for category, message in messages %}
+          <div class="form-alert {{ category }}">
+            {{ message }}
+          </div>
+        {% endfor %}
       {% endwith %}
 
-      <section class="wizard-section" data-registration-step data-step-title-key="register_company_data">
+      <div class="required-fields-note">
+        <strong>*</strong>
+        <span data-pi18n="register_required_fields_note">
+          Required fields
+        </span>
+      </div>
+
+      <!-- STEP 1: COMPANY -->
+      <section
+        class="wizard-section is-current-step"
+        data-registration-step
+        data-step-code="company"
+        data-step-title-key="register_company_data"
+      >
         <div class="section-head">
-          <div><span class="eyebrow" data-pi18n="register_step_company">КОМПАНИЯ</span><h2 data-pi18n="register_company_data">Данные компании</h2></div>
-          <p data-pi18n="register_required_hint">Заполните реальные данные — они нужны для подтверждения.</p>
+          <div>
+            <span
+              class="eyebrow"
+              data-pi18n="register_step_company"
+            >COMPANY</span>
+
+            <h2 data-pi18n="register_company_data">
+              Company details
+            </h2>
+          </div>
+
+          <p data-pi18n="register_required_hint">
+            Enter real company information.
+          </p>
         </div>
+
         <div class="registration-fields">
-          <label class="wide" style="grid-column:1/-1"><span data-pi18n="company_name">Название компании</span><input name="company_name" required minlength="2" autocomplete="organization"></label>
-          <label><span data-pi18n="company_registration_number">Регистрационный номер / БИН</span><input name="registration_number" required autocomplete="off"></label>
-          <label><span data-pi18n="company_contact_name">Контактное лицо</span><input name="contact_name" required minlength="2" autocomplete="name"></label>
-          <label><span data-pi18n="company_email">Email компании</span><input name="email" type="email" required autocomplete="email"></label>
-          <label>
-            <span data-pi18n="phone_country_code">&#1050;&#1086;&#1076; &#1089;&#1090;&#1088;&#1072;&#1085;&#1099;</span>
-            <select
-              name="phone_country_code"
+          <label class="wide">
+            <span
+              class="field-label"
+              data-pi18n="company_name"
+            >Company name</span>
+            <input
+              name="company_name"
               required
-              autocomplete="tel-country-code"
+              minlength="2"
+              autocomplete="organization"
+              value="{{ request.form.get('company_name', '') }}"
             >
-              <option value="+7" selected>KZ +7</option>
-              <option value="+7">RU +7</option>
-              <option value="+998">UZ +998</option>
-              <option value="+996">KG +996</option>
-              <option value="+992">TJ +992</option>
-              <option value="+993">TM +993</option>
-              <option value="+994">AZ +994</option>
-              <option value="+374">AM +374</option>
-              <option value="+995">GE +995</option>
-              <option value="+375">BY +375</option>
-              <option value="+380">UA +380</option>
-              <option value="+90">TR +90</option>
-              <option value="+971">AE +971</option>
-              <option value="+86">CN +86</option>
-              <option value="+1">US/CA +1</option>
-              <option value="+44">GB +44</option>
-              <option value="+49">DE +49</option>
-            </select>
           </label>
 
           <label>
-            <span data-pi18n="phone_number">&#1053;&#1086;&#1084;&#1077;&#1088; &#1090;&#1077;&#1083;&#1077;&#1092;&#1086;&#1085;&#1072;</span>
+            <span
+              class="field-label"
+              data-pi18n="company_registration_number"
+            >Registration number / BIN</span>
             <input
-              name="phone"
+              name="registration_number"
               required
-              autocomplete="tel-national"
-              inputmode="tel"
-              placeholder="700 123 45 67"
+              value="{{ request.form.get('registration_number', '') }}"
+            >
+          </label>
+
+          <label>
+            <span
+              class="field-label"
+              data-pi18n="company_contact_name"
+            >Contact person</span>
+            <input
+              name="contact_name"
+              required
+              minlength="2"
+              autocomplete="name"
+              value="{{ request.form.get('contact_name', '') }}"
             >
           </label>
 
           <label class="wide">
-            <span data-pi18n="company_legal_address">&#1070;&#1088;&#1080;&#1076;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span>
+            <span
+              class="field-label"
+              data-pi18n="company_email"
+            >Company email</span>
             <input
+              id="registrationEmail"
+              name="email"
+              type="email"
+              required
+              autocomplete="email"
+              value="{{ request.form.get('email', '') }}"
+            >
+          </label>
+
+          {% set phone_code = request.form.get('phone_country_code', '+7') %}
+
+          <label class="wide phone-field">
+            <span
+              class="field-label"
+              data-pi18n="company_phone"
+            >Company phone</span>
+
+            <span class="phone-composite">
+              <select
+                name="phone_country_code"
+                required
+                autocomplete="tel-country-code"
+                aria-label="Country code"
+              >
+                <option value="+7"{% if phone_code == '+7' %} selected{% endif %}>KZ/RU +7</option>
+                <option value="+998"{% if phone_code == '+998' %} selected{% endif %}>UZ +998</option>
+                <option value="+996"{% if phone_code == '+996' %} selected{% endif %}>KG +996</option>
+                <option value="+992"{% if phone_code == '+992' %} selected{% endif %}>TJ +992</option>
+                <option value="+993"{% if phone_code == '+993' %} selected{% endif %}>TM +993</option>
+                <option value="+994"{% if phone_code == '+994' %} selected{% endif %}>AZ +994</option>
+                <option value="+374"{% if phone_code == '+374' %} selected{% endif %}>AM +374</option>
+                <option value="+995"{% if phone_code == '+995' %} selected{% endif %}>GE +995</option>
+                <option value="+375"{% if phone_code == '+375' %} selected{% endif %}>BY +375</option>
+                <option value="+380"{% if phone_code == '+380' %} selected{% endif %}>UA +380</option>
+                <option value="+90"{% if phone_code == '+90' %} selected{% endif %}>TR +90</option>
+                <option value="+971"{% if phone_code == '+971' %} selected{% endif %}>AE +971</option>
+                <option value="+86"{% if phone_code == '+86' %} selected{% endif %}>CN +86</option>
+                <option value="+1"{% if phone_code == '+1' %} selected{% endif %}>US/CA +1</option>
+                <option value="+44"{% if phone_code == '+44' %} selected{% endif %}>GB +44</option>
+                <option value="+49"{% if phone_code == '+49' %} selected{% endif %}>DE +49</option>
+              </select>
+
+              <input
+                name="phone"
+                required
+                autocomplete="tel-national"
+                inputmode="tel"
+                placeholder="700 123 45 67"
+                value="{{ request.form.get('phone', '') }}"
+              >
+            </span>
+          </label>
+
+          <label class="wide">
+            <span
+              class="field-label"
+              data-pi18n="company_legal_address"
+            >Legal address</span>
+            <input
+              id="registrationLegalAddress"
               name="legal_address"
               required
               minlength="5"
               autocomplete="street-address"
+              value="{{ request.form.get('legal_address', '') }}"
             >
           </label>
 
-          <label class="wide">
-            <span data-pi18n="company_actual_address">&#1060;&#1072;&#1082;&#1090;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span>
+          <label class="address-match">
             <input
+              type="checkbox"
+              id="registrationSameAddress"
+            >
+            <span data-pi18n="register_same_address">
+              Actual address is the same as legal address
+            </span>
+          </label>
+
+          <label class="wide">
+            <span
+              class="field-label"
+              data-pi18n="company_actual_address"
+            >Actual address</span>
+            <input
+              id="registrationActualAddress"
               name="actual_address"
               required
               minlength="5"
               autocomplete="street-address"
+              value="{{ request.form.get('actual_address', '') }}"
             >
           </label>
 
           <label>
-            <span data-pi18n="register_products_count">&#1055;&#1088;&#1080;&#1084;&#1077;&#1088;&#1085;&#1086;&#1077; &#1095;&#1080;&#1089;&#1083;&#1086; &#1090;&#1086;&#1074;&#1072;&#1088;&#1086;&#1074;</span>
+            <span
+              class="field-label"
+              data-pi18n="register_products_count"
+            >Estimated products</span>
             <input
+              id="registrationProducts"
               name="estimated_products"
               type="number"
-              min="0"
+              min="1"
               max="10000000"
               step="1"
               inputmode="numeric"
               required
               placeholder="500"
+              value="{{ request.form.get('estimated_products', '') }}"
             >
           </label>
-          <label class="comment-field"><span data-pi18n="register_comment">Комментарий</span><textarea name="comment" rows="3" placeholder="Что продаёте и какие площадки нужны"></textarea></label>
-        </div>
-      </section>
 
-      <section class="wizard-section" data-registration-step data-step-title-key="register_plan_title">
-        <div class="section-head">
-          <div><span class="eyebrow" data-pi18n="register_step_plan">ПАКЕТ</span><h2 data-pi18n="register_plan_title">Выберите пакет</h2></div>
-          <p data-pi18n="register_plan_hint">Оплата пока не выполняется. Выбранный пакет, цена и срок начнут действовать только после подтверждения супер-администратором.</p>
-        </div>
-        <fieldset class="integration-selector subscription-plan-selector">
-          <legend class="sr-only">Пакет подписки</legend>
-          <div class="integration-grid subscription-plan-grid">
-            {% for plan in subscription_plans %}
-            <label class="integration-card available subscription-plan-card">
-              <input type="radio" name="plan_code" value="{{ plan.code }}"{% if plan.code == selected_plan_code %} checked{% endif %} required>
-              <span class="integration-body">
-                <span class="integration-head"><strong>{{ plan.name }}</strong><span class="integration-status">{{ '{:,.0f}'.format(plan.price_amount).replace(',', ' ') }} {{ plan.currency }}</span></span>
-                <span class="integration-description">{{ plan.description }}</span>
-                <small>{{ plan.term_days }} дней · {% if plan.position_limit is none %}без лимита позиций{% else %}до {{ plan.position_limit }} позиций на площадку{% endif %} · {% if plan.daily_operation_limit is none %}без лимита запусков{% else %}{{ plan.daily_operation_limit }} запусков в день{% endif %}</small>
+          <label class="comment-field">
+            <span class="field-label">
+              <span data-pi18n="register_comment">
+                Comment
               </span>
-            </label>
-            {% endfor %}
-          </div>
-        </fieldset>
+              <small
+                class="optional-tag"
+                data-pi18n="register_optional"
+              >optional</small>
+            </span>
+
+            <textarea
+              name="comment"
+              rows="3"
+            >{{ request.form.get('comment', '') }}</textarea>
+          </label>
+        </div>
       </section>
 
-      <section class="wizard-section" data-registration-step data-step-title-key="register_marketplaces_title">
+      <!-- STEP 2: MARKETPLACES -->
+      <section
+        class="wizard-section"
+        data-registration-step
+        data-step-code="marketplaces"
+        data-step-title-key="register_marketplaces_title"
+        hidden
+      >
         <div class="section-head">
-          <div><span class="eyebrow" data-pi18n="register_step_marketplaces">ПЛОЩАДКИ</span><h2 data-pi18n="register_marketplaces_title">Какие маркетплейсы нужны</h2></div>
-          <p data-pi18n="register_marketplaces_hint">Выберите минимум одну площадку. После проверки супер-администратор подтвердит доступ компании.</p>
+          <div>
+            <span
+              class="eyebrow"
+              data-pi18n="register_step_marketplaces"
+            >MARKETPLACES</span>
+
+            <div class="required-section-title">
+              <h2 data-pi18n="register_marketplaces_title">
+                Select marketplaces
+              </h2>
+              <span aria-hidden="true">*</span>
+            </div>
+          </div>
+
+          <p data-pi18n="register_marketplaces_hint">
+            Select at least one marketplace.
+          </p>
         </div>
-        <fieldset class="integration-selector" id="registrationMarketplaces">
-          <legend class="sr-only" data-pi18n="register_marketplaces_title">Какие маркетплейсы нужны</legend>
+
+        <fieldset
+          class="integration-selector"
+          id="registrationMarketplaces"
+        >
+          <legend
+            class="sr-only"
+            data-pi18n="register_marketplaces_title"
+          >
+            Select marketplaces
+          </legend>
+
           <div class="integration-grid">
             {% for item in public_integrations %}
             <label class="integration-card available">
-              <input type="checkbox" name="marketplaces" value="{{ item.code }}"{% if item.code in selected_marketplaces %} checked{% endif %}>
+              <input
+                type="checkbox"
+                name="marketplaces"
+                value="{{ item.code }}"
+                {% if item.code in selected_marketplaces %}checked{% endif %}
+              >
+
               <span class="integration-body">
-                <span class="integration-head"><strong>{{ item.name }}</strong><span class="integration-status" data-pi18n="marketplace_requested">Запросить</span></span>
-                <span class="integration-description">{{ item.description }}</span>
+                <span class="integration-head">
+                  <strong>{{ item.name }}</strong>
+                  <span
+                    class="integration-status"
+                    data-pi18n="marketplace_requested"
+                  >Select</span>
+                </span>
+
+                <span class="integration-description">
+                  {{ item.description }}
+                </span>
               </span>
             </label>
             {% endfor %}
           </div>
-          <small class="marketplace-selection-error" id="marketplaceSelectionError" data-pi18n="register_marketplaces_required">Выберите хотя бы один маркетплейс.</small>
+
+          <small
+            class="marketplace-selection-error"
+            id="marketplaceSelectionError"
+            data-pi18n="register_marketplaces_required"
+          >
+            Select at least one marketplace.
+          </small>
         </fieldset>
       </section>
 
-      <section class="wizard-section" data-registration-step data-step-title-key="register_account">
+      <!-- STEP 3: PLAN -->
+      <section
+        class="wizard-section"
+        data-registration-step
+        data-step-code="plan"
+        data-step-title-key="register_plan_title"
+        hidden
+      >
         <div class="section-head">
-          <div><span class="eyebrow" data-pi18n="register_step_access">ДОСТУП</span><h2 data-pi18n="register_account">Учётная запись администратора</h2></div>
-          <p data-pi18n="register_password_hint">Пароль: не менее 12 символов, с буквами разного регистра, цифрой и специальным символом.</p>
+          <div>
+            <span
+              class="eyebrow"
+              data-pi18n="register_step_plan"
+            >PLAN</span>
+
+            <div class="required-section-title">
+              <h2 data-pi18n="register_plan_title">
+                Select a plan
+              </h2>
+              <span aria-hidden="true">*</span>
+            </div>
+          </div>
+
+          <p data-pi18n="register_plan_hint">
+            The plan is recommended by catalog size.
+          </p>
         </div>
+
+        <div class="plan-recommendation" id="planRecommendation">
+          <strong data-pi18n="register_plan_recommendation_title">
+            Recommended plan
+          </strong>
+
+          <span
+            id="planRecommendationText"
+            data-pi18n="register_plan_recommendation_wait"
+          >
+            Enter the estimated number of products first.
+          </span>
+
+          <small id="planMarketplaceSummary"></small>
+        </div>
+
+        <fieldset
+          class="integration-selector subscription-plan-selector"
+          id="registrationPlans"
+        >
+          <legend class="sr-only">
+            Subscription plan
+          </legend>
+
+          <div class="integration-grid subscription-plan-grid">
+            {% for plan in subscription_plans %}
+            <label
+              class="integration-card available subscription-plan-card"
+              data-plan-code="{{ plan.code }}"
+              data-position-limit="{{ '' if plan.position_limit is none else plan.position_limit }}"
+              data-display-order="{{ plan.display_order }}"
+            >
+              <span
+                class="plan-recommended-badge"
+                data-pi18n="register_recommended_badge"
+              >
+                RECOMMENDED
+              </span>
+
+              <input
+                type="radio"
+                name="plan_code"
+                value="{{ plan.code }}"
+                {% if plan.code == selected_plan_code %}checked{% endif %}
+                required
+              >
+
+              <span class="integration-body">
+                <span class="integration-head">
+                  <strong>{{ plan.name }}</strong>
+
+                  <span class="integration-status">
+                    {{ '{:,.0f}'.format(plan.price_amount).replace(',', ' ') }}
+                    {{ plan.currency }}
+                  </span>
+                </span>
+
+                <span class="integration-description">
+                  {{ plan.description }}
+                </span>
+
+                <small>
+                  {{ plan.term_days }} days
+                  &middot;
+                  {% if plan.position_limit is none %}
+                    unlimited positions
+                  {% else %}
+                    up to {{ plan.position_limit }} positions per marketplace
+                  {% endif %}
+                  &middot;
+                  {% if plan.daily_operation_limit is none %}
+                    unlimited runs
+                  {% else %}
+                    {{ plan.daily_operation_limit }} runs per day
+                  {% endif %}
+                </small>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- STEP 4: ACCOUNT -->
+      <section
+        class="wizard-section"
+        data-registration-step
+        data-step-code="account"
+        data-step-title-key="register_account"
+        hidden
+      >
+        <div class="section-head">
+          <div>
+            <span
+              class="eyebrow"
+              data-pi18n="register_step_access"
+            >ACCOUNT</span>
+
+            <h2 data-pi18n="register_account">
+              Administrator account
+            </h2>
+          </div>
+
+          <p data-pi18n="register_password_hint">
+            Use a strong password of at least 12 characters.
+          </p>
+        </div>
+
         <div class="registration-fields">
-          <label><span data-pi18n="password">Пароль</span><input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
-          <label><span data-pi18n="password_confirm">Повторите пароль</span><input name="password_confirm" type="password" required minlength="12" autocomplete="new-password"></label>
+          <label class="wide account-email-preview">
+            <span
+              class="field-label"
+              data-pi18n="register_account_email"
+            >Login email</span>
+
+            <input
+              id="registrationAccountEmail"
+              type="email"
+              readonly
+              tabindex="-1"
+              value="{{ request.form.get('email', '') }}"
+            >
+
+            <small data-pi18n="register_account_email_hint">
+              The company email from step one is used.
+            </small>
+          </label>
+
+          <label>
+            <span
+              class="field-label"
+              data-pi18n="password"
+            >Password</span>
+
+            <span class="password-control">
+              <input
+                id="registrationPassword"
+                name="password"
+                type="password"
+                required
+                minlength="12"
+                autocomplete="new-password"
+              >
+
+              <button
+                class="password-toggle"
+                type="button"
+                data-toggle-password="registrationPassword"
+                aria-label="Show password"
+              >
+                <img
+                  src="{{ url_for('static', filename='icons/eye.svg') }}"
+                  alt=""
+                >
+              </button>
+            </span>
+          </label>
+
+          <label>
+            <span
+              class="field-label"
+              data-pi18n="password_confirm"
+            >Repeat password</span>
+
+            <span class="password-control">
+              <input
+                id="registrationPasswordConfirm"
+                name="password_confirm"
+                type="password"
+                required
+                minlength="12"
+                autocomplete="new-password"
+              >
+
+              <button
+                class="password-toggle"
+                type="button"
+                data-toggle-password="registrationPasswordConfirm"
+                aria-label="Show password"
+              >
+                <img
+                  src="{{ url_for('static', filename='icons/eye.svg') }}"
+                  alt=""
+                >
+              </button>
+            </span>
+          </label>
+        </div>
+
+        <div class="consent-stack registration-consents">
+          <label>
+            <input
+              type="checkbox"
+              name="privacy_consent"
+              value="1"
+              {% if request.form.get('privacy_consent') %}checked{% endif %}
+              required
+            >
+            <span
+              class="consent-text"
+              data-pi18n="register_privacy"
+            >
+              I agree to personal data processing and the privacy policy.
+            </span>
+          </label>
+
+          <label>
+            <input
+              type="checkbox"
+              name="terms_consent"
+              value="1"
+              {% if request.form.get('terms_consent') %}checked{% endif %}
+              required
+            >
+            <span
+              class="consent-text"
+              data-pi18n="register_terms"
+            >
+              I accept the terms of use.
+            </span>
+          </label>
         </div>
       </section>
 
-      <section class="wizard-section" data-registration-step data-step-title-key="register_consents_title">
-        <div class="consent-stack">
-          <label><input type="checkbox" name="privacy_consent" value="1" required><span data-pi18n="register_privacy">Я согласен на обработку персональных данных и ознакомился с политикой конфиденциальности.</span></label>
-          <label><input type="checkbox" name="terms_consent" value="1" required><span data-pi18n="register_terms">Я принимаю условия использования.</span></label>
-        </div>
-      </section>
+      <nav
+        class="registration-guide"
+        id="registrationGuide"
+        aria-label="Registration steps"
+      >
+        <div
+          class="registration-guide-copy"
+          aria-live="polite"
+        >
+          <small>
+            <span id="registrationStepNumber">
+              Step 1 of 4
+            </span>
+            &middot;
+            <span
+              id="registrationStepStatus"
+              data-pi18n="register_guide_fill"
+            >
+              complete this step
+            </span>
+          </small>
 
-      <nav class="registration-guide" id="registrationGuide" aria-label="Шаги регистрации">
-        <div class="registration-guide-copy" aria-live="polite">
-          <small><span id="registrationStepNumber">Шаг 1 из 5</span> · <span id="registrationStepStatus" data-pi18n="register_guide_fill">заполните текущий блок</span></small>
-          <strong id="registrationStepTitle">Данные компании</strong>
-          <span class="registration-progress" aria-hidden="true"><i id="registrationProgressBar"></i></span>
+          <strong id="registrationStepTitle">
+            Company details
+          </strong>
+
+          <span
+            class="registration-progress"
+            aria-hidden="true"
+          >
+            <i id="registrationProgressBar"></i>
+          </span>
         </div>
+
         <div class="registration-guide-actions">
-          <button class="site-button secondary" type="button" id="registrationPrevious" data-pi18n="back">Назад</button>
-          <button class="site-button primary" type="button" id="registrationNext">Далее</button>
+          <button
+            class="site-button secondary"
+            type="button"
+            id="registrationPrevious"
+            data-pi18n="back"
+          >
+            Back
+          </button>
+
+          <button
+            class="site-button primary"
+            type="button"
+            id="registrationNext"
+            data-pi18n="register_guide_next"
+          >
+            Next
+          </button>
         </div>
       </nav>
-
-      <div class="form-actions">
-        <a class="site-button secondary" href="{{ url_for('landing') }}" data-pi18n="back">Назад</a>
-        <button class="site-button primary submit-registration" type="submit" data-pi18n="register_submit">Отправить на рассмотрение</button>
-      </div>
     </form>
   </section>
 </main>
@@ -220,39 +699,6 @@
 <script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/public_i18n_runtime.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/public.js') }}?v={{ version }}"></script>
-<script>
-document.addEventListener('click',function(event){var button=event.target.closest('[data-public-lang]');if(button){var input=document.getElementById('registrationLocale');if(input)input.value=button.dataset.publicLang||'ru';}});
-(function(){var form=document.getElementById('registrationForm'),box=document.getElementById('registrationMarketplaces'),error=document.getElementById('marketplaceSelectionError');if(!form||!box)return;function validate(){var ok=!!box.querySelector('input[name="marketplaces"]:checked');box.classList.toggle('invalid',!ok);if(error)error.hidden=ok;return ok;}box.addEventListener('change',validate);form.addEventListener('submit',function(event){if(!validate()){event.preventDefault();box.querySelector('input[name="marketplaces"]')?.focus();}});validate();}());
-(function(){
-  var form=document.getElementById('registrationForm'),sections=Array.from(document.querySelectorAll('[data-registration-step]'));
-  var previous=document.getElementById('registrationPrevious'),next=document.getElementById('registrationNext');
-  var number=document.getElementById('registrationStepNumber'),title=document.getElementById('registrationStepTitle'),status=document.getElementById('registrationStepStatus'),progress=document.getElementById('registrationProgressBar');
-  if(!form||!sections.length||!previous||!next)return;
-  var current=0;
-  function tr(key,fallback){var lang=localStorage.getItem('itp_lang')||'ru';return window.ITP_PUBLIC_LOCALES?.[lang]?.[key]||window.ITP_PUBLIC_LOCALES?.ru?.[key]||fallback;}
-  function sectionTitle(section){return tr(section.dataset.stepTitleKey,section.querySelector('.section-head h2')?.textContent.trim()||'');}
-  function update(){
-    sections.forEach(function(section,index){section.classList.toggle('is-current-step',index===current);});
-    if(number)number.textContent=tr('register_guide_step','Шаг {current} из {total}').replace('{current}',current+1).replace('{total}',sections.length);
-    if(title)title.textContent=sectionTitle(sections[current]);
-    if(status)status.textContent=current===sections.length-1?tr('register_guide_review','проверьте согласия и отправьте форму'):tr('register_guide_fill','заполните текущий блок');
-    if(progress)progress.style.width=((current+1)/sections.length*100)+'%';
-    previous.disabled=current===0;next.textContent=current===sections.length-1?tr('register_guide_submit','К отправке'):tr('register_guide_next','Далее');
-  }
-  function valid(section){
-    var marketplace=section.querySelector('#registrationMarketplaces');
-    if(marketplace&&!marketplace.querySelector('input[name="marketplaces"]:checked')){marketplace.classList.add('invalid');marketplace.querySelector('input[name="marketplaces"]')?.focus();return false;}
-    var controls=Array.from(section.querySelectorAll('input:not([type="hidden"]),select,textarea'));
-    var invalid=controls.find(function(control){return !control.checkValidity();});
-    if(invalid){invalid.reportValidity();invalid.focus();return false;}return true;
-  }
-  function go(index,check){if(check&&!valid(sections[current]))return;current=Math.max(0,Math.min(index,sections.length-1));update();sections[current].scrollIntoView({behavior:'smooth',block:'center'});}
-  previous.addEventListener('click',function(){go(current-1,false);});
-  next.addEventListener('click',function(){if(current===sections.length-1){if(valid(sections[current]))document.querySelector('.form-actions')?.scrollIntoView({behavior:'smooth',block:'center'});return;}go(current+1,true);});
-  document.addEventListener('itp:public-locale',update);
-  if('IntersectionObserver' in window){var observer=new IntersectionObserver(function(entries){var visible=entries.filter(function(entry){return entry.isIntersecting;}).sort(function(a,b){return b.intersectionRatio-a.intersectionRatio;})[0];if(visible){current=sections.indexOf(visible.target);update();}},{threshold:[.45,.7]});sections.forEach(function(section){observer.observe(section);});}
-  update();
-}());
-</script>
+<script src="{{ url_for('static', filename='js/registration_wizard.js') }}?v={{ version }}"></script>
 </body>
 </html>

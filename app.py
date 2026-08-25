@@ -2124,7 +2124,7 @@ def registration() -> Any:
         "default_theme": default_workspace_template.get("theme", "system"),
         "subscription_plans": subscription_service().plans(public_only=True),
         "selected_plan_code": str(
-            request.form.get("plan_code") or request.args.get("plan") or "trial"
+            request.form.get("plan_code") or request.args.get("plan") or ""
         ),
     }
     if request.method == "POST":
