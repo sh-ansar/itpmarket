@@ -50,10 +50,89 @@
   </section>
   {% elif platform_section == 'payments' %}
   <section class="platform-panel" id="payments">
-    <div class="panel-head"><div><span>BILLING</span><h2>Активные периоды</h2><p>Срок считается от момента ручного подтверждения оплаты.</p></div></div>
-    <div class="company-table-wrap"><table class="company-table payment-table"><thead><tr><th>Компания</th><th>Пакет</th><th>Оплачено</th><th>Действует до</th><th>Осталось</th></tr></thead><tbody id="activeSubscriptionTableBody"><tr><td colspan="5" class="loading">Загрузка…</td></tr></tbody></table></div>
-    <div class="panel-head"><div><span>PAYMENTS</span><h2>История подтверждений</h2></div></div>
-    <div class="company-table-wrap"><table class="company-table payment-table"><thead><tr><th>Компания</th><th>Пакет</th><th>Сумма</th><th>Период</th><th>Подтверждено</th></tr></thead><tbody id="paymentTableBody"><tr><td colspan="5" class="loading">Загрузка…</td></tr></tbody></table></div>
+
+    <div class="panel-head billing-review-head">
+      <div>
+        <span>PAYMENT REVIEW</span>
+        <h2>&#1054;&#1078;&#1080;&#1076;&#1072;&#1102;&#1090; &#1087;&#1088;&#1086;&#1074;&#1077;&#1088;&#1082;&#1080;</h2>
+        <p>&#1057;&#1095;&#1077;&#1090;&#1072;, &#1087;&#1083;&#1072;&#1090;&#1077;&#1078;&#1085;&#1099;&#1077; &#1076;&#1086;&#1082;&#1091;&#1084;&#1077;&#1085;&#1090;&#1099; &#1080; &#1088;&#1091;&#1095;&#1085;&#1086;&#1077; &#1087;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1078;&#1076;&#1077;&#1085;&#1080;&#1077; &#1086;&#1087;&#1083;&#1072;&#1090;&#1099;.</p>
+      </div>
+    </div>
+
+    <div class="company-table-wrap billing-review-wrap">
+      <table class="company-table payment-table billing-review-table">
+        <thead>
+          <tr>
+            <th>&#1050;&#1086;&#1084;&#1087;&#1072;&#1085;&#1080;&#1103;</th>
+            <th>&#1055;&#1072;&#1082;&#1077;&#1090;</th>
+            <th>&#1057;&#1091;&#1084;&#1084;&#1072; / &#1087;&#1077;&#1088;&#1080;&#1086;&#1076;</th>
+            <th>&#1057;&#1095;&#1105;&#1090;</th>
+            <th>&#1055;&#1083;&#1072;&#1090;&#1105;&#1078;&#1085;&#1099;&#1081; &#1076;&#1086;&#1082;&#1091;&#1084;&#1077;&#1085;&#1090;</th>
+            <th>&#1057;&#1090;&#1072;&#1090;&#1091;&#1089;</th>
+            <th>&#1044;&#1077;&#1081;&#1089;&#1090;&#1074;&#1080;&#1103;</th>
+          </tr>
+        </thead>
+        <tbody id="paymentReviewTableBody">
+          <tr>
+            <td colspan="7" class="loading">&#1047;&#1072;&#1075;&#1088;&#1091;&#1079;&#1082;&#1072;&#8230;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel-head">
+      <div>
+        <span>BILLING</span>
+        <h2>&#1040;&#1082;&#1090;&#1080;&#1074;&#1085;&#1099;&#1077; &#1087;&#1077;&#1088;&#1080;&#1086;&#1076;&#1099;</h2>
+        <p>&#1057;&#1088;&#1086;&#1082; &#1089;&#1095;&#1080;&#1090;&#1072;&#1077;&#1090;&#1089;&#1103; &#1086;&#1090; &#1084;&#1086;&#1084;&#1077;&#1085;&#1090;&#1072; &#1088;&#1091;&#1095;&#1085;&#1086;&#1075;&#1086; &#1087;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1078;&#1076;&#1077;&#1085;&#1080;&#1103; &#1086;&#1087;&#1083;&#1072;&#1090;&#1099;.</p>
+      </div>
+    </div>
+
+    <div class="company-table-wrap">
+      <table class="company-table payment-table">
+        <thead>
+          <tr>
+            <th>&#1050;&#1086;&#1084;&#1087;&#1072;&#1085;&#1080;&#1103;</th>
+            <th>&#1055;&#1072;&#1082;&#1077;&#1090;</th>
+            <th>&#1054;&#1087;&#1083;&#1072;&#1095;&#1077;&#1085;&#1086;</th>
+            <th>&#1044;&#1077;&#1081;&#1089;&#1090;&#1074;&#1091;&#1077;&#1090; &#1076;&#1086;</th>
+            <th>&#1054;&#1089;&#1090;&#1072;&#1083;&#1086;&#1089;&#1100;</th>
+          </tr>
+        </thead>
+        <tbody id="activeSubscriptionTableBody">
+          <tr>
+            <td colspan="5" class="loading">&#1047;&#1072;&#1075;&#1088;&#1091;&#1079;&#1082;&#1072;&#8230;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel-head">
+      <div>
+        <span>PAYMENTS</span>
+        <h2>&#1048;&#1089;&#1090;&#1086;&#1088;&#1080;&#1103; &#1087;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1078;&#1076;&#1077;&#1085;&#1080;&#1081;</h2>
+      </div>
+    </div>
+
+    <div class="company-table-wrap">
+      <table class="company-table payment-table">
+        <thead>
+          <tr>
+            <th>&#1050;&#1086;&#1084;&#1087;&#1072;&#1085;&#1080;&#1103;</th>
+            <th>&#1055;&#1072;&#1082;&#1077;&#1090;</th>
+            <th>&#1057;&#1091;&#1084;&#1084;&#1072;</th>
+            <th>&#1055;&#1077;&#1088;&#1080;&#1086;&#1076;</th>
+            <th>&#1055;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1078;&#1076;&#1077;&#1085;&#1086;</th>
+          </tr>
+        </thead>
+        <tbody id="paymentTableBody">
+          <tr>
+            <td colspan="5" class="loading">&#1047;&#1072;&#1075;&#1088;&#1091;&#1079;&#1082;&#1072;&#8230;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
   </section>
   {% endif %}
 </main>
@@ -61,6 +140,31 @@
 <aside class="tenant-detail-drawer" id="tenantDetailDrawer" hidden><div class="drawer-top"><div><span>COMPANY</span><h2 id="tenantDetailTitle">—</h2></div><button id="closeTenantDetail" aria-label="Close">×</button></div><div id="tenantDetailBody"></div></aside>
 <div class="drawer-backdrop" id="tenantDetailBackdrop" hidden></div>
 <div class="platform-modal" id="tenantAdminModal" hidden><div><button class="modal-close">×</button><h3 data-i18n="platform_create_admin">Добавить администратора</h3><form id="tenantAdminForm"><input type="hidden" name="tenant_id"><label><span data-i18n="auth_name">Имя</span><input name="display_name" required></label><label>Email<input name="email" type="email" required></label><label><span data-i18n="temporary_password">Временный пароль</span><input name="password" type="password" minlength="12" required></label><button data-i18n="create">Создать</button></form></div></div>
+<div class="platform-modal billing-decision-modal" id="billingDecisionModal" hidden>
+  <div>
+    <button type="button" class="modal-close" data-billing-modal-close aria-label="Close">&times;</button>
+
+    <h3 id="billingDecisionTitle">&#1054;&#1087;&#1083;&#1072;&#1090;&#1072;</h3>
+    <p class="billing-decision-description" id="billingDecisionDescription"></p>
+
+    <form id="billingDecisionForm">
+      <input type="hidden" name="invoice_id">
+      <input type="hidden" name="action">
+
+      <label>
+        <span id="billingDecisionNoteLabel">&#1050;&#1086;&#1084;&#1084;&#1077;&#1085;&#1090;&#1072;&#1088;&#1080;&#1081;</span>
+        <textarea name="note" rows="5" maxlength="2000"></textarea>
+      </label>
+
+      <div class="billing-decision-actions">
+        <button type="button" data-billing-modal-close>&#1054;&#1090;&#1084;&#1077;&#1085;&#1072;</button>
+        <button type="submit" class="billing-decision-submit" id="billingDecisionSubmit">
+          &#1055;&#1088;&#1086;&#1076;&#1086;&#1083;&#1078;&#1080;&#1090;&#1100;
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
 <div id="platformToasts"></div>
 <script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>

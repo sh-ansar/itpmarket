@@ -121,16 +121,194 @@
     $('#subscriptionRequests').innerHTML=[...pending,...pendingAddons].join('')||'<div class="loading">Нет заявок на подтверждение.</div>';
   }
 
+  function billingStatusLabel(value) {
+    return ({
+      awaiting_payment:
+        '\u041e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b',
+      payment_review:
+        '\u041d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435',
+      payment_rejected:
+        '\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043e'
+    }[value] || value || '\u2014');
+  }
+
   function renderPayments(data={}){
-    const activeHost=$('#activeSubscriptionTableBody'),paymentHost=$('#paymentTableBody');
+    const reviewHost=$('#paymentReviewTableBody');
+    const activeHost=$('#activeSubscriptionTableBody');
+    const paymentHost=$('#paymentTableBody');
+
+    if(reviewHost){
+      const items=data.payment_review_items||[];
+
+      reviewHost.innerHTML=items.length
+        ?items.map(item=>{
+          const proof=item.proof||null;
+          const invoiceId=Number(item.invoice_id||0);
+          const status=String(item.subscription_status||'');
+          const canReject=(
+            status==='payment_review'
+            && proof
+            && proof.status==='under_review'
+          );
+
+          const invoiceDocument=item.invoice_pdf_ready
+            ?`<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/pdf" target="_blank" rel="noopener">\u0421\u0447\u0451\u0442 PDF</a><small>${esc(item.invoice_number||'')}</small>`
+            :`<span class="muted">\u041d\u0435\u0442 PDF</span><small>${esc(item.invoice_number||'')}</small>`;
+
+          const proofDocument=proof
+            ?`<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/payment-proof" target="_blank" rel="noopener">${esc(proof.original_filename||'\u041e\u0442\u043a\u0440\u044b\u0442\u044c')}</a><small>${esc(formatDate(proof.uploaded_at))}</small>`
+            :`<span class="muted">\u041d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d</span>`;
+
+          const reviewNote=(
+            proof
+            && proof.review_note
+            && status==='payment_rejected'
+          )
+            ?`<small class="billing-review-note">${esc(proof.review_note)}</small>`
+            :'';
+
+          return `<tr>
+            <td>
+              <strong>${esc(item.tenant_name||'\u2014')}</strong>
+              <small>${esc(item.registration_number||'')}</small>
+            </td>
+            <td>
+              <strong>${esc(item.plan_name||item.plan_code||'\u2014')}</strong>
+              <small>${formatNumber(item.months_count||0)} \u043c\u0435\u0441.</small>
+            </td>
+            <td>
+              <strong>${formatNumber(item.total_amount)} ${esc(item.currency||'KZT')}</strong>
+              <small>${formatNumber(item.months_count||0)} \u043c\u0435\u0441.</small>
+            </td>
+            <td class="billing-document-cell">${invoiceDocument}</td>
+            <td class="billing-document-cell">${proofDocument}</td>
+            <td>
+              <span class="billing-status ${esc(status)}">${esc(billingStatusLabel(status))}</span>
+              ${reviewNote}
+            </td>
+            <td>
+              <div class="billing-review-actions">
+                <button
+                  type="button"
+                  class="approve"
+                  data-billing-action="confirm"
+                  data-invoice-id="${invoiceId}"
+                  data-invoice-number="${esc(item.invoice_number||'')}"
+                  data-tenant-name="${esc(item.tenant_name||'')}"
+                >\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c</button>
+
+                <button
+                  type="button"
+                  class="decline"
+                  data-billing-action="reject"
+                  data-invoice-id="${invoiceId}"
+                  data-invoice-number="${esc(item.invoice_number||'')}"
+                  data-tenant-name="${esc(item.tenant_name||'')}"
+                  ${canReject?'':'disabled'}
+                >\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c</button>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')
+        :'<tr><td colspan="7" class="loading">\u041d\u0435\u0442 \u043e\u043f\u043b\u0430\u0442, \u043e\u0436\u0438\u0434\u0430\u044e\u0449\u0438\u0445 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438.</td></tr>';
+    }
+
     if(activeHost){
       const items=data.active_subscriptions||[];
-      activeHost.innerHTML=items.length?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.price_amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.ends_at))}</td><td><span class="billing-remaining ${new Date(item.ends_at).getTime()-Date.now()<5*86400000?'due':''}">${esc(remainingDays(item.ends_at))}</span></td></tr>`).join(''):'<tr><td colspan="5" class="loading">Нет активных периодов.</td></tr>';
+      activeHost.innerHTML=items.length
+        ?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.price_amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.ends_at))}</td><td><span class="billing-remaining ${new Date(item.ends_at).getTime()-Date.now()<5*86400000?'due':''}">${esc(remainingDays(item.ends_at))}</span></td></tr>`).join('')
+        :'<tr><td colspan="5" class="loading">\u041d\u0435\u0442 \u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043f\u0435\u0440\u0438\u043e\u0434\u043e\u0432.</td></tr>';
     }
+
     if(paymentHost){
       const items=data.payments||[];
-      paymentHost.innerHTML=items.length?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>до ${esc(formatDate(item.period_end))} · ${Number(item.months_count||0).toLocaleString()} мес.</small></td><td>${esc(formatDate(item.paid_at))}</td></tr>`).join(''):'<tr><td colspan="5" class="loading">Подтверждённых оплат пока нет.</td></tr>';
+      paymentHost.innerHTML=items.length
+        ?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>\u0434\u043e ${esc(formatDate(item.period_end))} \u00b7 ${Number(item.months_count||0).toLocaleString()} \u043c\u0435\u0441.</small></td><td>${esc(formatDate(item.paid_at))}</td></tr>`).join('')
+        :'<tr><td colspan="5" class="loading">\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0445 \u043e\u043f\u043b\u0430\u0442 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</td></tr>';
     }
+  }
+
+  function openBillingDecision(button) {
+    const modal=$('#billingDecisionModal');
+    const form=$('#billingDecisionForm');
+
+    if(!modal||!form)return;
+
+    const action=String(
+      button.dataset.billingAction||''
+    );
+
+    const invoiceId=Number(
+      button.dataset.invoiceId||0
+    );
+
+    if(
+      !Number.isInteger(invoiceId)
+      || invoiceId<=0
+      || !['confirm','reject'].includes(action)
+    ){
+      toast(
+        '\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0430\u044f \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u044f.',
+        true
+      );
+      return;
+    }
+
+    form.elements.invoice_id.value=String(invoiceId);
+    form.elements.action.value=action;
+
+    const note=form.elements.note;
+    note.value='';
+    note.required=action==='reject';
+
+    const tenant=String(
+      button.dataset.tenantName||''
+    );
+
+    const invoice=String(
+      button.dataset.invoiceNumber||''
+    );
+
+    $('#billingDecisionTitle').textContent=(
+      action==='confirm'
+        ?'\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443'
+        :'\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443'
+    );
+
+    $('#billingDecisionDescription').textContent=[
+      tenant,
+      invoice
+    ].filter(Boolean).join(' \u00b7 ');
+
+    $('#billingDecisionNoteLabel').textContent=(
+      action==='reject'
+        ?'\u041f\u0440\u0438\u0447\u0438\u043d\u0430 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u044f'
+        :'\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439'
+    );
+
+    const submit=$('#billingDecisionSubmit');
+
+    submit.textContent=(
+      action==='confirm'
+        ?'\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c'
+        :'\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c'
+    );
+
+    submit.classList.toggle(
+      'decline',
+      action==='reject'
+    );
+
+    modal.hidden=false;
+    note.focus();
+  }
+
+  function closeBillingDecision() {
+    const modal=$('#billingDecisionModal');
+    const form=$('#billingDecisionForm');
+
+    if(modal)modal.hidden=true;
+    if(form)form.reset();
   }
 
   function render(data) {
@@ -166,8 +344,43 @@
   }
 
   async function load() {
-    try { render(await api(`/api/platform/overview?section=${encodeURIComponent(section)}`)); }
-    catch (error) { toast(error.message, true); }
+    try {
+      const data=await api(
+        `/api/platform/overview?section=${encodeURIComponent(section)}`
+      );
+
+      if(section==='payments'){
+        try{
+          const review=await api(
+            '/api/platform/billing/payments'
+          );
+
+          data.subscriptions={
+            ...(data.subscriptions||{}),
+            payment_review_items:
+              review.items||[]
+          };
+        }catch(error){
+          data.subscriptions={
+            ...(data.subscriptions||{}),
+            payment_review_items:[]
+          };
+
+          toast(
+            error.message,
+            true
+          );
+        }
+      }
+
+      render(data);
+    }
+    catch(error){
+      toast(
+        error.message,
+        true
+      );
+    }
   }
 
   document.addEventListener('click', async event => {
@@ -177,6 +390,7 @@
     const preview = event.target.closest('[data-source-rule-preview]');
     const subscriptionReview=event.target.closest('[data-subscription-review]');
     const addonReview=event.target.closest('[data-addon-review]');
+    const billingAction=event.target.closest('[data-billing-action]');
     if (admin) {
       event.preventDefault();
       $('#tenantAdminForm').elements.tenant_id.value = admin.dataset.admin;
@@ -213,6 +427,13 @@
       try{await api(`/api/platform/subscription-addons/requests/${addonReview.dataset.addonReview}/${addonReview.dataset.decision}`,{method:'POST',body:{}});toast('Заявка на позиции обработана');await load();}catch(error){toast(error.message,true)}
       return;
     }
+    if(billingAction){
+      event.preventDefault();
+      openBillingDecision(
+        billingAction
+      );
+      return;
+    }
     try {
       if (status) {
         await api(`/api/platform/tenants/${status.dataset.tenantId}`, {method:'PUT', body:{status:status.dataset.companyStatus}});
@@ -244,6 +465,132 @@
       await load();
     }catch(error){toast(error.message,true)}
   });
+
+  $('#billingDecisionForm')?.addEventListener(
+    'submit',
+    async event=>{
+      event.preventDefault();
+
+      const form=event.currentTarget;
+      const invoiceId=Number(
+        form.elements.invoice_id.value||0
+      );
+      const action=String(
+        form.elements.action.value||''
+      );
+      const note=String(
+        form.elements.note.value||''
+      ).trim();
+
+      if(
+        !Number.isInteger(invoiceId)
+        || invoiceId<=0
+        || !['confirm','reject'].includes(action)
+      ){
+        toast(
+          '\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0430\u044f \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u044f.',
+          true
+        );
+        return;
+      }
+
+      if(
+        action==='reject'
+        && !note
+      ){
+        toast(
+          '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0440\u0438\u0447\u0438\u043d\u0443 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u044f.',
+          true
+        );
+        return;
+      }
+
+      const submit=$(
+        '#billingDecisionSubmit'
+      );
+
+      if(submit){
+        submit.disabled=true;
+      }
+
+      try{
+        const body=(
+          action==='reject'
+            ?{
+              review_note:note
+            }
+            :{
+              note
+            }
+        );
+
+        await api(
+          `/api/platform/billing/invoices/${invoiceId}/${action}`,
+          {
+            method:'POST',
+            body
+          }
+        );
+
+        toast(
+          action==='confirm'
+            ?'\u041e\u043f\u043b\u0430\u0442\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430'
+            :'\u041e\u043f\u043b\u0430\u0442\u0430 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0430'
+        );
+
+        closeBillingDecision();
+        await load();
+      }
+      catch(error){
+        toast(
+          error.message,
+          true
+        );
+      }
+      finally{
+        if(submit){
+          submit.disabled=false;
+        }
+      }
+    }
+  );
+
+  document
+    .querySelectorAll(
+      '[data-billing-modal-close]'
+    )
+    .forEach(
+      button=>{
+        button.addEventListener(
+          'click',
+          closeBillingDecision
+        );
+      }
+    );
+
+  $('#billingDecisionModal')?.addEventListener(
+    'click',
+    event=>{
+      if(
+        event.target
+        ===event.currentTarget
+      ){
+        closeBillingDecision();
+      }
+    }
+  );
+
+  document.addEventListener(
+    'keydown',
+    event=>{
+      if(
+        event.key==='Escape'
+        && !$('#billingDecisionModal')?.hidden
+      ){
+        closeBillingDecision();
+      }
+    }
+  );
 
   $('#tenantAdminForm')?.addEventListener('submit', async event => {
     event.preventDefault();
