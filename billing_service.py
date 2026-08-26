@@ -2207,6 +2207,72 @@ class BillingService:
         finally:
             conn.close()
 
+        proof_value = None
+
+        if invoice_value:
+            proof = (
+                self.payment_proof_for_invoice(
+                    int(invoice_value["id"]),
+                    tenant_id=int(tenant_id),
+                )
+            )
+
+            if proof:
+                proof_value = {
+                    "id":
+                        int(proof["id"]),
+                    "invoice_id":
+                        int(proof["invoice_id"]),
+                    "status":
+                        str(
+                            proof.get("status")
+                            or ""
+                        ),
+                    "original_filename":
+                        str(
+                            proof.get(
+                                "original_filename"
+                            )
+                            or ""
+                        ),
+                    "mime_type":
+                        str(
+                            proof.get(
+                                "mime_type"
+                            )
+                            or ""
+                        ),
+                    "file_size":
+                        int(
+                            proof.get(
+                                "file_size"
+                            )
+                            or 0
+                        ),
+                    "uploaded_at":
+                        str(
+                            proof.get(
+                                "uploaded_at"
+                            )
+                            or ""
+                        ),
+                    "reviewed_at":
+                        str(
+                            proof.get(
+                                "reviewed_at"
+                            )
+                            or ""
+                        ),
+                    "review_note":
+                        str(
+                            proof.get(
+                                "review_note"
+                            )
+                            or ""
+                        ),
+                    "download_ready": True,
+                }
+
         supplier = (
             self.supplier_settings()
         )
@@ -2238,6 +2304,8 @@ class BillingService:
                 subscription_value,
             "invoice":
                 invoice_value,
+            "payment_proof":
+                proof_value,
             "supplier_ready":
                 ready,
             "can_issue":

@@ -34,7 +34,10 @@ from waitress import serve
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth_service import AuthService, normalize_email, validate_password
-from billing_service import BillingService
+from billing_service import (
+    BillingService,
+    PAYMENT_PROOF_MAX_BYTES,
+)
 from config import (
     ROOT,
     ensure_directories,
@@ -3847,6 +3850,177 @@ def api_subscription_invoice_pdf(
                 )
                 + ".pdf"
             ),
+            max_age=0,
+        )
+
+    except SubscriptionError as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.post(
+    "/api/subscription/invoice/<int:invoice_id>/payment-proof"
+)
+@permission_required("manage_company")
+def api_subscription_payment_proof_upload(
+    invoice_id: int,
+) -> Any:
+    user = current_user() or {}
+
+    upload = request.files.get(
+        "file"
+    )
+
+    if upload is None:
+        return json_error(
+            "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 "
+            "\u0444\u0430\u0439\u043b "
+            "\u043f\u043b\u0430\u0442\u0451\u0436\u043d\u043e\u0433\u043e "
+            "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430.",
+            400,
+        )
+
+    content = upload.read(
+        PAYMENT_PROOF_MAX_BYTES + 1
+    )
+
+    try:
+        billing = billing_service()
+
+        billing.save_payment_proof(
+            int(invoice_id),
+            int(user["tenant_id"]),
+            int(user["id"]),
+            original_filename=str(
+                upload.filename
+                or ""
+            ),
+            mime_type=str(
+                upload.mimetype
+                or upload.content_type
+                or ""
+            ),
+            content=content,
+        )
+
+        return json_ok(
+            billing=(
+                billing
+                .tenant_billing_snapshot(
+                    int(
+                        user["tenant_id"]
+                    )
+                )
+            )
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.get(
+    "/api/subscription/invoice/<int:invoice_id>/payment-proof"
+)
+@permission_required("view_settings")
+def api_subscription_payment_proof_download(
+    invoice_id: int,
+) -> Any:
+    user = current_user() or {}
+    billing = billing_service()
+
+    invoice = billing.invoice_by_id(
+        int(invoice_id)
+    )
+
+    if (
+        not invoice
+        or int(
+            invoice.get(
+                "tenant_id"
+            )
+            or 0
+        )
+        != int(
+            user["tenant_id"]
+        )
+    ):
+        return json_error(
+            "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+            "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    proof = (
+        billing
+        .payment_proof_for_invoice(
+            int(invoice_id),
+            tenant_id=int(
+                user["tenant_id"]
+            ),
+        )
+    )
+
+    if not proof:
+        return json_error(
+            "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+            "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    try:
+        document = (
+            billing.payment_proof_file(
+                int(proof["id"]),
+                int(user["tenant_id"]),
+            )
+        )
+
+        extension = (
+            document["path"]
+            .suffix
+            .lower()
+        )
+
+        if extension not in {
+            ".pdf",
+            ".jpg",
+            ".png",
+        }:
+            extension = ""
+
+        download_name = (
+            "payment-proof-"
+            + str(
+                invoice[
+                    "invoice_number"
+                ]
+            )
+            + extension
+        )
+
+        return send_file(
+            document["path"],
+            mimetype=str(
+                proof.get(
+                    "mime_type"
+                )
+                or "application/octet-stream"
+            ),
+            as_attachment=True,
+            download_name=download_name,
             max_age=0,
         )
 
