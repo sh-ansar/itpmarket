@@ -4327,6 +4327,304 @@ def api_platform_subscription_addon_review(request_id: int, decision: str) -> An
         return json_error(str(exc), 409)
 
 
+@app.get(
+    "/api/platform/billing/payments"
+)
+@platform_permission_required(
+    "billing.payment.view"
+)
+def api_platform_billing_payments_get() -> Any:
+    return json_ok(
+        items=(
+            billing_service()
+            .platform_payment_items()
+        )
+    )
+
+
+@app.get(
+    "/api/platform/billing/invoices/"
+    "<int:invoice_id>/pdf"
+)
+@platform_permission_required(
+    "billing.invoice.download"
+)
+def api_platform_billing_invoice_pdf(
+    invoice_id: int,
+) -> Any:
+    billing = billing_service()
+
+    invoice = billing.invoice_by_id(
+        int(invoice_id)
+    )
+
+    if not invoice:
+        return json_error(
+            "\u0421\u0447\u0451\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    try:
+        document = billing.invoice_pdf(
+            int(invoice_id)
+        )
+
+        number = re.sub(
+            r"[^A-Za-z0-9._-]+",
+            "-",
+            str(
+                invoice.get(
+                    "invoice_number"
+                )
+                or invoice_id
+            ),
+        ).strip(
+            ".-"
+        )
+
+        if not number:
+            number = str(
+                int(invoice_id)
+            )
+
+        return send_file(
+            document["path"],
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=(
+                "invoice-"
+                + number
+                + ".pdf"
+            ),
+            max_age=0,
+        )
+
+    except SubscriptionError as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.get(
+    "/api/platform/billing/invoices/"
+    "<int:invoice_id>/payment-proof"
+)
+@platform_permission_required(
+    "billing.payment.view"
+)
+def api_platform_billing_payment_proof(
+    invoice_id: int,
+) -> Any:
+    billing = billing_service()
+
+    invoice = billing.invoice_by_id(
+        int(invoice_id)
+    )
+
+    if not invoice:
+        return json_error(
+            "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+            "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    proof = (
+        billing
+        .payment_proof_for_invoice(
+            int(invoice_id)
+        )
+    )
+
+    if not proof:
+        return json_error(
+            "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+            "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    try:
+        document = (
+            billing
+            .payment_proof_file(
+                int(
+                    proof["id"]
+                ),
+                int(
+                    invoice[
+                        "tenant_id"
+                    ]
+                ),
+            )
+        )
+
+        extension = (
+            Path(
+                document["path"]
+            )
+            .suffix
+            .lower()
+        )
+
+        if extension not in {
+            ".pdf",
+            ".jpg",
+            ".jpeg",
+            ".png",
+        }:
+            extension = ""
+
+        number = re.sub(
+            r"[^A-Za-z0-9._-]+",
+            "-",
+            str(
+                invoice.get(
+                    "invoice_number"
+                )
+                or invoice_id
+            ),
+        ).strip(
+            ".-"
+        )
+
+        if not number:
+            number = str(
+                int(invoice_id)
+            )
+
+        return send_file(
+            document["path"],
+            mimetype=str(
+                proof.get(
+                    "mime_type"
+                )
+                or
+                "application/octet-stream"
+            ),
+            as_attachment=True,
+            download_name=(
+                "payment-proof-"
+                + number
+                + extension
+            ),
+            max_age=0,
+        )
+
+    except SubscriptionError as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.post(
+    "/api/platform/billing/invoices/"
+    "<int:invoice_id>/confirm"
+)
+@platform_permission_required(
+    "billing.payment.confirm"
+)
+def api_platform_billing_payment_confirm(
+    invoice_id: int,
+) -> Any:
+    payload = json_payload()
+
+    try:
+        result = (
+            billing_service()
+            .confirm_invoice_payment(
+                int(invoice_id),
+                int(
+                    (
+                        current_user()
+                        or {}
+                    )["id"]
+                ),
+                note=str(
+                    payload.get(
+                        "note"
+                    )
+                    or ""
+                ),
+            )
+        )
+
+        return json_ok(
+            result=result,
+            items=(
+                billing_service()
+                .platform_payment_items()
+            ),
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.post(
+    "/api/platform/billing/invoices/"
+    "<int:invoice_id>/reject"
+)
+@platform_permission_required(
+    "billing.payment.reject"
+)
+def api_platform_billing_payment_reject(
+    invoice_id: int,
+) -> Any:
+    payload = json_payload()
+
+    try:
+        result = (
+            billing_service()
+            .reject_invoice_payment(
+                int(invoice_id),
+                int(
+                    (
+                        current_user()
+                        or {}
+                    )["id"]
+                ),
+                review_note=str(
+                    payload.get(
+                        "review_note"
+                    )
+                    or ""
+                ),
+            )
+        )
+
+        return json_ok(
+            result=result,
+            items=(
+                billing_service()
+                .platform_payment_items()
+            ),
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
 @app.get("/api/platform/overview")
 @platform_roles_required("superadmin", "accountant")
 def api_platform_overview() -> Any:

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import io
 import tempfile
@@ -384,7 +384,7 @@ class BillingPaymentProofHttpTests(
             disposition,
         )
 
-    def test_second_upload_is_rejected_while_under_review(
+    def test_second_upload_replaces_proof_while_under_review(
         self,
     ) -> None:
         invoice = self._invoice()
@@ -398,41 +398,188 @@ class BillingPaymentProofHttpTests(
             first.status_code,
         )
 
+        first_payload = (
+            first.get_json()
+        )
+
+        first_proof = (
+            first_payload[
+                "billing"
+            ][
+                "payment_proof"
+            ]
+        )
+
+        second_content = (
+            self._pdf()
+            + b"second"
+        )
+
         second = self._upload(
             int(invoice["id"]),
-            content=(
-                self._pdf()
-                + b"second"
+            content=second_content,
+        )
+
+        self.assertEqual(
+            200,
+            second.status_code,
+        )
+
+        second_payload = (
+            second.get_json()
+        )
+
+        billing = second_payload[
+            "billing"
+        ]
+
+        self.assertEqual(
+            "payment_review",
+            billing[
+                "subscription"
+            ][
+                "status"
+            ],
+        )
+
+        second_proof = billing[
+            "payment_proof"
+        ]
+
+        self.assertEqual(
+            "under_review",
+            second_proof[
+                "status"
+            ],
+        )
+
+        self.assertNotEqual(
+            int(
+                first_proof[
+                    "id"
+                ]
+            ),
+            int(
+                second_proof[
+                    "id"
+                ]
+            ),
+        )
+
+        conn = (
+            self.billing
+            ._connect()
+        )
+
+        try:
+            rows = conn.execute(
+                """SELECT
+                       id,
+                       status
+                   FROM subscription_payment_proofs
+                   WHERE invoice_id=?
+                   ORDER BY id""",
+                (
+                    int(
+                        invoice[
+                            "id"
+                        ]
+                    ),
+                ),
+            ).fetchall()
+
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            2,
+            len(rows),
+        )
+
+        self.assertEqual(
+            int(
+                first_proof[
+                    "id"
+                ]
+            ),
+            int(
+                rows[0][
+                    "id"
+                ]
             ),
         )
 
         self.assertEqual(
-            409,
-            second.status_code,
+            "superseded",
+            rows[0][
+                "status"
+            ],
         )
 
-        proof = (
+        self.assertEqual(
+            int(
+                second_proof[
+                    "id"
+                ]
+            ),
+            int(
+                rows[1][
+                    "id"
+                ]
+            ),
+        )
+
+        self.assertEqual(
+            "under_review",
+            rows[1][
+                "status"
+            ],
+        )
+
+        current = (
             self.billing
             .payment_proof_for_invoice(
-                int(invoice["id"]),
-                tenant_id=self.tenant_id,
+                int(
+                    invoice[
+                        "id"
+                    ]
+                ),
+                tenant_id=
+                    self.tenant_id,
             )
         )
 
         self.assertIsNotNone(
-            proof
+            current
+        )
+
+        self.assertEqual(
+            int(
+                second_proof[
+                    "id"
+                ]
+            ),
+            int(
+                current[
+                    "id"
+                ]
+            ),
         )
 
         document = (
             self.billing
             .payment_proof_file(
-                int(proof["id"]),
+                int(
+                    current[
+                        "id"
+                    ]
+                ),
                 self.tenant_id,
             )
         )
 
         self.assertEqual(
-            self._pdf(),
+            second_content,
             document[
                 "path"
             ].read_bytes(),
