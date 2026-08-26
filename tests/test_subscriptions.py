@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from auth_service import AuthService
+from billing_service import BillingService
 from catalog_configuration_service import CatalogConfigurationService
 from notification_service import NotificationService
 from schema import ensure_database
@@ -27,6 +28,12 @@ class SubscriptionServiceTests(unittest.TestCase):
         )
         self.tenant_id = int(self.admin["tenant_id"])
         self.service = SubscriptionService(self.db_path)
+        self.billing = BillingService(
+            self.db_path,
+            document_root=Path(
+                self.folder.name
+            ),
+        )
 
     def tearDown(self) -> None:
         self.folder.cleanup()
@@ -67,21 +74,93 @@ class SubscriptionServiceTests(unittest.TestCase):
             },
         }, int(self.admin["id"]))
 
-    def _activate(self, plan_code: str) -> dict:
-        request = self.service.request_plan(
-            self.tenant_id, plan_code, int(self.admin["id"])
+    def _confirm_paid(
+        self,
+        reviewed: dict,
+        *,
+        months: int = 1,
+    ) -> dict:
+        invoice = (
+            self.billing
+            .create_invoice(
+                int(
+                    reviewed[
+                        "id"
+                    ]
+                ),
+                months,
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+                seller_snapshot={
+                    "name":
+                        "Subscription Test Supplier",
+                    "vat_rate":
+                        0,
+                },
+            )
         )
 
-        reviewed = self.service.review_subscription(
-            int(request["id"]),
-            "approved",
-            int(self.admin["id"]),
-            term_days=31,
-            price_amount=(
-                0
-                if plan_code == "trial"
-                else 12000
-            ),
+        result = (
+            self.billing
+            .confirm_invoice_payment(
+                int(
+                    invoice[
+                        "id"
+                    ]
+                ),
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        return result[
+            "subscription"
+        ]
+
+    def _activate(
+        self,
+        plan_code: str,
+    ) -> dict:
+        request = (
+            self.service
+            .request_plan(
+                self.tenant_id,
+                plan_code,
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        reviewed = (
+            self.service
+            .review_subscription(
+                int(
+                    request[
+                        "id"
+                    ]
+                ),
+                "approved",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+                term_days=31,
+                price_amount=(
+                    0
+                    if plan_code == "trial"
+                    else 12000
+                ),
+            )
         )
 
         if plan_code == "trial":
@@ -89,14 +168,13 @@ class SubscriptionServiceTests(unittest.TestCase):
 
         self.assertEqual(
             "awaiting_invoice",
-            reviewed["status"],
+            reviewed[
+                "status"
+            ],
         )
 
-        return self.service.review_subscription(
-            int(reviewed["id"]),
-            "approved",
-            int(self.admin["id"]),
-            _payment_confirmed=True,
+        return self._confirm_paid(
+            reviewed
         )
 
     def test_paid_plan_approval_waits_for_billing(self) -> None:
@@ -177,97 +255,144 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertFalse(entitlement["marketplaces"]["wildberries"]["enabled"])
         self.assertEqual(2, entitlement["marketplaces"]["kaspi"]["position_limit"])
 
-    def test_plan_change_waits_for_current_period_end(self) -> None:
+    def test_plan_change_waits_for_current_period_end(
+        self,
+    ) -> None:
         self._create_limited_plan()
 
         current = self._activate(
             "test_limited"
         )
 
-        request = self.service.request_plan(
-            self.tenant_id,
-            "starter",
-            int(self.admin["id"]),
+        request = (
+            self.service
+            .request_plan(
+                self.tenant_id,
+                "starter",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
         )
 
-        reviewed = self.service.review_subscription(
-            int(request["id"]),
-            "approved",
-            int(self.admin["id"]),
+        reviewed = (
+            self.service
+            .review_subscription(
+                int(
+                    request[
+                        "id"
+                    ]
+                ),
+                "approved",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
         )
 
         self.assertEqual(
             "awaiting_invoice",
-            reviewed["status"],
+            reviewed[
+                "status"
+            ],
         )
 
-        scheduled = self.service.review_subscription(
-            int(reviewed["id"]),
-            "approved",
-            int(self.admin["id"]),
-            _payment_confirmed=True,
+        scheduled = (
+            self._confirm_paid(
+                reviewed
+            )
         )
 
         self.assertEqual(
             "scheduled",
-            scheduled["status"],
+            scheduled[
+                "status"
+            ],
         )
 
         self.assertEqual(
-            current["ends_at"],
-            scheduled["starts_at"],
+            current[
+                "ends_at"
+            ],
+            scheduled[
+                "starts_at"
+            ],
         )
 
-        entitlement = self.service.entitlement(
-            self.tenant_id
+        entitlement = (
+            self.service
+            .entitlement(
+                self.tenant_id
+            )
         )
 
         self.assertEqual(
             "test_limited",
-            entitlement["subscription"][
+            entitlement[
+                "subscription"
+            ][
                 "plan_code"
             ],
         )
 
-    def test_admin_can_assign_future_package_dates(self) -> None:
-        reviewed = self.service.assign_plan(
-            self.tenant_id,
-            "starter",
-            int(self.admin["id"]),
-            starts_at=(
-                "2030-01-01T10:00:00+05:00"
-            ),
-            ends_at=(
-                "2030-02-01T10:00:00+05:00"
-            ),
-            review_note="Admin schedule",
+    def test_admin_can_assign_future_package_dates(
+        self,
+    ) -> None:
+        reviewed = (
+            self.service
+            .assign_plan(
+                self.tenant_id,
+                "starter",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+                starts_at=
+                    "2030-01-01T10:00:00+05:00",
+                ends_at=
+                    "2030-02-01T10:00:00+05:00",
+                review_note=
+                    "Admin schedule",
+            )
         )
 
         self.assertEqual(
             "awaiting_invoice",
-            reviewed["status"],
+            reviewed[
+                "status"
+            ],
         )
 
-        assigned = self.service.review_subscription(
-            int(reviewed["id"]),
-            "approved",
-            int(self.admin["id"]),
-            _payment_confirmed=True,
+        assigned = (
+            self._confirm_paid(
+                reviewed
+            )
         )
 
         self.assertEqual(
             "scheduled",
-            assigned["status"],
+            assigned[
+                "status"
+            ],
         )
 
         self.assertEqual(
             "2030-01-01T10:00:00+05:00",
-            assigned["starts_at"],
+            assigned[
+                "starts_at"
+            ],
         )
 
         self.assertEqual(
             "2030-02-01T10:00:00+05:00",
-            assigned["ends_at"],
+            assigned[
+                "ends_at"
+            ],
         )
 
     def test_daily_operation_limit_is_enforced_and_release_is_recoverable(self) -> None:
@@ -355,37 +480,184 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertTrue(service.entitlement(approved)["active"])
         self.assertFalse(service.entitlement(pending)["active"])
 
-    def test_trial_is_one_time_records_payment_and_creates_expiry_reminder(self) -> None:
-        requested = self.service.request_plan(
-            self.tenant_id, "trial", int(self.admin["id"])
+    def test_trial_is_one_time_without_payment_and_creates_expiry_reminder(
+        self,
+    ) -> None:
+        requested = (
+            self.service
+            .request_plan(
+                self.tenant_id,
+                "trial",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
         )
-        active = self.service.review_subscription(
-            int(requested["id"]), "approved", int(self.admin["id"])
-        )
-        self.assertEqual(3, active["term_days"])
-        self.assertEqual(0, active["price_amount"])
 
-        snapshot = self.service.admin_snapshot()
-        payment = next(
-            item for item in snapshot["payments"]
-            if int(item["subscription_id"]) == int(active["id"])
+        active = (
+            self.service
+            .review_subscription(
+                int(
+                    requested[
+                        "id"
+                    ]
+                ),
+                "approved",
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
         )
-        self.assertEqual("trial", payment["plan_code"])
-        self.assertEqual(0, payment["amount"])
 
-        with self.assertRaisesRegex(Exception, "пробный"):
-            self.service.request_plan(
-                self.tenant_id, "trial", int(self.admin["id"])
+        self.assertEqual(
+            3,
+            active[
+                "term_days"
+            ],
+        )
+
+        self.assertEqual(
+            0,
+            active[
+                "price_amount"
+            ],
+        )
+
+        snapshot = (
+            self.service
+            .admin_snapshot()
+        )
+
+        trial_payments = [
+            item
+            for item
+            in snapshot[
+                "payments"
+            ]
+            if int(
+                item[
+                    "subscription_id"
+                ]
+            )
+            == int(
+                active[
+                    "id"
+                ]
+            )
+        ]
+
+        self.assertEqual(
+            [],
+            trial_payments,
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        try:
+            payment_count = int(
+                conn.execute(
+                    """SELECT COUNT(*)
+                       FROM subscription_payments
+                       WHERE subscription_id=?""",
+                    (
+                        int(
+                            active[
+                                "id"
+                            ]
+                        ),
+                    ),
+                ).fetchone()[0]
             )
 
-        notifications = NotificationService(self.db_path)
-        notifications.ensure_expiry_reminders(self.tenant_id)
-        inbox = notifications.list_for_user(int(self.admin["id"]))
-        self.assertEqual(1, inbox["unread"])
-        self.assertEqual("subscription_expiry", inbox["items"][0]["event_type"])
-        # The daily reminder is idempotent even when the UI polls repeatedly.
-        notifications.ensure_expiry_reminders(self.tenant_id)
-        self.assertEqual(1, notifications.list_for_user(int(self.admin["id"]))["unread"])
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            0,
+            payment_count,
+        )
+
+        with self.assertRaisesRegex(
+            Exception,
+            "\u043f\u0440\u043e\u0431\u043d\u044b\u0439",
+        ):
+            (
+                self.service
+                .request_plan(
+                    self.tenant_id,
+                    "trial",
+                    int(
+                        self.admin[
+                            "id"
+                        ]
+                    ),
+                )
+            )
+
+        notifications = (
+            NotificationService(
+                self.db_path
+            )
+        )
+
+        notifications.ensure_expiry_reminders(
+            self.tenant_id
+        )
+
+        inbox = (
+            notifications
+            .list_for_user(
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                )
+            )
+        )
+
+        self.assertEqual(
+            1,
+            inbox[
+                "unread"
+            ],
+        )
+
+        self.assertEqual(
+            "subscription_expiry",
+            inbox[
+                "items"
+            ][0][
+                "event_type"
+            ],
+        )
+
+        # Daily reminder remains idempotent
+        # even when the UI polls repeatedly.
+        notifications.ensure_expiry_reminders(
+            self.tenant_id
+        )
+
+        self.assertEqual(
+            1,
+            (
+                notifications
+                .list_for_user(
+                    int(
+                        self.admin[
+                            "id"
+                        ]
+                    )
+                )[
+                    "unread"
+                ]
+            ),
+        )
 
 
 if __name__ == "__main__":

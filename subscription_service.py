@@ -819,7 +819,6 @@ class SubscriptionService:
         starts_at: str | None = None,
         ends_at: str | None = None,
         review_note: str = "",
-        _payment_confirmed: bool = False,
     ) -> dict[str, Any]:
         decision = str(
             decision
@@ -849,13 +848,7 @@ class SubscriptionService:
                     "Заявка на пакет не найдена."
                 )
 
-            expected_status = (
-                "awaiting_invoice"
-                if _payment_confirmed
-                else "pending"
-            )
-
-            if str(row["status"]) != expected_status:
+            if str(row["status"]) != "pending":
                 raise SubscriptionError(
                     "Заявка уже обработана."
                 )
@@ -993,10 +986,7 @@ class SubscriptionService:
                         "окончания пакета."
                     )
 
-                if (
-                    plan_code != "trial"
-                    and not _payment_confirmed
-                ):
+                if plan_code != "trial":
                     if (
                         explicit_start
                         and explicit_end
@@ -1178,54 +1168,6 @@ class SubscriptionService:
                             int(row["tenant_id"]),
                         ),
                     )
-
-                conn.execute(
-                    """INSERT INTO subscription_payments(
-                           tenant_id,
-                           subscription_id,
-                           amount,
-                           currency,
-                           status,
-                           paid_at,
-                           period_start,
-                           period_end,
-                           term_days,
-                           months_count,
-                           confirmed_by,
-                           note,
-                           created_at
-                       )
-                       VALUES(
-                           ?,?,?,?,
-                           'confirmed',
-                           ?,?,?,?,?,?,?,?
-                       )
-                       ON CONFLICT(
-                           subscription_id
-                       ) DO NOTHING""",
-                    (
-                        int(row["tenant_id"]),
-                        int(subscription_id),
-                        price,
-                        str(row["currency"]),
-                        stamp,
-                        starts,
-                        ends,
-                        days,
-                        round(days / 30, 2),
-                        int(actor_user_id),
-                        (
-                            review_note
-                            or (
-                                "Бесплатный trial"
-                                if plan_code == "trial"
-                                else
-                                "Оплата подтверждена вручную"
-                            )
-                        ),
-                        stamp,
-                    ),
-                )
 
             else:
                 conn.execute(
