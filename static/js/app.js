@@ -781,16 +781,410 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
 
   function renderSubscriptionSettings(snapshot){
     const host=$('#subscriptionSettings');if(!host)return;
-    const data=snapshot||{},ent=data.entitlement||{},current=ent.subscription||{};
-    const active=Boolean(ent.active),pending=(data.requests||[]).find(item=>item.status==='pending'),scheduled=(data.requests||[]).find(item=>item.status==='scheduled');
-    const quotas=Object.entries(ent.marketplaces||{}).map(([code,q])=>`<article class="subscription-quota ${q.enabled?'':'disabled'}"><b>${esc(marketplaceLabel(code))}</b><small>${q.enabled?'Доступна':'Выключена в пакете'}</small><span>Позиции: ${number(q.positions_used||0)} / ${q.position_limit==null?'∞':number(q.position_limit)}</span><span>Запуски сегодня: ${number(q.daily_operations_used||0)} / ${q.daily_operation_limit==null?'∞':number(q.daily_operation_limit)}</span>${q.positions_remaining===0?'<em>Недостаточно позиций — увеличьте лимит</em>':''}</article>`).join('');
-    const plans=(data.plans||[]).map(plan=>`<option value="${esc(plan.code)}">${esc(plan.name)} · ${number(plan.price_amount)} ${esc(plan.currency)} / ${number(plan.term_days)} дн.</option>`).join('');
-    const addons=(data.addons||[]).map(addon=>`<option value="${esc(addon.code)}">${esc(addon.name)} · ${number(addon.price_amount)} ${esc(addon.currency)}</option>`).join('');
-    const marketplaceOptions=Object.keys(ent.marketplaces||{}).map(code=>`<option value="${esc(code)}">${esc(marketplaceLabel(code))}</option>`).join('');
-    host.innerHTML=`<div class="subscription-summary ${active?'active':'pending'}"><div><small>Текущий пакет</small><b>${esc(active?current.plan_name||current.plan_code:'Нет активного пакета')}</b><span>${active?`${number(current.price_amount)} ${esc(current.currency)} · до ${esc(String(current.ends_at||'—'))}`:esc(ent.message||'Ожидается подтверждение')}</span></div>${pending?`<strong>Заявка «${esc(pending.plan_name)}» ожидает подтверждения</strong>`:''}${scheduled?`<strong>Следующий пакет «${esc(scheduled.plan_name)}» начнёт действовать ${esc(String(scheduled.starts_at||'—'))}</strong>`:''}</div><div class="subscription-quota-grid">${quotas||'<div class="empty compact">Лимиты появятся после подтверждения пакета.</div>'}</div>${can('manage_company')?`<div class="subscription-actions"><label>Сменить пакет<select id="subscriptionPlanSelect">${plans}</select></label><button type="button" class="secondary" id="requestSubscriptionPlan" ${pending?'disabled':''}>Отправить на подтверждение</button>${active?`<label>Дополнительные позиции<select id="subscriptionAddonSelect">${addons}</select></label><label>Площадка<select id="subscriptionAddonMarketplace">${marketplaceOptions}</select></label><button type="button" class="secondary" id="requestSubscriptionAddon">Запросить</button>`:''}</div>`:''}`;
-    $('#requestSubscriptionPlan')?.addEventListener('click',async()=>{try{await api('/api/subscription/request',{method:'POST',body:{plan_code:$('#subscriptionPlanSelect').value}});toast('Заявка на пакет отправлена');loadSettings();}catch(e){toast(e.message,true)}});
-    $('#requestSubscriptionAddon')?.addEventListener('click',async()=>{try{await api('/api/subscription/addons/request',{method:'POST',body:{addon_code:$('#subscriptionAddonSelect').value,marketplace_code:$('#subscriptionAddonMarketplace').value,quantity:1}});toast('Заявка на дополнительные позиции отправлена');loadSettings();}catch(e){toast(e.message,true)}});
+
+    const data=snapshot||{};
+    const ent=data.entitlement||{};
+    const current=ent.subscription||{};
+    const billing=data.billing||{};
+    const billingSub=billing.subscription||{};
+    const invoice=billing.invoice||{};
+
+    const active=Boolean(ent.active);
+    const pending=(data.requests||[]).find(item=>item.status==='pending');
+    const scheduled=(data.requests||[]).find(item=>item.status==='scheduled');
+
+    const quotas=Object.entries(ent.marketplaces||{}).map(([code,q])=>
+      `<article class="subscription-quota ${q.enabled?'':'disabled'}">
+        <b>${esc(marketplaceLabel(code))}</b>
+        <small>${q.enabled?'\u0414\u043e\u0441\u0442\u0443\u043f\u043d\u0430':'\u0412\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u0430 \u0432 \u043f\u0430\u043a\u0435\u0442\u0435'}</small>
+        <span>\u041f\u043e\u0437\u0438\u0446\u0438\u0438: ${number(q.positions_used||0)} / ${q.position_limit==null?'\u221e':number(q.position_limit)}</span>
+        <span>\u0417\u0430\u043f\u0443\u0441\u043a\u0438 \u0441\u0435\u0433\u043e\u0434\u043d\u044f: ${number(q.daily_operations_used||0)} / ${q.daily_operation_limit==null?'\u221e':number(q.daily_operation_limit)}</span>
+        ${q.positions_remaining===0?'<em>\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u043f\u043e\u0437\u0438\u0446\u0438\u0439 \u2014 \u0443\u0432\u0435\u043b\u0438\u0447\u044c\u0442\u0435 \u043b\u0438\u043c\u0438\u0442</em>':''}
+      </article>`
+    ).join('');
+
+    const plans=(data.plans||[]).map(plan=>
+      `<option value="${esc(plan.code)}">${esc(plan.name)} \u00b7 ${number(plan.price_amount)} ${esc(plan.currency)} / ${number(plan.term_days)} \u0434\u043d.</option>`
+    ).join('');
+
+    const addons=(data.addons||[]).map(addon=>
+      `<option value="${esc(addon.code)}">${esc(addon.name)} \u00b7 ${number(addon.price_amount)} ${esc(addon.currency)}</option>`
+    ).join('');
+
+    const marketplaceOptions=Object.keys(ent.marketplaces||{}).map(code=>
+      `<option value="${esc(code)}">${esc(marketplaceLabel(code))}</option>`
+    ).join('');
+
+    const currency=String(
+      billingSub.currency
+      || invoice.currency
+      || current.currency
+      || 'KZT'
+    );
+
+    const money=value=>{
+      const amount=Number(value||0);
+      const formatted=new Intl.NumberFormat(
+        'ru-RU',
+        {
+          minimumFractionDigits:Number.isInteger(amount)?0:2,
+          maximumFractionDigits:2
+        }
+      ).format(amount);
+
+      return `${formatted} ${currency==='KZT'?'\u20b8':esc(currency)}`;
+    };
+
+    const dateText=value=>{
+      if(!value)return '\u2014';
+
+      const date=new Date(value);
+
+      if(Number.isNaN(date.getTime())){
+        return String(value);
+      }
+
+      return date.toLocaleDateString('ru-RU');
+    };
+
+    const billingLabels={
+      awaiting_invoice:'\u041c\u043e\u0436\u043d\u043e \u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0447\u0451\u0442',
+      awaiting_payment:'\u041e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b',
+      payment_review:'\u041e\u043f\u043b\u0430\u0442\u0430 \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435',
+      payment_rejected:'\u041f\u043b\u0430\u0442\u0451\u0436 \u043d\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d'
+    };
+
+    let billingHtml='';
+
+    if(invoice&&invoice.id){
+      const billingStatus=String(
+        billingSub.status||''
+      );
+
+      billingHtml=`
+        <section class="subscription-billing-card issued">
+          <div class="subscription-billing-head">
+            <div>
+              <small>SPYON BILLING</small>
+              <h4>\u0421\u0447\u0451\u0442 ${esc(invoice.invoice_number||'')}</h4>
+              <span>${esc(billingLabels[billingStatus]||billingStatus||'\u0421\u0447\u0451\u0442 \u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d')}</span>
+            </div>
+            <strong class="subscription-billing-status">${esc(billingLabels[billingStatus]||billingStatus||'\u041e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b')}</strong>
+          </div>
+
+          <div class="subscription-invoice-grid">
+            <article>
+              <small>\u041f\u0430\u043a\u0435\u0442</small>
+              <b>${esc(billingSub.plan_name||billingSub.plan_code||'Spyon')}</b>
+            </article>
+
+            <article>
+              <small>\u041f\u0435\u0440\u0438\u043e\u0434</small>
+              <b>${number(invoice.months_count||0)} \u043c\u0435\u0441.</b>
+            </article>
+
+            <article>
+              <small>\u0418\u0442\u043e\u0433\u043e</small>
+              <b>${money(invoice.total_amount)}</b>
+            </article>
+
+            <article>
+              <small>\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0434\u043e</small>
+              <b>${esc(dateText(invoice.due_at))}</b>
+            </article>
+          </div>
+
+          <div class="subscription-billing-actions">
+            ${invoice.pdf_ready?
+              `<button
+                type="button"
+                class="primary"
+                id="downloadSubscriptionInvoice"
+              >
+                \u0421\u043a\u0430\u0447\u0430\u0442\u044c PDF
+              </button>`
+              :
+              `<span class="billing-note">
+                PDF \u0441\u0447\u0451\u0442\u0430 \u0435\u0449\u0451 \u043d\u0435 \u0433\u043e\u0442\u043e\u0432
+              </span>`
+            }
+          </div>
+        </section>
+      `;
+    }else if(
+      billingSub
+      && billingSub.id
+      && String(billingSub.status||'')==='awaiting_invoice'
+    ){
+      const periods=(
+        Array.isArray(billing.periods)
+        && billing.periods.length
+      )
+        ? billing.periods
+        : [1,2,3,6,12];
+
+      const unitPrice=Number(
+        billingSub.price_amount||0
+      );
+
+      billingHtml=`
+        <section class="subscription-billing-card">
+          <div class="subscription-billing-head">
+            <div>
+              <small>SPYON BILLING</small>
+              <h4>
+                ${esc(billingSub.plan_name||billingSub.plan_code||'Spyon')}
+              </h4>
+              <span>
+                ${money(unitPrice)} / \u043c\u0435\u0441\u044f\u0446
+              </span>
+            </div>
+            <strong class="subscription-billing-status ready">
+              \u0413\u043e\u0442\u043e\u0432 \u043a \u043e\u043f\u043b\u0430\u0442\u0435
+            </strong>
+          </div>
+
+          <div class="subscription-period-block">
+            <small>\u041f\u0435\u0440\u0438\u043e\u0434 \u043e\u043f\u043b\u0430\u0442\u044b</small>
+
+            <div class="subscription-periods">
+              ${periods.map((months,index)=>
+                `<button
+                  type="button"
+                  class="subscription-period${index===0?' active':''}"
+                  data-billing-months="${Number(months)}"
+                >
+                  ${Number(months)} \u043c\u0435\u0441.
+                </button>`
+              ).join('')}
+            </div>
+          </div>
+
+          <div class="subscription-billing-total">
+            <div>
+              <small>\u0418\u0442\u043e\u0433\u043e \u043a \u043e\u043f\u043b\u0430\u0442\u0435</small>
+              <b id="subscriptionBillingTotal">
+                ${money(unitPrice*Number(periods[0]||1))}
+              </b>
+            </div>
+
+            ${can('manage_company')?
+              `<button
+                type="button"
+                class="primary"
+                id="issueSubscriptionInvoice"
+                ${(!billing.supplier_ready||!billing.can_issue)?'disabled':''}
+              >
+                \u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0447\u0451\u0442
+              </button>`
+              :''
+            }
+          </div>
+
+          ${!billing.supplier_ready?
+            `<div class="subscription-billing-warning">
+              \u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u0434\u043b\u044f \u0432\u044b\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u0441\u0447\u0451\u0442\u0430 \u0435\u0449\u0451 \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u044b \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u043e\u043c.
+            </div>`
+            :''
+          }
+        </section>
+      `;
+    }
+
+    host.innerHTML=`
+      <div class="subscription-summary ${active?'active':'pending'}">
+        <div>
+          <small>\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u043f\u0430\u043a\u0435\u0442</small>
+          <b>${esc(active?current.plan_name||current.plan_code:'\u041d\u0435\u0442 \u0430\u043a\u0442\u0438\u0432\u043d\u043e\u0433\u043e \u043f\u0430\u043a\u0435\u0442\u0430')}</b>
+          <span>${active?`${number(current.price_amount)} ${esc(current.currency)} \u00b7 \u0434\u043e ${esc(String(current.ends_at||'\u2014'))}`:esc(ent.message||'\u041e\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044f \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435')}</span>
+        </div>
+
+        ${pending?
+          `<strong>\u0417\u0430\u044f\u0432\u043a\u0430 \u00ab${esc(pending.plan_name)}\u00bb \u043e\u0436\u0438\u0434\u0430\u0435\u0442 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f</strong>`
+          :''
+        }
+
+        ${scheduled?
+          `<strong>\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u043f\u0430\u043a\u0435\u0442 \u00ab${esc(scheduled.plan_name)}\u00bb \u043d\u0430\u0447\u043d\u0451\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c ${esc(String(scheduled.starts_at||'\u2014'))}</strong>`
+          :''
+        }
+      </div>
+
+      ${billingHtml}
+
+      <div class="subscription-quota-grid">
+        ${quotas||'<div class="empty compact">\u041b\u0438\u043c\u0438\u0442\u044b \u043f\u043e\u044f\u0432\u044f\u0442\u0441\u044f \u043f\u043e\u0441\u043b\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f \u043f\u0430\u043a\u0435\u0442\u0430.</div>'}
+      </div>
+
+      ${can('manage_company')?
+        `<div class="subscription-actions">
+          <label>
+            \u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u043a\u0435\u0442
+            <select id="subscriptionPlanSelect">${plans}</select>
+          </label>
+
+          <button
+            type="button"
+            class="secondary"
+            id="requestSubscriptionPlan"
+            ${pending?'disabled':''}
+          >
+            \u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u043d\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435
+          </button>
+
+          ${active?
+            `<label>
+              \u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438
+              <select id="subscriptionAddonSelect">${addons}</select>
+            </label>
+
+            <label>
+              \u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0430
+              <select id="subscriptionAddonMarketplace">${marketplaceOptions}</select>
+            </label>
+
+            <button
+              type="button"
+              class="secondary"
+              id="requestSubscriptionAddon"
+            >
+              \u0417\u0430\u043f\u0440\u043e\u0441\u0438\u0442\u044c
+            </button>`
+            :''
+          }
+        </div>`
+        :''
+      }
+    `;
+
+    let selectedMonths=Number(
+      billing.periods?.[0]||1
+    );
+
+    $$('.subscription-period',host).forEach(button=>{
+      button.addEventListener('click',()=>{
+        selectedMonths=Number(
+          button.dataset.billingMonths||1
+        );
+
+        $$('.subscription-period',host).forEach(item=>
+          item.classList.toggle(
+            'active',
+            item===button
+          )
+        );
+
+        const total=$(
+          '#subscriptionBillingTotal',
+          host
+        );
+
+        if(total){
+          total.textContent=money(
+            Number(
+              billingSub.price_amount||0
+            )*selectedMonths
+          );
+        }
+      });
+    });
+
+    $('#issueSubscriptionInvoice')?.addEventListener(
+      'click',
+      async event=>{
+        const button=event.currentTarget;
+
+        try{
+          button.disabled=true;
+
+          await api(
+            '/api/subscription/invoice',
+            {
+              method:'POST',
+              body:{
+                months_count:selectedMonths
+              }
+            }
+          );
+
+          toast(
+            '\u0421\u0447\u0451\u0442 \u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d'
+          );
+
+          await loadSettings();
+        }catch(e){
+          button.disabled=false;
+          toast(e.message,true);
+        }
+      }
+    );
+
+    $('#downloadSubscriptionInvoice')?.addEventListener(
+      'click',
+      ()=>{
+        if(!invoice.id)return;
+
+        window.location.href=
+          `/api/subscription/invoice/${Number(invoice.id)}/pdf`;
+      }
+    );
+
+    $('#requestSubscriptionPlan')?.addEventListener(
+      'click',
+      async()=>{
+        try{
+          await api(
+            '/api/subscription/request',
+            {
+              method:'POST',
+              body:{
+                plan_code:
+                  $('#subscriptionPlanSelect').value
+              }
+            }
+          );
+
+          toast(
+            '\u0417\u0430\u044f\u0432\u043a\u0430 \u043d\u0430 \u043f\u0430\u043a\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430'
+          );
+
+          loadSettings();
+        }catch(e){
+          toast(e.message,true);
+        }
+      }
+    );
+
+    $('#requestSubscriptionAddon')?.addEventListener(
+      'click',
+      async()=>{
+        try{
+          await api(
+            '/api/subscription/addons/request',
+            {
+              method:'POST',
+              body:{
+                addon_code:
+                  $('#subscriptionAddonSelect').value,
+                marketplace_code:
+                  $('#subscriptionAddonMarketplace').value,
+                quantity:1
+              }
+            }
+          );
+
+          toast(
+            '\u0417\u0430\u044f\u0432\u043a\u0430 \u043d\u0430 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430'
+          );
+
+          loadSettings();
+        }catch(e){
+          toast(e.message,true);
+        }
+      }
+    );
   }
+
 
   function renderTelegramStatus(data){
     state.telegram=data||{};const card=$('#telegramSettings');if(!card)return;
