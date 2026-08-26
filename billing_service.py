@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from invoice_pdf_service import (
+    InvoicePDFError,
+    InvoicePDFService,
+)
 from storage.postgres_compat import (
     PostgresConnection,
     connect_database,
@@ -108,8 +113,22 @@ class BillingService:
     def __init__(
         self,
         db_path: Path,
+        *,
+        document_root: Path | None = None,
+        invoice_pdf_service: InvoicePDFService | None = None,
     ) -> None:
         self.db_path = Path(db_path)
+
+        self.document_root = (
+            Path(document_root)
+            if document_root is not None
+            else Path.cwd()
+        ).resolve()
+
+        self.invoice_pdf_service = (
+            invoice_pdf_service
+        )
+
         self.ensure_invoice_schema()
 
     def _connect(
@@ -775,6 +794,510 @@ class BillingService:
             f"{next_value:06d}"
         )
 
+    def invoice_by_id(
+        self,
+        invoice_id: int,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+
+        try:
+            row = conn.execute(
+                """SELECT *
+                   FROM subscription_invoices
+                   WHERE id=?
+                   LIMIT 1""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            return (
+                self._invoice_dict(row)
+                if row
+                else None
+            )
+
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _invoice_pdf_payload(
+        invoice: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(invoice)
+
+        payload["seller_snapshot"] = dict(
+            invoice.get("seller")
+            or {}
+        )
+
+        payload["buyer_snapshot"] = dict(
+            invoice.get("buyer")
+            or {}
+        )
+
+        payload["line_items"] = list(
+            invoice.get("line_items")
+            or []
+        )
+
+        return payload
+
+    @staticmethod
+    def _invoice_year(
+        invoice: dict[str, Any],
+    ) -> int:
+        raw = str(
+            invoice.get("issued_at")
+            or ""
+        ).strip()
+
+        if not raw:
+            raise SubscriptionError(
+                "\u0423 "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u043d\u0435 "
+                "\u0443\u043a\u0430\u0437\u0430\u043d\u0430 "
+                "\u0434\u0430\u0442\u0430 "
+                "\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f."
+            )
+
+        try:
+            value = datetime.fromisoformat(
+                raw.replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+        except ValueError as exc:
+            raise SubscriptionError(
+                "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0430\u044f "
+                "\u0434\u0430\u0442\u0430 "
+                "\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f "
+                "\u0441\u0447\u0451\u0442\u0430."
+            ) from exc
+
+        return int(
+            value.year
+        )
+
+    def _default_invoice_pdf_service(
+        self,
+        invoice: dict[str, Any],
+    ) -> InvoicePDFService:
+        year = self._invoice_year(
+            invoice
+        )
+
+        return InvoicePDFService(
+            output_dir=(
+                self.document_root
+                / "output"
+                / "invoices"
+                / str(year)
+            ),
+            logo_path=(
+                self.document_root
+                / "static"
+                / "billing"
+                / "itp_mining_logo.png"
+            ),
+            stamp_path=(
+                self.document_root
+                / "data"
+                / "billing-assets"
+                / "itp_mining_stamp.png"
+            ),
+        )
+
+    def _invoice_storage_root(
+        self,
+    ) -> Path:
+        return (
+            self.document_root
+            / "output"
+            / "invoices"
+        ).resolve()
+
+    def _normalize_invoice_file(
+        self,
+        path_value: str | Path,
+    ) -> Path:
+        raw = Path(
+            path_value
+        )
+
+        if raw.is_absolute():
+            resolved = raw.resolve()
+        else:
+            resolved = (
+                self.document_root
+                / raw
+            ).resolve()
+
+        root = (
+            self._invoice_storage_root()
+        )
+
+        try:
+            resolved.relative_to(
+                root
+            )
+        except ValueError as exc:
+            raise SubscriptionError(
+                "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 "
+                "\u043f\u0443\u0442\u044c "
+                "\u043a PDF "
+                "\u0441\u0447\u0451\u0442\u0430."
+            ) from exc
+
+        return resolved
+
+    def _relative_invoice_file(
+        self,
+        file_path: Path,
+    ) -> str:
+        resolved = (
+            self._normalize_invoice_file(
+                file_path
+            )
+        )
+
+        try:
+            relative = resolved.relative_to(
+                self.document_root
+            )
+        except ValueError as exc:
+            raise SubscriptionError(
+                "\u041d\u0435 "
+                "\u0443\u0434\u0430\u043b\u043e\u0441\u044c "
+                "\u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c "
+                "\u043e\u0442\u043d\u043e\u0441\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0439 "
+                "\u043f\u0443\u0442\u044c "
+                "\u043a PDF "
+                "\u0441\u0447\u0451\u0442\u0430."
+            ) from exc
+
+        return relative.as_posix()
+
+    @staticmethod
+    def _file_sha256(
+        file_path: Path,
+    ) -> str:
+        digest = hashlib.sha256()
+
+        with file_path.open(
+            "rb"
+        ) as stream:
+            for chunk in iter(
+                lambda: stream.read(
+                    1024 * 1024
+                ),
+                b"",
+            ):
+                digest.update(
+                    chunk
+                )
+
+        return digest.hexdigest()
+
+    def invoice_pdf(
+        self,
+        invoice_id: int,
+    ) -> dict[str, Any]:
+        invoice = self.invoice_by_id(
+            int(invoice_id)
+        )
+
+        if not invoice:
+            raise SubscriptionError(
+                "\u0421\u0447\u0451\u0442 "
+                "\u043d\u0435 "
+                "\u043d\u0430\u0439\u0434\u0435\u043d."
+            )
+
+        relative_path = str(
+            invoice.get("pdf_path")
+            or ""
+        ).strip()
+
+        expected_sha256 = str(
+            invoice.get("pdf_sha256")
+            or ""
+        ).strip().lower()
+
+        if (
+            not relative_path
+            and not expected_sha256
+        ):
+            raise SubscriptionError(
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u0435\u0449\u0451 "
+                "\u043d\u0435 "
+                "\u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d."
+            )
+
+        if (
+            not relative_path
+            or not expected_sha256
+        ):
+            raise SubscriptionError(
+                "\u041c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435 "
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0435\u043d\u044b."
+            )
+
+        file_path = (
+            self._normalize_invoice_file(
+                relative_path
+            )
+        )
+
+        if not file_path.is_file():
+            raise SubscriptionError(
+                "\u0424\u0430\u0439\u043b "
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442."
+            )
+
+        actual_sha256 = (
+            self._file_sha256(
+                file_path
+            )
+        )
+
+        if (
+            actual_sha256
+            != expected_sha256
+        ):
+            raise SubscriptionError(
+                "\u041d\u0430\u0440\u0443\u0448\u0435\u043d\u0430 "
+                "\u0446\u0435\u043b\u043e\u0441\u0442\u043d\u043e\u0441\u0442\u044c "
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430."
+            )
+
+        return {
+            "invoice": invoice,
+            "path": file_path,
+            "relative_path":
+                relative_path,
+            "sha256":
+                actual_sha256,
+            "size":
+                int(
+                    file_path.stat().st_size
+                ),
+        }
+
+    def generate_invoice_pdf(
+        self,
+        invoice_id: int,
+    ) -> dict[str, Any]:
+        invoice = self.invoice_by_id(
+            int(invoice_id)
+        )
+
+        if not invoice:
+            raise SubscriptionError(
+                "\u0421\u0447\u0451\u0442 "
+                "\u043d\u0435 "
+                "\u043d\u0430\u0439\u0434\u0435\u043d."
+            )
+
+        if str(
+            invoice.get("status")
+            or ""
+        ) == "cancelled":
+            raise SubscriptionError(
+                "\u0414\u043b\u044f "
+                "\u043e\u0442\u043c\u0435\u043d\u0451\u043d\u043d\u043e\u0433\u043e "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "PDF "
+                "\u043d\u0435 "
+                "\u0444\u043e\u0440\u043c\u0438\u0440\u0443\u0435\u0442\u0441\u044f."
+            )
+
+        current_path = str(
+            invoice.get("pdf_path")
+            or ""
+        ).strip()
+
+        current_sha = str(
+            invoice.get("pdf_sha256")
+            or ""
+        ).strip()
+
+        if (
+            current_path
+            or current_sha
+        ):
+            return self.invoice_pdf(
+                int(invoice_id)
+            )
+
+        service = (
+            self.invoice_pdf_service
+            or self._default_invoice_pdf_service(
+                invoice
+            )
+        )
+
+        payload = (
+            self._invoice_pdf_payload(
+                invoice
+            )
+        )
+
+        try:
+            generated = service.generate(
+                payload
+            )
+        except InvoicePDFError as exc:
+            raise SubscriptionError(
+                "\u041d\u0435 "
+                "\u0443\u0434\u0430\u043b\u043e\u0441\u044c "
+                "\u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c "
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430."
+            ) from exc
+
+        generated_path_raw = str(
+            generated.get("path")
+            or ""
+        ).strip()
+
+        generated_sha = str(
+            generated.get("sha256")
+            or ""
+        ).strip().lower()
+
+        if not generated_path_raw:
+            raise SubscriptionError(
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u043d\u0435 "
+                "\u0431\u044b\u043b "
+                "\u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d."
+            )
+
+        generated_path = (
+            self._normalize_invoice_file(
+                generated_path_raw
+            )
+        )
+
+        if not generated_path.is_file():
+            raise SubscriptionError(
+                "\u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 "
+                "PDF "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u043d\u0435 "
+                "\u043d\u0430\u0439\u0434\u0435\u043d."
+            )
+
+        actual_sha = (
+            self._file_sha256(
+                generated_path
+            )
+        )
+
+        if (
+            generated_sha
+            and generated_sha
+            != actual_sha
+        ):
+            raise SubscriptionError(
+                "\u041a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u0430\u044f "
+                "\u0441\u0443\u043c\u043c\u0430 "
+                "\u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0433\u043e "
+                "PDF "
+                "\u043d\u0435 "
+                "\u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442."
+            )
+
+        relative_path = (
+            self._relative_invoice_file(
+                generated_path
+            )
+        )
+
+        conn = self._connect()
+
+        try:
+            conn.execute(
+                """UPDATE subscription_invoices
+                   SET pdf_path=?,
+                       pdf_sha256=?,
+                       updated_at=?
+                   WHERE id=?
+                     AND COALESCE(pdf_path, '')=''
+                     AND COALESCE(pdf_sha256, '')=''""",
+                (
+                    relative_path,
+                    actual_sha,
+                    now_iso(),
+                    int(invoice_id),
+                ),
+            )
+
+            stored = conn.execute(
+                """SELECT pdf_path,
+                          pdf_sha256
+                   FROM subscription_invoices
+                   WHERE id=?""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            if not stored:
+                raise SubscriptionError(
+                    "\u0421\u0447\u0451\u0442 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0439\u0434\u0435\u043d."
+                )
+
+            stored_path = str(
+                stored["pdf_path"]
+                or ""
+            )
+
+            stored_sha = str(
+                stored["pdf_sha256"]
+                or ""
+            ).lower()
+
+            if (
+                stored_path
+                != relative_path
+                or stored_sha
+                != actual_sha
+            ):
+                raise SubscriptionError(
+                    "\u041a\u043e\u043d\u0444\u043b\u0438\u043a\u0442 "
+                    "\u043f\u0440\u0438 "
+                    "\u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0438 "
+                    "PDF "
+                    "\u0441\u0447\u0451\u0442\u0430."
+                )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
+        return self.invoice_pdf(
+            int(invoice_id)
+        )
+
     def invoice_for_subscription(
         self,
         subscription_id: int,
@@ -1107,6 +1630,12 @@ class BillingService:
                     "plan_code":
                         str(
                             row["plan_code"]
+                            or ""
+                        ),
+                    "plan_name":
+                        str(
+                            row["plan_name"]
+                            or row["plan_code"]
                             or ""
                         ),
                     "name":
