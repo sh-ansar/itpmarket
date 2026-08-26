@@ -1329,6 +1329,50 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_invoices_open
 ON subscription_invoices(subscription_id)
 WHERE status<>'cancelled';
 
+CREATE TABLE IF NOT EXISTS subscription_payment_proofs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    subscription_id INTEGER NOT NULL,
+    invoice_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'under_review',
+    original_filename TEXT NOT NULL DEFAULT '',
+    stored_path TEXT NOT NULL UNIQUE,
+    mime_type TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT NOT NULL DEFAULT '',
+    uploaded_by INTEGER,
+    uploaded_at TEXT NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    review_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id)
+        REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(subscription_id)
+        REFERENCES tenant_subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY(invoice_id)
+        REFERENCES subscription_invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY(uploaded_by)
+        REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by)
+        REFERENCES app_users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_payment_proofs_invoice
+ON subscription_payment_proofs(
+    invoice_id,uploaded_at DESC
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_payment_proofs_tenant
+ON subscription_payment_proofs(
+    tenant_id,status,uploaded_at DESC
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_payment_proofs_review_open
+ON subscription_payment_proofs(invoice_id)
+WHERE status='under_review';
+
 CREATE TABLE IF NOT EXISTS tenant_subscription_addons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,

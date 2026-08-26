@@ -61,3 +61,4 @@ backups/*
 !backups/.gitkeep
 
 data/billing-assets/
+data/billing/payment-proofs/
