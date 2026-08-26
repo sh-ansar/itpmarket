@@ -64,7 +64,11 @@ from marketplace_registry import (
     parse_product_code,
 )
 from security_hygiene import redact_sensitive
-from tenant_security import company_is_approved, has_permission
+from tenant_security import (
+    company_is_approved,
+    has_permission,
+    has_platform_permission,
+)
 from subscription_service import (
     SubscriptionError,
     SubscriptionLimitError,
@@ -693,6 +697,50 @@ def platform_roles_required(*roles: str) -> Callable[[Callable[..., Any]], Calla
                 abort(403)
             return view(*args, **kwargs)
         return wrapped
+    return decorator
+
+
+def platform_permission_required(
+    permission_code: str,
+) -> Callable[
+    [Callable[..., Any]],
+    Callable[..., Any],
+]:
+    def decorator(
+        view: Callable[..., Any],
+    ) -> Callable[..., Any]:
+        @wraps(view)
+        @login_required
+        def wrapped(
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            if not has_platform_permission(
+                current_user(),
+                permission_code,
+            ):
+                if is_api_request():
+                    return jsonify(
+                        {
+                            "ok": False,
+                            "error":
+                                "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e "
+                                "\u043f\u0440\u0430\u0432 "
+                                "\u0434\u043b\u044f "
+                                "\u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0438 "
+                                "\u0431\u0438\u043b\u043b\u0438\u043d\u0433\u0430.",
+                        }
+                    ), 403
+
+                abort(403)
+
+            return view(
+                *args,
+                **kwargs,
+            )
+
+        return wrapped
+
     return decorator
 
 
@@ -2455,14 +2503,63 @@ def app_index() -> Any:
     return render_template("app.html")
 
 
-@app.get("/platform", defaults={"section": "companies"})
+@app.get("/platform")
+@platform_roles_required("superadmin", "accountant")
+def platform_root() -> Any:
+    user = current_user() or {}
+
+    if (
+        str(
+            user.get("platform_role")
+            or ""
+        )
+        == "accountant"
+    ):
+        return redirect(
+            url_for(
+                "platform_index",
+                section="payments",
+            )
+        )
+
+    return render_template(
+        "platform.html",
+        platform_section="companies",
+    )
+
+
 @app.get("/platform/<section>")
-@platform_roles_required("superadmin")
+@platform_roles_required("superadmin", "accountant")
 def platform_index(section: str) -> Any:
-    value = str(section or "companies").strip().casefold()
-    if value not in {"companies", "packages", "link-rules", "payments"}:
+    value = str(
+        section
+        or ""
+    ).strip().casefold()
+
+    if value not in {
+        "companies",
+        "packages",
+        "link-rules",
+        "payments",
+    }:
         abort(404)
-    return render_template("platform.html", platform_section=value)
+
+    user = current_user() or {}
+
+    if (
+        str(
+            user.get("platform_role")
+            or ""
+        )
+        == "accountant"
+        and value != "payments"
+    ):
+        abort(403)
+
+    return render_template(
+        "platform.html",
+        platform_section=value,
+    )
 
 
 @app.get("/api/session")
@@ -4231,25 +4328,116 @@ def api_platform_subscription_addon_review(request_id: int, decision: str) -> An
 
 
 @app.get("/api/platform/overview")
-@platform_roles_required("superadmin")
+@platform_roles_required("superadmin", "accountant")
 def api_platform_overview() -> Any:
-    section = str(request.args.get("section") or "companies").strip().casefold()
-    if section == "companies":
-        active_subscriptions = subscription_service().active_subscriptions()
-        result = SAAS.platform_overview()
-        active_by_tenant = {
-            int(item["tenant_id"]): item
-            for item in active_subscriptions
-        }
-        for tenant in result.get("tenants", []):
-            tenant["subscription"] = active_by_tenant.get(int(tenant["id"]))
-        subscriptions: dict[str, Any] = {}
-    else:
-        subscriptions = (
-            subscription_service().admin_snapshot()
-            if section in {"packages", "payments"} else {}
+    section = str(
+        request.args.get("section")
+        or "companies"
+    ).strip().casefold()
+
+    user = current_user() or {}
+    platform_role = str(
+        user.get("platform_role")
+        or ""
+    )
+
+    if (
+        platform_role == "accountant"
+        and section != "payments"
+    ):
+        return json_error(
+            "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e "
+            "\u043f\u0440\u0430\u0432.",
+            403,
         )
-        result = {"tenants": [], "totals": {"tenants": 0, "active_tenants": 0, "new_requests": 0, "products": 0}}
+
+    if section == "companies":
+        active_subscriptions = (
+            subscription_service()
+            .active_subscriptions()
+        )
+
+        result = SAAS.platform_overview()
+
+        active_by_tenant = {
+            int(item["tenant_id"]):
+                item
+            for item
+            in active_subscriptions
+        }
+
+        for tenant in result.get(
+            "tenants",
+            [],
+        ):
+            tenant["subscription"] = (
+                active_by_tenant.get(
+                    int(tenant["id"])
+                )
+            )
+
+        subscriptions: dict[
+            str,
+            Any,
+        ] = {}
+
+    elif section == "packages":
+        subscriptions = (
+            subscription_service()
+            .admin_snapshot()
+        )
+
+        result = {
+            "tenants": [],
+            "totals": {
+                "tenants": 0,
+                "active_tenants": 0,
+                "new_requests": 0,
+                "products": 0,
+            },
+        }
+
+    elif section == "payments":
+        snapshot = (
+            subscription_service()
+            .admin_snapshot()
+        )
+
+        subscriptions = {
+            "payments":
+                snapshot.get(
+                    "payments",
+                    [],
+                ),
+            "active_subscriptions":
+                snapshot.get(
+                    "active_subscriptions",
+                    [],
+                ),
+        }
+
+        result = {
+            "tenants": [],
+            "totals": {
+                "tenants": 0,
+                "active_tenants": 0,
+                "new_requests": 0,
+                "products": 0,
+            },
+        }
+
+    else:
+        subscriptions = {}
+
+        result = {
+            "tenants": [],
+            "totals": {
+                "tenants": 0,
+                "active_tenants": 0,
+                "new_requests": 0,
+                "products": 0,
+            },
+        }
     return json_ok(
         **result,
         requests=[],

@@ -10,11 +10,11 @@
 <body>
 <header class="platform-header">
   <a href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span><b>Spyon</b><small data-i18n="platform_system_admin">Управление платформой</small></span></a>
-  <nav><a class="{{ 'active' if platform_section == 'companies' else '' }}" href="{{ url_for('platform_index', section='companies') }}" data-i18n="platform_companies">Компании</a><a class="{{ 'active' if platform_section == 'packages' else '' }}" href="{{ url_for('platform_index', section='packages') }}">Пакеты</a><a class="{{ 'active' if platform_section == 'link-rules' else '' }}" href="{{ url_for('platform_index', section='link-rules') }}" data-i18n="marketplace_source_rules_nav">Правила ссылок</a><a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a></nav>
+  <nav>{% if current_user.platform_role == "accountant" %}<a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% else %}<a class="{{ 'active' if platform_section == 'companies' else '' }}" href="{{ url_for('platform_index', section='companies') }}" data-i18n="platform_companies">Компании</a><a class="{{ 'active' if platform_section == 'packages' else '' }}" href="{{ url_for('platform_index', section='packages') }}">Пакеты</a><a class="{{ 'active' if platform_section == 'link-rules' else '' }}" href="{{ url_for('platform_index', section='link-rules') }}" data-i18n="marketplace_source_rules_nav">Правила ссылок</a><a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% endif %}</nav>
   <div class="platform-actions">
     <button class="theme-switch" data-theme-toggle aria-label="Theme"><span class="theme-icon sun"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""></span><i></i><span class="theme-icon moon"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></span></button>
     <div class="languages"><button data-lang="ru">RU</button><button data-lang="kk">KZ</button><button data-lang="en">EN</button></div>
-    <a class="platform-link" href="{{ url_for('app_index') }}" data-i18n="platform_client_panel">Рабочая панель</a><span>{{ current_user.display_name }}</span>
+    {% if current_user.platform_role != "accountant" %}<a class="platform-link" href="{{ url_for('app_index') }}" data-i18n="platform_client_panel">Рабочая панель</a>{% endif %}<span>{{ current_user.display_name }}</span>
   </div>
 </header>
 

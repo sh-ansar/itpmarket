@@ -46,6 +46,52 @@ PERMISSION_DEFINITIONS: dict[str, str] = {
     "view_help": "Просмотр справки",
 }
 
+PLATFORM_PERMISSION_DEFINITIONS: dict[str, str] = {
+    "billing.view":
+        "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 "
+        "\u0431\u0438\u043b\u043b\u0438\u043d\u0433\u0430",
+    "billing.invoice.issue":
+        "\u0412\u044b\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0438\u0435 "
+        "\u0441\u0447\u0435\u0442\u043e\u0432",
+    "billing.invoice.download":
+        "\u0421\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u0435 "
+        "\u0441\u0447\u0435\u0442\u043e\u0432",
+    "billing.invoice.cancel":
+        "\u041e\u0442\u043c\u0435\u043d\u0430 "
+        "\u0441\u0447\u0435\u0442\u043e\u0432",
+    "billing.payment.view":
+        "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 "
+        "\u043e\u043f\u043b\u0430\u0442",
+    "billing.payment.confirm":
+        "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 "
+        "\u043e\u043f\u043b\u0430\u0442",
+    "billing.payment.reject":
+        "\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u0435 "
+        "\u043e\u043f\u043b\u0430\u0442",
+    "billing.report.view":
+        "\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 "
+        "\u0431\u0438\u043b\u043b\u0438\u043d\u0433\u043e\u0432\u044b\u0445 "
+        "\u043e\u0442\u0447\u0435\u0442\u043e\u0432",
+}
+
+PLATFORM_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
+    "superadmin":
+        frozenset(
+            PLATFORM_PERMISSION_DEFINITIONS
+        ),
+    "accountant":
+        frozenset(
+            PLATFORM_PERMISSION_DEFINITIONS
+        ),
+    "support":
+        frozenset(),
+    "technical":
+        frozenset(),
+    "":
+        frozenset(),
+}
+
+
 ROLE_DEFAULT_PERMISSIONS: dict[str, frozenset[str]] = {
     "viewer": frozenset({
         "view_dashboard", "view_products", "view_reports", "view_settings", "view_help",
@@ -63,6 +109,33 @@ ROLE_LABELS = {
     "operator": "Оператор",
     "viewer": "Наблюдатель",
 }
+
+
+def has_platform_permission(
+    user: dict[str, Any] | None,
+    permission: str,
+) -> bool:
+    value = user or {}
+
+    role = str(
+        value.get("platform_role")
+        or ""
+    ).strip().casefold()
+
+    permissions = (
+        PLATFORM_ROLE_PERMISSIONS
+        .get(
+            role,
+            frozenset(),
+        )
+    )
+
+    return bool(
+        permission
+        in PLATFORM_PERMISSION_DEFINITIONS
+        and permission
+        in permissions
+    )
 
 
 def canonical_company_status(value: Any) -> str:

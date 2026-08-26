@@ -24,7 +24,7 @@ from tenant_security import (
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ROLES = {"admin", "operator", "viewer"}
-PLATFORM_ROLES = {"", "superadmin", "support", "technical"}
+PLATFORM_ROLES = {"", "superadmin", "support", "technical", "accountant"}
 PASSWORD_HASH_METHOD = "scrypt"
 PASSWORD_MIN_LENGTH = 12
 
