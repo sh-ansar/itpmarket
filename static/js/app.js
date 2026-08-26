@@ -132,7 +132,8 @@
     if(externalSignal){if(externalSignal.aborted)forwardAbort();else externalSignal.addEventListener('abort',forwardAbort,{once:true})}
     const opts = {...options, headers:{...(options.headers||{})},signal:controller.signal};
     delete opts.timeoutMs;
-    if (opts.body && typeof opts.body !== 'string') { opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body); }
+    const formDataBody=typeof FormData!=='undefined'&&opts.body instanceof FormData;
+    if (opts.body && typeof opts.body !== 'string' && !formDataBody) { opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body); }
     if (opts.method && opts.method !== 'GET') opts.headers['X-CSRF-Token']=csrf;
     const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):0;
     try{
@@ -788,6 +789,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     const billing=data.billing||{};
     const billingSub=billing.subscription||{};
     const invoice=billing.invoice||{};
+    const paymentProof=billing.payment_proof||{};
 
     const active=Boolean(ent.active);
     const pending=(data.requests||[]).find(item=>item.status==='pending');
@@ -861,6 +863,125 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         billingSub.status||''
       );
 
+      const proofStatus=String(
+        paymentProof.status||''
+      );
+
+      const canUploadProof=
+        can('manage_company')
+        && (
+          billingStatus==='awaiting_payment'
+          || billingStatus==='payment_rejected'
+        );
+
+      const proofStatusLabel={
+        under_review:'\u041d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435',
+        rejected:'\u041e\u0442\u043a\u043b\u043e\u043d\u0451\u043d',
+        confirmed:'\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d',
+        superseded:'\u0417\u0430\u043c\u0435\u043d\u0451\u043d'
+      }[proofStatus]||proofStatus;
+
+      const existingProofHtml=paymentProof.id
+        ? `
+          <div class="subscription-proof-current">
+            <div>
+              <small>\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442</small>
+              <b>${esc(paymentProof.original_filename||'\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442')}</b>
+              <span>
+                ${esc(proofStatusLabel||'\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043d')}
+                ${paymentProof.uploaded_at?`\u00b7 ${esc(dateText(paymentProof.uploaded_at))}`:''}
+              </span>
+            </div>
+
+            ${paymentProof.download_ready?
+              `<button
+                type="button"
+                class="secondary"
+                id="downloadSubscriptionPaymentProof"
+              >
+                \u0421\u043a\u0430\u0447\u0430\u0442\u044c
+              </button>`
+              :''
+            }
+          </div>
+        `
+        :'';
+
+      const rejectedHtml=
+        billingStatus==='payment_rejected'
+          ? `
+            <div class="subscription-proof-rejected">
+              <b>\u041e\u043f\u043b\u0430\u0442\u0430 \u043d\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430</b>
+              <span>
+                ${esc(paymentProof.review_note||'\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0439 \u043f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442.')}
+              </span>
+            </div>
+          `
+          :'';
+
+      const uploadProofHtml=canUploadProof
+        ? `
+          <div class="subscription-proof-upload">
+            <div class="subscription-proof-upload-copy">
+              <small>\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u043e\u043f\u043b\u0430\u0442\u044b</small>
+              <b>
+                ${billingStatus==='payment_rejected'
+                  ?'\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043d\u043e\u0432\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442'
+                  :'\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442'
+                }
+              </b>
+              <span>PDF, JPG, JPEG \u0438\u043b\u0438 PNG \u00b7 \u0434\u043e 10 MB</span>
+            </div>
+
+            <label
+              class="subscription-proof-file"
+              for="subscriptionPaymentProofFile"
+            >
+              <input
+                id="subscriptionPaymentProofFile"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+              >
+              <span id="subscriptionPaymentProofName">
+                \u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b
+              </span>
+            </label>
+
+            <button
+              type="button"
+              class="primary"
+              id="uploadSubscriptionPaymentProof"
+              disabled
+            >
+              \u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443
+            </button>
+          </div>
+        `
+        :'';
+
+      const paymentProofHtml=`
+        <section class="subscription-proof-card ${esc(billingStatus)}">
+          <div class="subscription-proof-head">
+            <div>
+              <small>PAYMENT CONFIRMATION</small>
+              <h5>\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u043e\u043f\u043b\u0430\u0442\u044b</h5>
+            </div>
+
+            ${
+              billingStatus==='payment_review'
+                ?'<strong class="subscription-proof-state review">\u041d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435</strong>'
+                :billingStatus==='payment_rejected'
+                  ?'<strong class="subscription-proof-state rejected">\u041d\u0443\u0436\u043d\u043e \u0438\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c</strong>'
+                  :'<strong class="subscription-proof-state">\u041e\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044f</strong>'
+            }
+          </div>
+
+          ${rejectedHtml}
+          ${existingProofHtml}
+          ${uploadProofHtml}
+        </section>
+      `;
+
       billingHtml=`
         <section class="subscription-billing-card issued">
           <div class="subscription-billing-head">
@@ -909,6 +1030,8 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
               </span>`
             }
           </div>
+
+          ${paymentProofHtml}
         </section>
       `;
     }else if(
@@ -1126,6 +1249,101 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
 
         window.location.href=
           `/api/subscription/invoice/${Number(invoice.id)}/pdf`;
+      }
+    );
+
+    const paymentProofInput=$(
+      '#subscriptionPaymentProofFile'
+    );
+
+    const paymentProofUploadButton=$(
+      '#uploadSubscriptionPaymentProof'
+    );
+
+    paymentProofInput?.addEventListener(
+      'change',
+      ()=>{
+        const file=paymentProofInput.files?.[0]||null;
+
+        const name=$(
+          '#subscriptionPaymentProofName'
+        );
+
+        if(name){
+          name.textContent=file
+            ?file.name
+            :'\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b';
+        }
+
+        if(paymentProofUploadButton){
+          paymentProofUploadButton.disabled=!file;
+        }
+      }
+    );
+
+    paymentProofUploadButton?.addEventListener(
+      'click',
+      async event=>{
+        const button=event.currentTarget;
+        const file=paymentProofInput?.files?.[0];
+
+        if(!file){
+          toast(
+            '\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442',
+            true
+          );
+          return;
+        }
+
+        if(file.size>10*1024*1024){
+          toast(
+            '\u0424\u0430\u0439\u043b \u0431\u043e\u043b\u044c\u0448\u0435 10 MB',
+            true
+          );
+          return;
+        }
+
+        const form=new FormData();
+        form.append(
+          'file',
+          file,
+          file.name
+        );
+
+        try{
+          button.disabled=true;
+
+          await api(
+            `/api/subscription/invoice/${Number(invoice.id)}/payment-proof`,
+            {
+              method:'POST',
+              body:form,
+              timeoutMs:30000
+            }
+          );
+
+          toast(
+            '\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443'
+          );
+
+          await loadSettings();
+        }catch(e){
+          button.disabled=false;
+          toast(
+            e.message,
+            true
+          );
+        }
+      }
+    );
+
+    $('#downloadSubscriptionPaymentProof')?.addEventListener(
+      'click',
+      ()=>{
+        if(!invoice.id)return;
+
+        window.location.href=
+          `/api/subscription/invoice/${Number(invoice.id)}/payment-proof`;
       }
     );
 

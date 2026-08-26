@@ -3421,3 +3421,150 @@ html[data-theme="dark"] .help-body li{color:#b8cbd4}
     flex:1 1 calc(50% - 8px)
   }
 }
+
+.subscription-proof-card{
+  display:grid;
+  gap:12px;
+  margin-top:4px;
+  padding:15px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface-2)
+}
+.subscription-proof-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px
+}
+.subscription-proof-head>div{
+  display:grid;
+  gap:3px
+}
+.subscription-proof-head small{
+  color:var(--blue);
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:.1em
+}
+.subscription-proof-head h5{
+  margin:0;
+  font-size:13px
+}
+.subscription-proof-state{
+  padding:6px 9px;
+  border-radius:999px;
+  background:#fff5dc;
+  color:#8c6612;
+  font-size:9px;
+  white-space:nowrap
+}
+.subscription-proof-state.review{
+  background:#e8f1ff;
+  color:#1460c9
+}
+.subscription-proof-state.rejected{
+  background:#fff0f2;
+  color:#a83242
+}
+.subscription-proof-current{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface)
+}
+.subscription-proof-current>div{
+  display:grid;
+  gap:3px
+}
+.subscription-proof-current small,
+.subscription-proof-current span{
+  color:var(--muted);
+  font-size:9px
+}
+.subscription-proof-current b{
+  font-size:11px;
+  overflow-wrap:anywhere
+}
+.subscription-proof-rejected{
+  display:grid;
+  gap:4px;
+  padding:10px 12px;
+  border:1px solid #ecc4ca;
+  border-radius:10px;
+  background:#fff4f5
+}
+.subscription-proof-rejected b{
+  color:#a83242;
+  font-size:10px
+}
+.subscription-proof-rejected span{
+  color:#7d4b52;
+  font-size:10px;
+  line-height:16px
+}
+.subscription-proof-upload{
+  display:grid;
+  grid-template-columns:minmax(170px,1fr) minmax(180px,1fr) auto;
+  align-items:end;
+  gap:10px
+}
+.subscription-proof-upload-copy{
+  display:grid;
+  gap:3px
+}
+.subscription-proof-upload-copy small,
+.subscription-proof-upload-copy span{
+  color:var(--muted);
+  font-size:9px
+}
+.subscription-proof-upload-copy b{
+  font-size:11px
+}
+.subscription-proof-file{
+  position:relative;
+  display:flex;
+  align-items:center;
+  min-height:40px;
+  padding:8px 11px;
+  border:1px dashed var(--line);
+  border-radius:9px;
+  background:var(--surface);
+  cursor:pointer;
+  overflow:hidden
+}
+.subscription-proof-file:hover{
+  border-color:var(--blue)
+}
+.subscription-proof-file input{
+  position:absolute;
+  width:1px;
+  height:1px;
+  opacity:0;
+  pointer-events:none
+}
+.subscription-proof-file span{
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--ink);
+  font-size:10px
+}
+
+@media(max-width:900px){
+  .subscription-proof-upload{
+    grid-template-columns:1fr
+  }
+}
+
+@media(max-width:560px){
+  .subscription-proof-head,
+  .subscription-proof-current{
+    display:grid
+  }
+}
