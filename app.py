@@ -3789,12 +3789,51 @@ def api_subscription_invoice_create() -> Any:
                 "\u0441\u0447\u0451\u0442."
             )
 
-        if str(
+        subscription_status = str(
             subscription.get(
                 "status"
             )
             or ""
-        ) != "awaiting_invoice":
+        )
+
+        existing_invoice = (
+            state.get(
+                "invoice"
+            )
+            or {}
+        )
+
+        retry_pdf = (
+            subscription_status
+            in {
+                "awaiting_payment",
+                "payment_review",
+                "payment_rejected",
+            }
+            and int(
+                existing_invoice.get(
+                    "id"
+                )
+                or 0
+            ) > 0
+            and str(
+                existing_invoice.get(
+                    "status"
+                )
+                or ""
+            ) == "issued"
+            and not bool(
+                existing_invoice.get(
+                    "pdf_ready"
+                )
+            )
+        )
+
+        if (
+            subscription_status
+            != "awaiting_invoice"
+            and not retry_pdf
+        ):
             raise SubscriptionError(
                 "\u0421\u0447\u0451\u0442 "
                 "\u0443\u0436\u0435 "
@@ -3806,6 +3845,28 @@ def api_subscription_invoice_create() -> Any:
                 "\u0433\u043e\u0442\u043e\u0432 "
                 "\u043a "
                 "\u043e\u043f\u043b\u0430\u0442\u0435."
+            )
+
+        if retry_pdf:
+            billing.generate_invoice_pdf(
+                int(
+                    existing_invoice[
+                        "id"
+                    ]
+                )
+            )
+
+            return json_ok(
+                billing=(
+                    billing
+                    .tenant_billing_snapshot(
+                        int(
+                            user[
+                                "tenant_id"
+                            ]
+                        )
+                    )
+                )
             )
 
         supplier = (

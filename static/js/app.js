@@ -1027,10 +1027,17 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
               >
                 \u0421\u043a\u0430\u0447\u0430\u0442\u044c PDF
               </button>`
-              :
-              `<span class="billing-note">
-                PDF \u0441\u0447\u0451\u0442\u0430 \u0435\u0449\u0451 \u043d\u0435 \u0433\u043e\u0442\u043e\u0432
-              </span>`
+              :can('manage_company')
+                ?`<button
+                    type="button"
+                    class="primary"
+                    id="retrySubscriptionInvoicePdf"
+                  >
+                    \u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c PDF
+                  </button>`
+                :`<span class="billing-note">
+                    PDF \u0441\u0447\u0451\u0442\u0430 \u0435\u0449\u0451 \u043d\u0435 \u0433\u043e\u0442\u043e\u0432
+                  </span>`
             }
           </div>
 
