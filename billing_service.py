@@ -1633,14 +1633,7 @@ class BillingService:
                 )
 
             query += """
-                       ORDER BY
-                           CASE status
-                               WHEN 'under_review' THEN 0
-                               WHEN 'rejected' THEN 1
-                               WHEN 'confirmed' THEN 2
-                               ELSE 3
-                           END,
-                           id DESC
+                       ORDER BY id DESC
                        LIMIT 1"""
 
             row = conn.execute(
@@ -1771,10 +1764,40 @@ class BillingService:
                 content
             )
 
+        display_filename = (
+            Path(
+                str(
+                    original_filename
+                    or ""
+                ).replace(
+                    "\\",
+                    "/",
+                )
+            )
+            .name
+            .strip()
+        )
+
+        if not display_filename:
+            raise SubscriptionError(
+                "\u0423 "
+                "\u0444\u0430\u0439\u043b\u0430 "
+                "\u043d\u0435\u0442 "
+                "\u0438\u043c\u0435\u043d\u0438."
+            )
+
+        if len(display_filename) > 255:
+            raise SubscriptionError(
+                "\u0418\u043c\u044f "
+                "\u0444\u0430\u0439\u043b\u0430 "
+                "\u0441\u043b\u0438\u0448\u043a\u043e\u043c "
+                "\u0434\u043b\u0438\u043d\u043d\u043e\u0435."
+            )
+
         extension, canonical_mime = (
             self
             ._validate_payment_proof_content(
-                original_filename,
+                display_filename,
                 mime_type,
                 content,
             )
@@ -1836,6 +1859,7 @@ class BillingService:
 
         if subscription_status not in {
             "awaiting_payment",
+            "payment_review",
             "payment_rejected",
         }:
             raise SubscriptionError(
@@ -1936,6 +1960,7 @@ class BillingService:
                      AND tenant_id=?
                      AND status IN(
                          'awaiting_payment',
+                         'payment_review',
                          'payment_rejected'
                      )""",
                 (
@@ -1993,10 +2018,7 @@ class BillingService:
                         ]
                     ),
                     int(invoice_id),
-                    str(
-                        original_filename
-                        or ""
-                    ).strip(),
+                    display_filename,
                     relative_path,
                     canonical_mime,
                     len(content),
@@ -2346,6 +2368,1264 @@ class BillingService:
                 if row
                 else None
             )
+
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _billing_datetime(
+        value: Any,
+    ) -> Any:
+        from datetime import datetime
+
+        raw = str(
+            value
+            or ""
+        ).strip()
+
+        if not raw:
+            return None
+
+        if raw.endswith("Z"):
+            raw = (
+                raw[:-1]
+                + "+00:00"
+            )
+
+        try:
+            result = (
+                datetime.fromisoformat(
+                    raw
+                )
+            )
+        except ValueError:
+            return None
+
+        if result.tzinfo is None:
+            result = result.replace(
+                tzinfo=(
+                    datetime.now()
+                    .astimezone()
+                    .tzinfo
+                )
+            )
+
+        return result
+
+    @staticmethod
+    def _add_calendar_months(
+        value: Any,
+        months_count: int,
+    ) -> Any:
+        from calendar import monthrange
+
+        months = int(
+            months_count
+        )
+
+        month_index = (
+            value.month
+            - 1
+            + months
+        )
+
+        year = (
+            value.year
+            + month_index // 12
+        )
+
+        month = (
+            month_index % 12
+            + 1
+        )
+
+        day = min(
+            value.day,
+            monthrange(
+                year,
+                month,
+            )[1],
+        )
+
+        return value.replace(
+            year=year,
+            month=month,
+            day=day,
+        )
+
+    def platform_payment_items(
+        self,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+
+        try:
+            rows = conn.execute(
+                """SELECT
+                       i.id AS invoice_id,
+                       i.invoice_number,
+                       i.status AS invoice_status,
+                       i.months_count,
+                       i.total_amount,
+                       i.currency,
+                       i.issued_at,
+                       i.due_at,
+                       i.pdf_path,
+                       i.pdf_sha256,
+
+                       s.id AS subscription_id,
+                       s.status AS subscription_status,
+                       s.starts_at,
+                       s.ends_at,
+
+                       p.code AS plan_code,
+                       p.name AS plan_name,
+
+                       t.id AS tenant_id,
+                       t.name AS tenant_name,
+                       t.registration_number,
+
+                       proof.id AS proof_id,
+                       proof.status AS proof_status,
+                       proof.original_filename,
+                       proof.mime_type,
+                       proof.file_size,
+                       proof.uploaded_at,
+                       proof.reviewed_at,
+                       proof.review_note
+
+                   FROM subscription_invoices i
+
+                   JOIN tenant_subscriptions s
+                     ON s.id=i.subscription_id
+
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+
+                   JOIN tenants t
+                     ON t.id=i.tenant_id
+
+                   LEFT JOIN subscription_payment_proofs proof
+                     ON proof.id=(
+                         SELECT p2.id
+                         FROM subscription_payment_proofs p2
+                         WHERE p2.invoice_id=i.id
+                           AND p2.status<>'superseded'
+                         ORDER BY p2.id DESC
+                         LIMIT 1
+                     )
+
+                   WHERE i.status='issued'
+                     AND s.status IN(
+                         'awaiting_payment',
+                         'payment_review',
+                         'payment_rejected'
+                     )
+
+                   ORDER BY
+                       CASE s.status
+                           WHEN 'payment_review' THEN 0
+                           WHEN 'awaiting_payment' THEN 1
+                           ELSE 2
+                       END,
+                       COALESCE(
+                           proof.uploaded_at,
+                           i.issued_at
+                       ),
+                       i.id"""
+            ).fetchall()
+
+        finally:
+            conn.close()
+
+        result: list[
+            dict[str, Any]
+        ] = []
+
+        for row in rows:
+            value = dict(row)
+
+            result.append(
+                {
+                    "invoice_id":
+                        int(
+                            value[
+                                "invoice_id"
+                            ]
+                        ),
+                    "invoice_number":
+                        str(
+                            value[
+                                "invoice_number"
+                            ]
+                        ),
+                    "invoice_status":
+                        str(
+                            value[
+                                "invoice_status"
+                            ]
+                        ),
+                    "months_count":
+                        int(
+                            value[
+                                "months_count"
+                            ]
+                        ),
+                    "total_amount":
+                        float(
+                            value[
+                                "total_amount"
+                            ]
+                        ),
+                    "currency":
+                        str(
+                            value[
+                                "currency"
+                            ]
+                        ),
+                    "issued_at":
+                        str(
+                            value[
+                                "issued_at"
+                            ]
+                            or ""
+                        ),
+                    "due_at":
+                        str(
+                            value[
+                                "due_at"
+                            ]
+                            or ""
+                        ),
+                    "invoice_pdf_ready":
+                        bool(
+                            str(
+                                value[
+                                    "pdf_path"
+                                ]
+                                or ""
+                            ).strip()
+                            and str(
+                                value[
+                                    "pdf_sha256"
+                                ]
+                                or ""
+                            ).strip()
+                        ),
+                    "subscription_id":
+                        int(
+                            value[
+                                "subscription_id"
+                            ]
+                        ),
+                    "subscription_status":
+                        str(
+                            value[
+                                "subscription_status"
+                            ]
+                        ),
+                    "starts_at":
+                        str(
+                            value[
+                                "starts_at"
+                            ]
+                            or ""
+                        ),
+                    "ends_at":
+                        str(
+                            value[
+                                "ends_at"
+                            ]
+                            or ""
+                        ),
+                    "plan_code":
+                        str(
+                            value[
+                                "plan_code"
+                            ]
+                        ),
+                    "plan_name":
+                        str(
+                            value[
+                                "plan_name"
+                            ]
+                        ),
+                    "tenant_id":
+                        int(
+                            value[
+                                "tenant_id"
+                            ]
+                        ),
+                    "tenant_name":
+                        str(
+                            value[
+                                "tenant_name"
+                            ]
+                        ),
+                    "registration_number":
+                        str(
+                            value[
+                                "registration_number"
+                            ]
+                            or ""
+                        ),
+                    "proof":
+                        (
+                            {
+                                "id":
+                                    int(
+                                        value[
+                                            "proof_id"
+                                        ]
+                                    ),
+                                "status":
+                                    str(
+                                        value[
+                                            "proof_status"
+                                        ]
+                                        or ""
+                                    ),
+                                "original_filename":
+                                    str(
+                                        value[
+                                            "original_filename"
+                                        ]
+                                        or ""
+                                    ),
+                                "mime_type":
+                                    str(
+                                        value[
+                                            "mime_type"
+                                        ]
+                                        or ""
+                                    ),
+                                "file_size":
+                                    int(
+                                        value[
+                                            "file_size"
+                                        ]
+                                        or 0
+                                    ),
+                                "uploaded_at":
+                                    str(
+                                        value[
+                                            "uploaded_at"
+                                        ]
+                                        or ""
+                                    ),
+                                "reviewed_at":
+                                    str(
+                                        value[
+                                            "reviewed_at"
+                                        ]
+                                        or ""
+                                    ),
+                                "review_note":
+                                    str(
+                                        value[
+                                            "review_note"
+                                        ]
+                                        or ""
+                                    ),
+                            }
+                            if value[
+                                "proof_id"
+                            ]
+                            is not None
+                            else None
+                        ),
+                }
+            )
+
+        return result
+
+    def reject_invoice_payment(
+        self,
+        invoice_id: int,
+        actor_user_id: int,
+        *,
+        review_note: str,
+    ) -> dict[str, Any]:
+        note = str(
+            review_note
+            or ""
+        ).strip()
+
+        if not note:
+            raise SubscriptionError(
+                "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 "
+                "\u043f\u0440\u0438\u0447\u0438\u043d\u0443 "
+                "\u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u044f "
+                "\u043e\u043f\u043b\u0430\u0442\u044b."
+            )
+
+        if len(note) > 2000:
+            raise SubscriptionError(
+                "\u041f\u0440\u0438\u0447\u0438\u043d\u0430 "
+                "\u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u044f "
+                "\u0441\u043b\u0438\u0448\u043a\u043e\u043c "
+                "\u0434\u043b\u0438\u043d\u043d\u0430\u044f."
+            )
+
+        stamp = now_iso()
+        conn = self._connect()
+
+        try:
+            row = conn.execute(
+                """SELECT
+                       i.id AS invoice_id,
+                       i.invoice_number,
+                       i.tenant_id,
+                       i.subscription_id,
+                       i.status AS invoice_status,
+                       s.status AS subscription_status
+                   FROM subscription_invoices i
+                   JOIN tenant_subscriptions s
+                     ON s.id=i.subscription_id
+                   WHERE i.id=?""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            if not row:
+                raise SubscriptionError(
+                    "\u0421\u0447\u0451\u0442 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0439\u0434\u0435\u043d."
+                )
+
+            if str(
+                row[
+                    "invoice_status"
+                ]
+            ) != "issued":
+                raise SubscriptionError(
+                    "\u0421\u0447\u0451\u0442 "
+                    "\u0443\u0436\u0435 "
+                    "\u043d\u0435 "
+                    "\u043e\u0436\u0438\u0434\u0430\u0435\u0442 "
+                    "\u043e\u043f\u043b\u0430\u0442\u044b."
+                )
+
+            if str(
+                row[
+                    "subscription_status"
+                ]
+            ) != "payment_review":
+                raise SubscriptionError(
+                    "\u041e\u043f\u043b\u0430\u0442\u0430 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0445\u043e\u0434\u0438\u0442\u0441\u044f "
+                    "\u043d\u0430 "
+                    "\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435."
+                )
+
+            proof = conn.execute(
+                """SELECT *
+                   FROM subscription_payment_proofs
+                   WHERE invoice_id=?
+                     AND status='under_review'
+                   ORDER BY id DESC
+                   LIMIT 1""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            if not proof:
+                raise SubscriptionError(
+                    "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+                    "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+                    "\u0434\u043b\u044f "
+                    "\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0439\u0434\u0435\u043d."
+                )
+
+            subscription_cursor = conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET
+                       status='payment_rejected',
+                       updated_at=?
+                   WHERE id=?
+                     AND status='payment_review'""",
+                (
+                    stamp,
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            )
+
+            if subscription_cursor.rowcount != 1:
+                raise SubscriptionError(
+                    "\u0421\u0442\u0430\u0442\u0443\u0441 "
+                    "\u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438 "
+                    "\u0443\u0436\u0435 "
+                    "\u0438\u0437\u043c\u0435\u043d\u0438\u043b\u0441\u044f."
+                )
+
+            proof_cursor = conn.execute(
+                """UPDATE subscription_payment_proofs
+                   SET
+                       status='rejected',
+                       reviewed_by=?,
+                       reviewed_at=?,
+                       review_note=?,
+                       updated_at=?
+                   WHERE id=?
+                     AND status='under_review'""",
+                (
+                    int(actor_user_id),
+                    stamp,
+                    note,
+                    stamp,
+                    int(proof["id"]),
+                ),
+            )
+
+            if proof_cursor.rowcount != 1:
+                raise SubscriptionError(
+                    "\u041f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 "
+                    "\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 "
+                    "\u0443\u0436\u0435 "
+                    "\u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0430\u043d."
+                )
+
+            conn.execute(
+                """INSERT INTO platform_audit_log(
+                       actor_user_id,
+                       action,
+                       tenant_id,
+                       entity_type,
+                       entity_id,
+                       details_json,
+                       created_at
+                   )
+                   VALUES(
+                       ?,?,?,?,?,?,?
+                   )""",
+                (
+                    int(actor_user_id),
+                    "billing_payment_rejected",
+                    int(
+                        row[
+                            "tenant_id"
+                        ]
+                    ),
+                    "subscription_invoice",
+                    str(
+                        int(invoice_id)
+                    ),
+                    json.dumps(
+                        {
+                            "invoice_number":
+                                str(
+                                    row[
+                                        "invoice_number"
+                                    ]
+                                ),
+                            "proof_id":
+                                int(
+                                    proof["id"]
+                                ),
+                            "review_note":
+                                note,
+                        },
+                        ensure_ascii=False,
+                        separators=(
+                            ",",
+                            ":",
+                        ),
+                    ),
+                    stamp,
+                ),
+            )
+
+            conn.commit()
+
+            updated_proof = conn.execute(
+                """SELECT *
+                   FROM subscription_payment_proofs
+                   WHERE id=?""",
+                (
+                    int(proof["id"]),
+                ),
+            ).fetchone()
+
+            updated_subscription = conn.execute(
+                """SELECT *
+                   FROM tenant_subscriptions
+                   WHERE id=?""",
+                (
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchone()
+
+            return {
+                "subscription":
+                    dict(
+                        updated_subscription
+                    ),
+                "proof":
+                    self._payment_proof_dict(
+                        updated_proof
+                    ),
+            }
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
+    def confirm_invoice_payment(
+        self,
+        invoice_id: int,
+        actor_user_id: int,
+        *,
+        note: str = "",
+    ) -> dict[str, Any]:
+        from datetime import datetime
+
+        confirmation_note = str(
+            note
+            or ""
+        ).strip()
+
+        if len(
+            confirmation_note
+        ) > 2000:
+            raise SubscriptionError(
+                "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439 "
+                "\u0441\u043b\u0438\u0448\u043a\u043e\u043c "
+                "\u0434\u043b\u0438\u043d\u043d\u044b\u0439."
+            )
+
+        stamp = now_iso()
+        now = (
+            datetime.now()
+            .astimezone()
+        )
+
+        conn = self._connect()
+
+        try:
+            row = conn.execute(
+                """SELECT
+                       i.id AS invoice_id,
+                       i.invoice_number,
+                       i.status AS invoice_status,
+                       i.tenant_id,
+                       i.subscription_id,
+                       i.months_count,
+                       i.total_amount,
+                       i.currency,
+
+                       s.status AS subscription_status,
+                       s.starts_at AS subscription_starts_at,
+
+                       p.code AS plan_code,
+                       p.name AS plan_name,
+
+                       t.status AS tenant_status
+
+                   FROM subscription_invoices i
+
+                   JOIN tenant_subscriptions s
+                     ON s.id=i.subscription_id
+
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+
+                   JOIN tenants t
+                     ON t.id=i.tenant_id
+
+                   WHERE i.id=?""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            if not row:
+                raise SubscriptionError(
+                    "\u0421\u0447\u0451\u0442 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0439\u0434\u0435\u043d."
+                )
+
+            existing_payment = conn.execute(
+                """SELECT *
+                   FROM subscription_payments
+                   WHERE subscription_id=?
+                   LIMIT 1""",
+                (
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchone()
+
+            if existing_payment:
+                subscription = conn.execute(
+                    """SELECT *
+                       FROM tenant_subscriptions
+                       WHERE id=?""",
+                    (
+                        int(
+                            row[
+                                "subscription_id"
+                            ]
+                        ),
+                    ),
+                ).fetchone()
+
+                return {
+                    "payment":
+                        dict(
+                            existing_payment
+                        ),
+                    "subscription":
+                        dict(
+                            subscription
+                        ),
+                    "already_confirmed":
+                        True,
+                }
+
+            if str(
+                row[
+                    "invoice_status"
+                ]
+            ) != "issued":
+                raise SubscriptionError(
+                    "\u0421\u0447\u0451\u0442 "
+                    "\u0443\u0436\u0435 "
+                    "\u043d\u0435 "
+                    "\u043e\u0436\u0438\u0434\u0430\u0435\u0442 "
+                    "\u043e\u043f\u043b\u0430\u0442\u044b."
+                )
+
+            subscription_status = str(
+                row[
+                    "subscription_status"
+                ]
+            )
+
+            if subscription_status not in {
+                "awaiting_payment",
+                "payment_review",
+                "payment_rejected",
+            }:
+                raise SubscriptionError(
+                    "\u041e\u043f\u043b\u0430\u0442\u0430 "
+                    "\u043d\u0435 "
+                    "\u043c\u043e\u0436\u0435\u0442 "
+                    "\u0431\u044b\u0442\u044c "
+                    "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430 "
+                    "\u0432 "
+                    "\u0442\u0435\u043a\u0443\u0449\u0435\u043c "
+                    "\u0441\u0442\u0430\u0442\u0443\u0441\u0435."
+                )
+
+            if str(
+                row[
+                    "tenant_status"
+                ]
+            ) not in {
+                "approved",
+                "active",
+            }:
+                raise SubscriptionError(
+                    "\u041a\u043e\u043c\u043f\u0430\u043d\u0438\u044f "
+                    "\u043d\u0435 "
+                    "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430."
+                )
+
+            months = int(
+                row[
+                    "months_count"
+                ]
+            )
+
+            if months not in BILLING_PERIOD_MONTHS:
+                raise SubscriptionError(
+                    "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0439 "
+                    "\u043f\u0435\u0440\u0438\u043e\u0434 "
+                    "\u0441\u0447\u0451\u0442\u0430."
+                )
+
+            amount = float(
+                row[
+                    "total_amount"
+                ]
+            )
+
+            if amount < 0:
+                raise SubscriptionError(
+                    "\u041d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0430\u044f "
+                    "\u0441\u0443\u043c\u043c\u0430 "
+                    "\u0441\u0447\u0451\u0442\u0430."
+                )
+
+            approved_start = (
+                self._billing_datetime(
+                    row[
+                        "subscription_starts_at"
+                    ]
+                )
+            )
+
+            latest_existing_end = None
+
+            current_rows = conn.execute(
+                """SELECT
+                       s.id,
+                       s.ends_at,
+                       p.code AS plan_code
+                   FROM tenant_subscriptions s
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+                   WHERE s.tenant_id=?
+                     AND s.id<>?
+                     AND s.status IN(
+                         'active',
+                         'scheduled'
+                     )
+                   ORDER BY
+                       s.ends_at DESC,
+                       s.id DESC""",
+                (
+                    int(
+                        row[
+                            "tenant_id"
+                        ]
+                    ),
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchall()
+
+            for current in current_rows:
+                if str(
+                    current[
+                        "plan_code"
+                    ]
+                    or ""
+                ).casefold() == "legacy":
+                    continue
+
+                current_end = (
+                    self
+                    ._billing_datetime(
+                        current[
+                            "ends_at"
+                        ]
+                    )
+                )
+
+                if (
+                    current_end
+                    and current_end > now
+                ):
+                    latest_existing_end = (
+                        current_end
+                    )
+                    break
+
+            start_dt = now
+
+            if (
+                approved_start
+                and approved_start
+                > start_dt
+            ):
+                start_dt = (
+                    approved_start
+                )
+
+            if (
+                latest_existing_end
+                and latest_existing_end
+                > start_dt
+            ):
+                start_dt = (
+                    latest_existing_end
+                )
+
+            end_dt = (
+                self._add_calendar_months(
+                    start_dt,
+                    months,
+                )
+            )
+
+            seconds = (
+                end_dt
+                - start_dt
+            ).total_seconds()
+
+            term_days = max(
+                1,
+                int(
+                    (
+                        seconds
+                        + 86399
+                    )
+                    // 86400
+                ),
+            )
+
+            starts = (
+                start_dt.isoformat(
+                    timespec="seconds"
+                )
+            )
+
+            ends = (
+                end_dt.isoformat(
+                    timespec="seconds"
+                )
+            )
+
+            new_status = (
+                "scheduled"
+                if start_dt > now
+                else "active"
+            )
+
+            subscription_cursor = conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET
+                       status=?,
+                       starts_at=?,
+                       ends_at=?,
+                       term_days=?,
+                       updated_at=?
+                   WHERE id=?
+                     AND status IN(
+                         'awaiting_payment',
+                         'payment_review',
+                         'payment_rejected'
+                     )""",
+                (
+                    new_status,
+                    starts,
+                    ends,
+                    term_days,
+                    stamp,
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            )
+
+            if subscription_cursor.rowcount != 1:
+                raise SubscriptionError(
+                    "\u0421\u0442\u0430\u0442\u0443\u0441 "
+                    "\u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438 "
+                    "\u0443\u0436\u0435 "
+                    "\u0438\u0437\u043c\u0435\u043d\u0438\u043b\u0441\u044f."
+                )
+
+            if new_status == "active":
+                conn.execute(
+                    """UPDATE tenant_subscriptions
+                       SET
+                           status='cancelled',
+                           updated_at=?
+                       WHERE tenant_id=?
+                         AND id<>?
+                         AND status IN(
+                             'active',
+                             'scheduled'
+                         )""",
+                    (
+                        stamp,
+                        int(
+                            row[
+                                "tenant_id"
+                            ]
+                        ),
+                        int(
+                            row[
+                                "subscription_id"
+                            ]
+                        ),
+                    ),
+                )
+
+                conn.execute(
+                    """UPDATE tenants
+                       SET
+                           plan_code=?,
+                           updated_at=?
+                       WHERE id=?""",
+                    (
+                        str(
+                            row[
+                                "plan_code"
+                            ]
+                        ),
+                        stamp,
+                        int(
+                            row[
+                                "tenant_id"
+                            ]
+                        ),
+                    ),
+                )
+
+            else:
+                conn.execute(
+                    """UPDATE tenant_subscriptions
+                       SET
+                           status='cancelled',
+                           updated_at=?
+                       WHERE tenant_id=?
+                         AND id<>?
+                         AND status='scheduled'""",
+                    (
+                        stamp,
+                        int(
+                            row[
+                                "tenant_id"
+                            ]
+                        ),
+                        int(
+                            row[
+                                "subscription_id"
+                            ]
+                        ),
+                    ),
+                )
+
+            proof = conn.execute(
+                """SELECT *
+                   FROM subscription_payment_proofs
+                   WHERE invoice_id=?
+                     AND status='under_review'
+                   ORDER BY id DESC
+                   LIMIT 1""",
+                (
+                    int(invoice_id),
+                ),
+            ).fetchone()
+
+            if proof:
+                conn.execute(
+                    """UPDATE subscription_payment_proofs
+                       SET
+                           status='confirmed',
+                           reviewed_by=?,
+                           reviewed_at=?,
+                           review_note=?,
+                           updated_at=?
+                       WHERE id=?
+                         AND status='under_review'""",
+                    (
+                        int(actor_user_id),
+                        stamp,
+                        confirmation_note,
+                        stamp,
+                        int(proof["id"]),
+                    ),
+                )
+
+            payment_note = (
+                confirmation_note
+                or
+                "\u041e\u043f\u043b\u0430\u0442\u0430 "
+                "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430 "
+                "\u0431\u0443\u0445\u0433\u0430\u043b\u0442\u0435\u0440\u043e\u043c"
+            )
+
+            conn.execute(
+                """INSERT INTO subscription_payments(
+                       tenant_id,
+                       subscription_id,
+                       amount,
+                       currency,
+                       status,
+                       paid_at,
+                       period_start,
+                       period_end,
+                       term_days,
+                       months_count,
+                       confirmed_by,
+                       note,
+                       created_at
+                   )
+                   VALUES(
+                       ?,?,?,?,
+                       'confirmed',
+                       ?,?,?,?,?,?,?,?
+                   )""",
+                (
+                    int(
+                        row[
+                            "tenant_id"
+                        ]
+                    ),
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                    amount,
+                    str(
+                        row[
+                            "currency"
+                        ]
+                    ),
+                    stamp,
+                    starts,
+                    ends,
+                    term_days,
+                    months,
+                    int(actor_user_id),
+                    payment_note,
+                    stamp,
+                ),
+            )
+
+            conn.execute(
+                """UPDATE subscription_invoices
+                   SET
+                       status='paid',
+                       updated_at=?
+                   WHERE id=?
+                     AND status='issued'""",
+                (
+                    stamp,
+                    int(invoice_id),
+                ),
+            )
+
+            conn.execute(
+                """INSERT INTO platform_audit_log(
+                       actor_user_id,
+                       action,
+                       tenant_id,
+                       entity_type,
+                       entity_id,
+                       details_json,
+                       created_at
+                   )
+                   VALUES(
+                       ?,?,?,?,?,?,?
+                   )""",
+                (
+                    int(actor_user_id),
+                    "billing_payment_confirmed",
+                    int(
+                        row[
+                            "tenant_id"
+                        ]
+                    ),
+                    "subscription_invoice",
+                    str(
+                        int(invoice_id)
+                    ),
+                    json.dumps(
+                        {
+                            "invoice_number":
+                                str(
+                                    row[
+                                        "invoice_number"
+                                    ]
+                                ),
+                            "amount":
+                                amount,
+                            "currency":
+                                str(
+                                    row[
+                                        "currency"
+                                    ]
+                                ),
+                            "months_count":
+                                months,
+                            "proof_id":
+                                (
+                                    int(
+                                        proof[
+                                            "id"
+                                        ]
+                                    )
+                                    if proof
+                                    else None
+                                ),
+                            "subscription_status":
+                                new_status,
+                            "period_start":
+                                starts,
+                            "period_end":
+                                ends,
+                        },
+                        ensure_ascii=False,
+                        separators=(
+                            ",",
+                            ":",
+                        ),
+                    ),
+                    stamp,
+                ),
+            )
+
+            conn.commit()
+
+            payment = conn.execute(
+                """SELECT *
+                   FROM subscription_payments
+                   WHERE subscription_id=?""",
+                (
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchone()
+
+            subscription = conn.execute(
+                """SELECT *
+                   FROM tenant_subscriptions
+                   WHERE id=?""",
+                (
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchone()
+
+            return {
+                "payment":
+                    dict(payment),
+                "subscription":
+                    dict(subscription),
+                "already_confirmed":
+                    False,
+            }
+
+        except Exception:
+            conn.rollback()
+            raise
 
         finally:
             conn.close()
