@@ -1298,6 +1298,200 @@ class BillingService:
             int(invoice_id)
         )
 
+    def tenant_billing_snapshot(
+        self,
+        tenant_id: int,
+    ) -> dict[str, Any]:
+        conn = self._connect()
+
+        try:
+            subscription = conn.execute(
+                """SELECT
+                       s.id,
+                       s.tenant_id,
+                       s.status,
+                       s.price_amount,
+                       s.currency,
+                       s.created_at,
+                       s.updated_at,
+                       p.code AS plan_code,
+                       p.name AS plan_name
+                   FROM tenant_subscriptions s
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+                   WHERE s.tenant_id=?
+                     AND s.status IN(
+                         'awaiting_invoice',
+                         'awaiting_payment',
+                         'payment_review',
+                         'payment_rejected'
+                     )
+                   ORDER BY s.id DESC
+                   LIMIT 1""",
+                (
+                    int(tenant_id),
+                ),
+            ).fetchone()
+
+            subscription_value = (
+                dict(subscription)
+                if subscription
+                else None
+            )
+
+            invoice_value = None
+
+            if subscription:
+                invoice = conn.execute(
+                    """SELECT *
+                       FROM subscription_invoices
+                       WHERE subscription_id=?
+                         AND status<>'cancelled'
+                       ORDER BY id DESC
+                       LIMIT 1""",
+                    (
+                        int(
+                            subscription["id"]
+                        ),
+                    ),
+                ).fetchone()
+
+                if invoice:
+                    value = self._invoice_dict(
+                        invoice
+                    )
+
+                    invoice_value = {
+                        "id":
+                            int(value["id"]),
+                        "subscription_id":
+                            int(
+                                value[
+                                    "subscription_id"
+                                ]
+                            ),
+                        "invoice_number":
+                            str(
+                                value[
+                                    "invoice_number"
+                                ]
+                            ),
+                        "status":
+                            str(
+                                value["status"]
+                            ),
+                        "months_count":
+                            int(
+                                value[
+                                    "months_count"
+                                ]
+                            ),
+                        "unit_price":
+                            float(
+                                value[
+                                    "unit_price"
+                                ]
+                            ),
+                        "subtotal_amount":
+                            float(
+                                value[
+                                    "subtotal_amount"
+                                ]
+                            ),
+                        "vat_rate":
+                            float(
+                                value[
+                                    "vat_rate"
+                                ]
+                            ),
+                        "vat_amount":
+                            float(
+                                value[
+                                    "vat_amount"
+                                ]
+                            ),
+                        "total_amount":
+                            float(
+                                value[
+                                    "total_amount"
+                                ]
+                            ),
+                        "currency":
+                            str(
+                                value[
+                                    "currency"
+                                ]
+                            ),
+                        "issued_at":
+                            str(
+                                value[
+                                    "issued_at"
+                                ]
+                            ),
+                        "due_at":
+                            str(
+                                value.get(
+                                    "due_at"
+                                )
+                                or ""
+                            ),
+                        "pdf_ready":
+                            bool(
+                                str(
+                                    value.get(
+                                        "pdf_path"
+                                    )
+                                    or ""
+                                ).strip()
+                                and str(
+                                    value.get(
+                                        "pdf_sha256"
+                                    )
+                                    or ""
+                                ).strip()
+                            ),
+                    }
+
+        finally:
+            conn.close()
+
+        supplier = (
+            self.supplier_settings()
+        )
+
+        ready = bool(
+            supplier.get(
+                "is_complete"
+            )
+        )
+
+        can_issue = bool(
+            subscription_value
+            and str(
+                subscription_value.get(
+                    "status"
+                )
+                or ""
+            ) == "awaiting_invoice"
+            and not invoice_value
+            and ready
+        )
+
+        return {
+            "periods":
+                list(
+                    BILLING_PERIOD_MONTHS
+                ),
+            "subscription":
+                subscription_value,
+            "invoice":
+                invoice_value,
+            "supplier_ready":
+                ready,
+            "can_issue":
+                can_issue,
+        }
+
     def invoice_for_subscription(
         self,
         subscription_id: int,

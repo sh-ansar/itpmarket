@@ -34,6 +34,7 @@ from waitress import serve
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth_service import AuthService, normalize_email, validate_password
+from billing_service import BillingService
 from config import (
     ROOT,
     ensure_directories,
@@ -100,6 +101,10 @@ ensure_database(DB_PATH)
 AUTH = AuthService(DB_PATH)
 SAAS = SaaSService(DB_PATH)
 SUBSCRIPTIONS = SubscriptionService(DB_PATH)
+BILLING = BillingService(
+    DB_PATH,
+    document_root=ROOT,
+)
 EMAIL = EmailService(DB_PATH)
 NOTIFICATIONS = NotificationService(DB_PATH, EMAIL)
 TELEGRAM_LINKS = TelegramLinkService(DB_PATH)
@@ -137,6 +142,42 @@ def subscription_service() -> SubscriptionService:
     if Path(SUBSCRIPTIONS.db_path).resolve() != Path(DB_PATH).resolve():
         SUBSCRIPTIONS = SubscriptionService(DB_PATH)
     return SUBSCRIPTIONS
+
+
+def billing_service() -> BillingService:
+    """Return billing bound to the active application database."""
+    global BILLING
+
+    if (
+        Path(BILLING.db_path).resolve()
+        != Path(DB_PATH).resolve()
+    ):
+        BILLING = BillingService(
+            DB_PATH,
+            document_root=ROOT,
+        )
+
+    return BILLING
+
+
+def subscription_snapshot(
+    tenant_id: int,
+) -> dict[str, Any]:
+    result = (
+        subscription_service()
+        .tenant_snapshot(
+            int(tenant_id)
+        )
+    )
+
+    result["billing"] = (
+        billing_service()
+        .tenant_billing_snapshot(
+            int(tenant_id)
+        )
+    )
+
+    return result
 
 
 def notification_service() -> NotificationService:
@@ -3226,8 +3267,11 @@ def api_settings_get() -> Any:
         config=config_result,
         tenant=current_tenant(),
         subscription=(
-            subscription_service().tenant_snapshot(int(user["tenant_id"]))
-            if user.get("tenant_id") else None
+            subscription_snapshot(
+                int(user["tenant_id"])
+            )
+            if user.get("tenant_id")
+            else None
         ),
     )
 
@@ -3596,7 +3640,221 @@ def api_schedules_delete(schedule_id: int) -> Any:
 @permission_required("view_settings")
 def api_subscription_get() -> Any:
     user = current_user() or {}
-    return json_ok(subscription=subscription_service().tenant_snapshot(int(user["tenant_id"])))
+
+    return json_ok(
+        subscription=subscription_snapshot(
+            int(user["tenant_id"])
+        )
+    )
+
+
+@app.post("/api/subscription/invoice")
+@permission_required("manage_company")
+def api_subscription_invoice_create() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+
+    try:
+        months_count = int(
+            payload.get(
+                "months_count"
+            )
+            or 0
+        )
+
+        billing = billing_service()
+
+        state = (
+            billing
+            .tenant_billing_snapshot(
+                int(user["tenant_id"])
+            )
+        )
+
+        subscription = (
+            state.get(
+                "subscription"
+            )
+            or {}
+        )
+
+        if not subscription:
+            raise SubscriptionError(
+                "\u041d\u0435\u0442 "
+                "\u043f\u0430\u043a\u0435\u0442\u0430, "
+                "\u0434\u043b\u044f "
+                "\u043a\u043e\u0442\u043e\u0440\u043e\u0433\u043e "
+                "\u043c\u043e\u0436\u043d\u043e "
+                "\u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c "
+                "\u0441\u0447\u0451\u0442."
+            )
+
+        if str(
+            subscription.get(
+                "status"
+            )
+            or ""
+        ) != "awaiting_invoice":
+            raise SubscriptionError(
+                "\u0421\u0447\u0451\u0442 "
+                "\u0443\u0436\u0435 "
+                "\u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d "
+                "\u0438\u043b\u0438 "
+                "\u043f\u0430\u043a\u0435\u0442 "
+                "\u0435\u0449\u0451 "
+                "\u043d\u0435 "
+                "\u0433\u043e\u0442\u043e\u0432 "
+                "\u043a "
+                "\u043e\u043f\u043b\u0430\u0442\u0435."
+            )
+
+        supplier = (
+            billing.supplier_settings()
+        )
+
+        if not supplier.get(
+            "is_complete"
+        ):
+            raise SubscriptionError(
+                "\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b "
+                "\u0434\u043b\u044f "
+                "\u0432\u044b\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0438\u044f "
+                "\u0441\u0447\u0451\u0442\u0430 "
+                "\u0435\u0449\u0451 "
+                "\u043d\u0435 "
+                "\u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u044b."
+            )
+
+        seller_snapshot = dict(
+            supplier
+        )
+
+        seller_snapshot.pop(
+            "is_complete",
+            None,
+        )
+
+        seller_snapshot.pop(
+            "missing_fields",
+            None,
+        )
+
+        invoice = billing.create_invoice(
+            int(
+                subscription[
+                    "id"
+                ]
+            ),
+            months_count,
+            int(user["id"]),
+            seller_snapshot=
+                seller_snapshot,
+            due_days=int(
+                supplier.get(
+                    "invoice_due_days"
+                )
+                or 5
+            ),
+        )
+
+        billing.generate_invoice_pdf(
+            int(invoice["id"])
+        )
+
+        return json_ok(
+            billing=(
+                billing
+                .tenant_billing_snapshot(
+                    int(
+                        user["tenant_id"]
+                    )
+                )
+            )
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
+
+
+@app.get(
+    "/api/subscription/invoice/<int:invoice_id>/pdf"
+)
+@permission_required("view_settings")
+def api_subscription_invoice_pdf(
+    invoice_id: int,
+) -> Any:
+    user = current_user() or {}
+    billing = billing_service()
+
+    invoice = billing.invoice_by_id(
+        int(invoice_id)
+    )
+
+    if (
+        not invoice
+        or int(
+            invoice.get(
+                "tenant_id"
+            )
+            or 0
+        )
+        != int(
+            user["tenant_id"]
+        )
+    ):
+        return json_error(
+            "\u0421\u0447\u0451\u0442 "
+            "\u043d\u0435 "
+            "\u043d\u0430\u0439\u0434\u0435\u043d.",
+            404,
+        )
+
+    if str(
+        invoice.get(
+            "status"
+        )
+        or ""
+    ) == "cancelled":
+        return json_error(
+            "\u0421\u0447\u0451\u0442 "
+            "\u043e\u0442\u043c\u0435\u043d\u0451\u043d.",
+            409,
+        )
+
+    try:
+        document = (
+            billing.invoice_pdf(
+                int(invoice_id)
+            )
+        )
+
+        return send_file(
+            document["path"],
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=(
+                str(
+                    invoice[
+                        "invoice_number"
+                    ]
+                )
+                + ".pdf"
+            ),
+            max_age=0,
+        )
+
+    except SubscriptionError as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
 
 
 @app.post("/api/subscription/request")
