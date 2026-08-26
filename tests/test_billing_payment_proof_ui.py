@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import unittest
 from pathlib import Path
@@ -62,6 +62,43 @@ class BillingPaymentProofUITests(
 
         self.assertIn(
             "10*1024*1024",
+            self.source,
+        )
+
+    def test_payment_proof_can_be_replaced_during_review(
+        self,
+    ) -> None:
+        guard_start = self.source.index(
+            "const canUploadProof="
+        )
+
+        guard_end = self.source.index(
+            "const proofStatusLabel=",
+            guard_start,
+        )
+
+        guard = self.source[
+            guard_start:
+            guard_end
+        ]
+
+        self.assertIn(
+            "billingStatus==='awaiting_payment'",
+            guard,
+        )
+
+        self.assertIn(
+            "billingStatus==='payment_review'",
+            guard,
+        )
+
+        self.assertIn(
+            "billingStatus==='payment_rejected'",
+            guard,
+        )
+
+        self.assertIn(
+            r"\u0417\u0430\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u043b\u0430\u0442\u0451\u0436\u043d\u044b\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442",
             self.source,
         )
 
