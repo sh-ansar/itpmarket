@@ -3177,6 +3177,50 @@ class BillingService:
                     "\u0441\u0447\u0451\u0442\u0430."
                 )
 
+            existing_scheduled = conn.execute(
+                """SELECT
+                       s.id
+                   FROM tenant_subscriptions s
+
+                   JOIN subscription_plans p
+                     ON p.id=s.plan_id
+
+                   WHERE s.tenant_id=?
+                     AND s.id<>?
+                     AND s.status='scheduled'
+                     AND LOWER(
+                         COALESCE(
+                             p.code,
+                             ''
+                         )
+                     )<>'legacy'
+
+                   LIMIT 1""",
+                (
+                    int(
+                        row[
+                            "tenant_id"
+                        ]
+                    ),
+                    int(
+                        row[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            ).fetchone()
+
+            if existing_scheduled:
+                raise SubscriptionError(
+                    "\u0423 "
+                    "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 "
+                    "\u0443\u0436\u0435 "
+                    "\u0435\u0441\u0442\u044c "
+                    "\u0437\u0430\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 "
+                    "\u043f\u0435\u0440\u0438\u043e\u0434 "
+                    "\u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438."
+                )
+
             approved_start = (
                 self._billing_datetime(
                     row[

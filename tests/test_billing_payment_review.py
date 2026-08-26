@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import tempfile
 import unittest
@@ -647,6 +647,271 @@ class BillingPaymentReviewTests(
             ).startswith(
                 "2027-02-28T12:00:00"
             )
+        )
+
+    def test_second_scheduled_payment_is_rejected(
+        self,
+    ) -> None:
+        from subscription_service import (
+            SubscriptionError,
+        )
+
+        # First confirmed period becomes active.
+        first_invoice = self._invoice(
+            months=1,
+        )
+
+        first_result = (
+            self.billing
+            .confirm_invoice_payment(
+                int(
+                    first_invoice[
+                        "id"
+                    ]
+                ),
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        self.assertEqual(
+            "active",
+            first_result[
+                "subscription"
+            ][
+                "status"
+            ],
+        )
+
+        # Prepare two outstanding invoices. The temporary status
+        # manipulation simulates a stale/concurrent state that
+        # request_plan() normally prevents.
+        second_invoice = self._invoice(
+            months=1,
+        )
+
+        conn = self.billing._connect()
+
+        try:
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='cancelled'
+                   WHERE id=?""",
+                (
+                    int(
+                        second_invoice[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+        third_invoice = self._invoice(
+            months=1,
+        )
+
+        conn = self.billing._connect()
+
+        try:
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='awaiting_payment'
+                   WHERE id=?""",
+                (
+                    int(
+                        second_invoice[
+                            "subscription_id"
+                        ]
+                    ),
+                ),
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+        # The first renewal becomes the single allowed
+        # future scheduled period.
+        second_result = (
+            self.billing
+            .confirm_invoice_payment(
+                int(
+                    second_invoice[
+                        "id"
+                    ]
+                ),
+                int(
+                    self.admin[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        self.assertEqual(
+            "scheduled",
+            second_result[
+                "subscription"
+            ][
+                "status"
+            ],
+        )
+
+        scheduled_id = int(
+            second_result[
+                "subscription"
+            ][
+                "id"
+            ]
+        )
+
+        scheduled_start = (
+            second_result[
+                "subscription"
+            ][
+                "starts_at"
+            ]
+        )
+
+        scheduled_end = (
+            second_result[
+                "subscription"
+            ][
+                "ends_at"
+            ]
+        )
+
+        # A second future renewal must not replace/cancel
+        # the already scheduled period.
+        with self.assertRaises(
+            SubscriptionError
+        ):
+            (
+                self.billing
+                .confirm_invoice_payment(
+                    int(
+                        third_invoice[
+                            "id"
+                        ]
+                    ),
+                    int(
+                        self.admin[
+                            "id"
+                        ]
+                    ),
+                )
+            )
+
+        conn = self.billing._connect()
+
+        try:
+            scheduled = conn.execute(
+                """SELECT *
+                   FROM tenant_subscriptions
+                   WHERE id=?""",
+                (
+                    scheduled_id,
+                ),
+            ).fetchone()
+
+            third_subscription = (
+                conn.execute(
+                    """SELECT *
+                       FROM tenant_subscriptions
+                       WHERE id=?""",
+                    (
+                        int(
+                            third_invoice[
+                                "subscription_id"
+                            ]
+                        ),
+                    ),
+                ).fetchone()
+            )
+
+            third_invoice_row = (
+                conn.execute(
+                    """SELECT *
+                       FROM subscription_invoices
+                       WHERE id=?""",
+                    (
+                        int(
+                            third_invoice[
+                                "id"
+                            ]
+                        ),
+                    ),
+                ).fetchone()
+            )
+
+            third_payment = (
+                conn.execute(
+                    """SELECT *
+                       FROM subscription_payments
+                       WHERE subscription_id=?""",
+                    (
+                        int(
+                            third_invoice[
+                                "subscription_id"
+                            ]
+                        ),
+                    ),
+                ).fetchone()
+            )
+
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(
+            scheduled
+        )
+
+        self.assertEqual(
+            "scheduled",
+            scheduled[
+                "status"
+            ],
+        )
+
+        self.assertEqual(
+            scheduled_start,
+            scheduled[
+                "starts_at"
+            ],
+        )
+
+        self.assertEqual(
+            scheduled_end,
+            scheduled[
+                "ends_at"
+            ],
+        )
+
+        self.assertEqual(
+            "awaiting_payment",
+            third_subscription[
+                "status"
+            ],
+        )
+
+        self.assertEqual(
+            "issued",
+            third_invoice_row[
+                "status"
+            ],
+        )
+
+        self.assertIsNone(
+            third_payment
         )
 
 
