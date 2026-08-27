@@ -244,9 +244,11 @@ class InventoryPermissionAndUiTests(unittest.TestCase):
         )
         self.assertIn("registration_guide.css", template)
         self.assertEqual(
-            5,
-            template.count('<section class="wizard-section" data-registration-step'),
+            4,
+            template.count("data-registration-step"),
         )
+        for step in ("company", "marketplaces", "plan", "account"):
+            self.assertIn(f'data-step-code="{step}"', template)
         self.assertIn('id="registrationGuide"', template)
         self.assertIn(".registration-fields input", css)
         self.assertIn("position: sticky", css)

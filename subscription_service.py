@@ -749,27 +749,287 @@ class SubscriptionService:
                 f"получено {requested}. Увеличьте лимит минимум на {missing} позиций."
             )
 
-    def request_plan(self, tenant_id: int, plan_code: str, requested_by: int | None) -> dict[str, Any]:
+    def request_plan(
+        self,
+        tenant_id: int,
+        plan_code: str,
+        requested_by: int | None,
+        *,
+        replace_unpaid: bool = False,
+    ) -> dict[str, Any]:
+        tenant_id = int(
+            tenant_id
+        )
+
+        actor_id = (
+            int(requested_by)
+            if requested_by is not None
+            else None
+        )
+
         conn = self._connect()
+
         try:
             plan = conn.execute(
-                """SELECT * FROM subscription_plans
-                   WHERE code=? AND is_active=1 AND is_public=1""",
-                (str(plan_code).strip().casefold(),),
+                """SELECT *
+                   FROM subscription_plans
+                   WHERE code=?
+                     AND is_active=1
+                     AND is_public=1""",
+                (
+                    str(
+                        plan_code
+                    )
+                    .strip()
+                    .casefold(),
+                ),
             ).fetchone()
+
             if not plan:
-                raise SubscriptionError("Выбранный пакет недоступен.")
-            if str(plan["code"]) == "trial" and conn.execute(
-                """SELECT 1 FROM tenant_subscriptions s
-                   JOIN subscription_plans p ON p.id=s.plan_id
-                   WHERE s.tenant_id=? AND p.code='trial'""",
-                (int(tenant_id),),
-            ).fetchone():
-                raise SubscriptionError("Бесплатный пробный период уже использован этой компанией.")
+                raise SubscriptionError(
+                    "\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0439 "
+                    "\u043f\u0430\u043a\u0435\u0442 "
+                    "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d."
+                )
+
+            if (
+                str(plan["code"]) == "trial"
+                and conn.execute(
+                    """SELECT 1
+                       FROM tenant_subscriptions s
+                       JOIN subscription_plans p
+                         ON p.id=s.plan_id
+                       WHERE s.tenant_id=?
+                         AND p.code='trial'""",
+                    (
+                        tenant_id,
+                    ),
+                ).fetchone()
+            ):
+                raise SubscriptionError(
+                    "\u0411\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u044b\u0439 "
+                    "\u043f\u0440\u043e\u0431\u043d\u044b\u0439 "
+                    "\u043f\u0435\u0440\u0438\u043e\u0434 "
+                    "\u0443\u0436\u0435 "
+                    "\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d "
+                    "\u044d\u0442\u043e\u0439 "
+                    "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0435\u0439."
+                )
+
             self._active_subscription(
                 conn,
-                int(tenant_id),
+                tenant_id,
             )
+
+            stamp = now_iso()
+
+            # A self-service replacement can invalidate an unconfirmed proof;
+            # plain plan requests retain the conservative legacy guard.
+            payment_review = conn.execute(
+                """SELECT id
+                   FROM tenant_subscriptions
+                   WHERE tenant_id=?
+                     AND status='payment_review'
+                   ORDER BY id DESC
+                   LIMIT 1""",
+                (
+                    tenant_id,
+                ),
+            ).fetchone()
+
+            if payment_review and not replace_unpaid:
+                raise SubscriptionError(
+                    "\u041e\u043f\u043b\u0430\u0442\u0430 "
+                    "\u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e "
+                    "\u0441\u0447\u0451\u0442\u0430 "
+                    "\u043d\u0430\u0445\u043e\u0434\u0438\u0442\u0441\u044f "
+                    "\u043d\u0430 "
+                    "\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435. "
+                    "\u0414\u043e\u0436\u0434\u0438\u0442\u0435\u0441\u044c "
+                    "\u0440\u0435\u0448\u0435\u043d\u0438\u044f "
+                    "\u043f\u043e "
+                    "\u043f\u043b\u0430\u0442\u0435\u0436\u0443 "
+                    "\u043f\u0435\u0440\u0435\u0434 "
+                    "\u0441\u043c\u0435\u043d\u043e\u0439 "
+                    "\u043f\u0430\u043a\u0435\u0442\u0430."
+                )
+
+            # Scheduled means that this period has already been paid.
+            # It must never be silently replaced.
+            scheduled = conn.execute(
+                """SELECT id
+                   FROM tenant_subscriptions
+                   WHERE tenant_id=?
+                     AND status='scheduled'
+                   ORDER BY id DESC
+                   LIMIT 1""",
+                (
+                    tenant_id,
+                ),
+            ).fetchone()
+
+            if scheduled:
+                raise SubscriptionError(
+                    "\u0423 "
+                    "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 "
+                    "\u0443\u0436\u0435 "
+                    "\u0435\u0441\u0442\u044c "
+                    "\u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 "
+                    "\u0431\u0443\u0434\u0443\u0449\u0438\u0439 "
+                    "\u043f\u0435\u0440\u0438\u043e\u0434. "
+                    "\u0414\u043e\u0436\u0434\u0438\u0442\u0435\u0441\u044c "
+                    "\u0435\u0433\u043e "
+                    "\u0430\u043a\u0442\u0438\u0432\u0430\u0446\u0438\u0438 "
+                    "\u043f\u0435\u0440\u0435\u0434 "
+                    "\u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u0439 "
+                    "\u0441\u043c\u0435\u043d\u043e\u0439 "
+                    "\u043f\u0430\u043a\u0435\u0442\u0430."
+                )
+
+            unpaid_rows = [
+                dict(row)
+                for row in conn.execute(
+                    """SELECT *
+                       FROM tenant_subscriptions
+                       WHERE tenant_id=?
+                         AND status IN (
+                             'pending',
+                             'awaiting_invoice',
+                             'awaiting_payment',
+                             'payment_review',
+                             'payment_rejected'
+                         )
+                       ORDER BY id DESC""",
+                    (
+                        tenant_id,
+                    ),
+                ).fetchall()
+            ]
+
+            if replace_unpaid:
+                # Re-selecting exactly the same unpaid package is
+                # idempotent. Do not destroy its existing invoice.
+                retained = next(
+                    (
+                        item
+                        for item in unpaid_rows
+                        if int(
+                            item["plan_id"]
+                        )
+                        == int(
+                            plan["id"]
+                        )
+                    ),
+                    None,
+                )
+
+                cancel_reason = (
+                    "\u041f\u0430\u043a\u0435\u0442 "
+                    "\u0437\u0430\u043c\u0435\u043d\u0451\u043d "
+                    "\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c "
+                    "\u0434\u043e "
+                    "\u043e\u043f\u043b\u0430\u0442\u044b."
+                )
+
+                for current in unpaid_rows:
+                    if (
+                        retained
+                        and int(
+                            current["id"]
+                        )
+                        == int(
+                            retained["id"]
+                        )
+                    ):
+                        continue
+
+                    conn.execute(
+                        """UPDATE subscription_invoices
+                           SET status='cancelled',
+                               cancelled_by=?,
+                               cancelled_at=?,
+                               cancel_reason=?,
+                               updated_at=?
+                           WHERE subscription_id=?
+                             AND status='issued'""",
+                        (
+                            actor_id,
+                            stamp,
+                            cancel_reason,
+                            stamp,
+                            int(
+                                current[
+                                    "id"
+                                ]
+                            ),
+                        ),
+                    )
+
+                    # Keep the immutable proof record for audit, but prevent
+                    # a later accountant decision from activating its
+                    # cancelled invoice.
+                    conn.execute(
+                        """UPDATE subscription_payment_proofs
+                           SET status='superseded',
+                               updated_at=?
+                           WHERE subscription_id=?
+                             AND status='under_review'""",
+                        (
+                            stamp,
+                            int(current["id"]),
+                        ),
+                    )
+
+                    conn.execute(
+                        """UPDATE tenant_subscriptions
+                           SET status='cancelled',
+                               review_note=?,
+                               updated_at=?
+                           WHERE id=?
+                             AND status IN (
+                                 'pending',
+                                 'awaiting_invoice',
+                                 'awaiting_payment',
+                                 'payment_review',
+                                 'payment_rejected'
+                             )""",
+                        (
+                            cancel_reason,
+                            stamp,
+                            int(
+                                current[
+                                    "id"
+                                ]
+                            ),
+                        ),
+                    )
+
+                if retained:
+                    conn.commit()
+
+                    row = conn.execute(
+                        """SELECT *
+                           FROM tenant_subscriptions
+                           WHERE id=?""",
+                        (
+                            int(
+                                retained[
+                                    "id"
+                                ]
+                            ),
+                        ),
+                    ).fetchone()
+
+                    if not row:
+                        raise SubscriptionError(
+                            "\u041f\u0430\u043a\u0435\u0442 "
+                            "\u043d\u0435 "
+                            "\u043d\u0430\u0439\u0434\u0435\u043d."
+                        )
+
+                    return dict(
+                        row
+                    )
 
             if conn.execute(
                 """SELECT 1
@@ -783,28 +1043,117 @@ class SubscriptionService:
                          'payment_rejected',
                          'scheduled'
                      )""",
-                (int(tenant_id),),
+                (
+                    tenant_id,
+                ),
             ).fetchone():
                 raise SubscriptionError(
-                    "У компании уже есть незавершённая заявка на пакет."
+                    "\u0423 "
+                    "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 "
+                    "\u0443\u0436\u0435 "
+                    "\u0435\u0441\u0442\u044c "
+                    "\u043d\u0435\u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043d\u043d\u044b\u0439 "
+                    "\u043f\u0435\u0440\u0438\u043e\u0434 "
+                    "\u0438\u043b\u0438 "
+                    "\u0437\u0430\u044f\u0432\u043a\u0430 "
+                    "\u043d\u0430 "
+                    "\u043f\u0430\u043a\u0435\u0442."
                 )
-            stamp = now_iso()
-            snapshot = json.dumps(self._plan_row(conn, int(plan["id"])), ensure_ascii=False, default=str)
+
+            snapshot = json.dumps(
+                self._plan_row(
+                    conn,
+                    int(
+                        plan["id"]
+                    ),
+                ),
+                ensure_ascii=False,
+                default=str,
+            )
+
             cursor = conn.execute(
                 """INSERT INTO tenant_subscriptions(
-                       tenant_id,plan_id,status,requested_by,requested_at,price_amount,currency,
-                       term_days,plan_snapshot_json,created_at,updated_at
-                   ) VALUES(?,?,'pending',?,?,?,?,?,?,?,?)""",
+                       tenant_id,
+                       plan_id,
+                       status,
+                       requested_by,
+                       requested_at,
+                       price_amount,
+                       currency,
+                       term_days,
+                       plan_snapshot_json,
+                       created_at,
+                       updated_at
+                   )
+                   VALUES(
+                       ?,
+                       ?,
+                       'pending',
+                       ?,
+                       ?,
+                       ?,
+                       ?,
+                       ?,
+                       ?,
+                       ?,
+                       ?
+                   )""",
                 (
-                    int(tenant_id), int(plan["id"]), requested_by, stamp,
-                    float(plan["price_amount"]), str(plan["currency"]), int(plan["term_days"]),
-                    snapshot, stamp, stamp,
+                    tenant_id,
+                    int(
+                        plan["id"]
+                    ),
+                    actor_id,
+                    stamp,
+                    float(
+                        plan[
+                            "price_amount"
+                        ]
+                    ),
+                    str(
+                        plan[
+                            "currency"
+                        ]
+                    ),
+                    int(
+                        plan[
+                            "term_days"
+                        ]
+                    ),
+                    snapshot,
+                    stamp,
+                    stamp,
                 ),
             )
+
             conn.commit()
-            return dict(conn.execute(
-                "SELECT * FROM tenant_subscriptions WHERE id=?", (int(cursor.lastrowid),)
-            ).fetchone())
+
+            row = conn.execute(
+                """SELECT *
+                   FROM tenant_subscriptions
+                   WHERE id=?""",
+                (
+                    int(
+                        cursor.lastrowid
+                    ),
+                ),
+            ).fetchone()
+
+            if not row:
+                raise SubscriptionError(
+                    "\u041f\u0430\u043a\u0435\u0442 "
+                    "\u043d\u0435 "
+                    "\u043d\u0430\u0439\u0434\u0435\u043d."
+                )
+
+            return dict(
+                row
+            )
+
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
 

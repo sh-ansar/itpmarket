@@ -62,7 +62,29 @@
     "registrationPasswordConfirm"
   );
 
-  var current = 0;
+  var stepInput = document.getElementById(
+    "registrationWizardStep"
+  );
+
+  var requestedStep = (
+    stepInput
+      ? String(stepInput.value || "")
+      : ""
+  );
+
+  var requestedIndex = sections.findIndex(
+    function (section) {
+      return (
+        section.dataset.stepCode === requestedStep
+      );
+    }
+  );
+
+  var current = (
+    requestedIndex >= 0
+      ? requestedIndex
+      : 0
+  );
   var selectedAtLoad = form.querySelector(
     'input[name="plan_code"]:checked'
   );
@@ -180,6 +202,13 @@
       0,
       Math.min(index, sections.length - 1)
     );
+
+    if (stepInput) {
+      stepInput.value = (
+        sections[current].dataset.stepCode ||
+        "company"
+      );
+    }
 
     updateGuide();
 
@@ -680,6 +709,13 @@
   form.addEventListener(
     "submit",
     function (event) {
+      if (stepInput) {
+        stepInput.value = (
+          sections[current].dataset.stepCode ||
+          "company"
+        );
+      }
+
       if (!validateAll()) {
         event.preventDefault();
       }
@@ -703,4 +739,16 @@
   marketplaceValid();
   updateRecommendation();
   refreshLocale();
+
+  if (
+    current > 0 &&
+    form.querySelector(".form-alert")
+  ) {
+    window.setTimeout(function () {
+      sections[current].scrollIntoView({
+        behavior: "auto",
+        block: "center",
+      });
+    }, 0);
+  }
 })();

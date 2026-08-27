@@ -46,7 +46,7 @@ class RegistrationHttpTests(unittest.TestCase):
             item.stop()
         self.folder.cleanup()
 
-    def test_registration_creates_pending_company_owner_without_marketplace_grants(self) -> None:
+    def test_registration_creates_approved_company_owner_without_marketplace_grants(self) -> None:
         page = self.client.get("/register")
         self.assertEqual(200, page.status_code)
         html = page.get_data(as_text=True)
@@ -94,8 +94,8 @@ class RegistrationHttpTests(unittest.TestCase):
             ).fetchone()
         finally:
             conn.close()
-        self.assertEqual(("pending", "BIN-HTTP-001"), tenant)
-        self.assertEqual(("pending", tenant_id), request_row)
+        self.assertEqual(("approved", "BIN-HTTP-001"), tenant)
+        self.assertEqual(("approved", tenant_id), request_row)
         self.assertFalse(any(item["is_allowed"] for item in self.saas.marketplace_access(tenant_id)))
 
     def test_registration_rejects_missing_required_commercial_fields(self) -> None:

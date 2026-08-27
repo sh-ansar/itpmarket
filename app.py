@@ -238,6 +238,83 @@ def queue_password_changed_email(user: dict[str, Any]) -> None:
     )
 
 
+
+def finalize_verified_registration(
+    user: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Finish the package selected during self-service registration.
+
+    Company registration itself does not require manual platform review.
+    Email verification is the account ownership gate. Marketplace
+    connections keep their own independent review lifecycle.
+    """
+    if not bool(
+        user.get(
+            "email_verified"
+        )
+    ):
+        return None
+
+    tenant_id = int(
+        user.get(
+            "tenant_id"
+        )
+        or 0
+    )
+
+    if tenant_id <= 0:
+        return None
+
+    snapshot = (
+        subscription_service()
+        .tenant_snapshot(
+            tenant_id
+        )
+    )
+
+    pending = next(
+        (
+            item
+            for item
+            in snapshot.get(
+                "requests",
+                [],
+            )
+            if str(
+                item.get(
+                    "status"
+                )
+                or ""
+            )
+            == "pending"
+        ),
+        None,
+    )
+
+    if not pending:
+        return None
+
+    return (
+        subscription_service()
+        .review_subscription(
+            int(
+                pending[
+                    "id"
+                ]
+            ),
+            "approved",
+            int(
+                user[
+                    "id"
+                ]
+            ),
+            review_note=(
+                "Self-service activation "
+                "after email verification"
+            ),
+        )
+    )
+
 def telegram_link_service() -> TelegramLinkService:
     """Return personal Telegram links bound to the active application DB."""
     global TELEGRAM_LINKS
@@ -2125,6 +2202,16 @@ def verify_email(token: str) -> Any:
         user = AUTH.verify_email(token)
         if not user:
             return render_template("auth_token_error.html", kind="verification"), 400
+
+        try:
+            finalize_verified_registration(
+                user
+            )
+        except SubscriptionError:
+            app.logger.exception(
+                "Unable to finalize verified registration"
+            )
+
         session.clear()
         session.permanent = True
         session["user_id"] = int(user["id"])
@@ -2327,12 +2414,17 @@ def registration() -> Any:
                 "email": payload["email"],
                 "workspace_profile": profile,
             }
-            provision = SAAS.provision_tenant_from_request(request_id, None, "pending")
+            provision = SAAS.provision_tenant_from_request(
+                request_id,
+                None,
+                "approved",
+                grant_marketplaces=False,
+            )
             verification_required = bool(
                 email_service().settings.enabled
             )
 
-            user, recovery_code = AUTH.create_user(
+            user, _recovery_code = AUTH.create_user(
                 payload["email"],
                 payload["contact_name"] or payload["company_name"],
                 password,
@@ -2444,6 +2536,12 @@ def registration() -> Any:
                 )
 
             # Compatibility mode while email delivery is disabled.
+            # The account is already email_verified=True here, so the
+            # selected package follows the same self-service lifecycle.
+            finalize_verified_registration(
+                user
+            )
+
             session.clear()
             session.permanent = True
             session["user_id"] = int(user["id"])
@@ -2458,7 +2556,6 @@ def registration() -> Any:
                 "tenant": provision["tenant"],
                 "request": provision["request"],
                 "user": user,
-                "recovery_code": recovery_code,
             })
 
             return render_template(
@@ -3364,6 +3461,9 @@ def api_settings_get() -> Any:
         config_result["ozon"] = load_ozon_public_config()
     return json_ok(
         preferences=DATA.preferences(int(user["id"])),
+        notification_preferences=notification_service().preferences_for_user(
+            int(user["id"])
+        ),
         config=config_result,
         tenant=current_tenant(),
         subscription=(
@@ -3383,14 +3483,100 @@ def api_settings_put() -> Any:
     user = current_user() or {}
     try:
         preferences_payload = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else payload
-        preferences = DATA.save_preferences(int(user["id"]), preferences_payload)
+        notification_preferences_payload = payload.get("notification_preferences")
         tenant_result = None
-        if has_permission(user, "manage_company") and isinstance(payload.get("tenant"), dict) and user.get("tenant_id"):
-            tenant_result = SAAS.update_tenant_profile(
-                int(user["tenant_id"]),
-                payload["tenant"],
-                int(user["id"]),
+
+        if (
+            has_permission(user, "manage_company")
+            and isinstance(
+                payload.get("tenant"),
+                dict,
             )
+            and user.get("tenant_id")
+        ):
+            tenant_payload = dict(
+                payload["tenant"]
+            )
+
+            existing_tenant = (
+                current_tenant()
+                or {}
+            )
+
+            protected_fields = (
+                "name",
+                "registration_number",
+                "contact_email",
+                "contact_phone",
+                "legal_address",
+                "actual_address",
+            )
+
+            changed_fields = [
+                key
+                for key in protected_fields
+                if (
+                    key in tenant_payload
+                    and str(
+                        tenant_payload.get(key)
+                        or ""
+                    ).strip()
+                    != str(
+                        existing_tenant.get(key)
+                        or ""
+                    ).strip()
+                )
+            ]
+
+            if (
+                changed_fields
+                and not is_superadmin(user)
+            ):
+                current_password = str(
+                    payload.get(
+                        "current_password"
+                    )
+                    or ""
+                )
+
+                if not current_password:
+                    return json_error(
+                        "\u0414\u043b\u044f "
+                        "\u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f "
+                        "\u0434\u0430\u043d\u043d\u044b\u0445 "
+                        "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 "
+                        "\u0432\u0432\u0435\u0434\u0438\u0442\u0435 "
+                        "\u0442\u0435\u043a\u0443\u0449\u0438\u0439 "
+                        "\u043f\u0430\u0440\u043e\u043b\u044c.",
+                        403,
+                    )
+
+                if not AUTH.verify_password(
+                    int(user["id"]),
+                    current_password,
+                ):
+                    return json_error(
+                        "\u0422\u0435\u043a\u0443\u0449\u0438\u0439 "
+                        "\u043f\u0430\u0440\u043e\u043b\u044c "
+                        "\u0443\u043a\u0430\u0437\u0430\u043d "
+                        "\u043d\u0435\u0432\u0435\u0440\u043d\u043e.",
+                        403,
+                    )
+
+            tenant_result = (
+                SAAS.update_tenant_profile(
+                    int(user["tenant_id"]),
+                    tenant_payload,
+                    int(user["id"]),
+                )
+            )
+        preferences = DATA.save_preferences(int(user["id"]), preferences_payload)
+        notification_preferences = None
+        if isinstance(notification_preferences_payload, dict):
+            notification_preferences = notification_service().save_preferences(
+                int(user["id"]), notification_preferences_payload
+            )
+
         config_result = None
         if is_superadmin(user) and isinstance(payload.get("config"), dict):
             config_payload = payload["config"]
@@ -3445,7 +3631,12 @@ def api_settings_put() -> Any:
             config_result = public_config(CFG)
             config_result["ozon"] = load_ozon_public_config()
         record_event("settings_updated", "settings", "user", {"locale": preferences.get("locale")})
-        return json_ok(preferences=preferences, config=config_result, tenant=tenant_result)
+        return json_ok(
+            preferences=preferences,
+            notification_preferences=notification_preferences,
+            config=config_result,
+            tenant=tenant_result,
+        )
     except (ValueError, TypeError) as exc:
         return json_error(f"Некорректные настройки: {exc}")
 
@@ -4193,14 +4384,80 @@ def api_subscription_payment_proof_download(
 @permission_required("manage_company")
 def api_subscription_request() -> Any:
     user = current_user() or {}
-    try:
-        result = subscription_service().request_plan(
-            int(user["tenant_id"]), str(json_payload().get("plan_code") or ""),
-            int(user["id"]),
+    payload = json_payload()
+
+    tenant_id = int(
+        user["tenant_id"]
+    )
+
+    actor_id = int(
+        user["id"]
+    )
+
+    plan_code = str(
+        payload.get(
+            "plan_code"
         )
-        return json_ok(request=result)
+        or ""
+    ).strip().casefold()
+
+    if not plan_code:
+        return json_error(
+            "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 "
+            "\u043f\u0430\u043a\u0435\u0442.",
+            400,
+        )
+
+    try:
+        result = (
+            subscription_service()
+            .request_plan(
+                tenant_id,
+                plan_code,
+                actor_id,
+                replace_unpaid=True,
+            )
+        )
+
+        # Package selection does not require platform approval.
+        # Marketplace connections have their own approval lifecycle.
+        if str(
+            result.get(
+                "status"
+            )
+            or ""
+        ) == "pending":
+            result = (
+                subscription_service()
+                .review_subscription(
+                    int(
+                        result[
+                            "id"
+                        ]
+                    ),
+                    "approved",
+                    actor_id,
+                    review_note=(
+                        "Self-service package selection"
+                    ),
+                )
+            )
+
+        return json_ok(
+            request=result,
+            subscription=(
+                subscription_service()
+                .tenant_snapshot(
+                    tenant_id
+                )
+            ),
+        )
+
     except SubscriptionError as exc:
-        return json_error(str(exc), 409)
+        return json_error(
+            str(exc),
+            409,
+        )
 
 
 @app.post("/api/subscription/addons/request")
@@ -4387,6 +4644,51 @@ def api_platform_subscription_addon_review(request_id: int, decision: str) -> An
     except SubscriptionError as exc:
         return json_error(str(exc), 409)
 
+
+@app.get(
+    "/api/platform/billing/supplier-settings"
+)
+@platform_roles_required("superadmin")
+def api_platform_billing_supplier_settings_get() -> Any:
+    return json_ok(
+        supplier=(
+            billing_service()
+            .supplier_settings()
+        )
+    )
+
+
+@app.put(
+    "/api/platform/billing/supplier-settings"
+)
+@platform_roles_required("superadmin")
+def api_platform_billing_supplier_settings_put() -> Any:
+    try:
+        supplier = (
+            billing_service()
+            .update_supplier_settings(
+                json_payload(),
+                int(
+                    (current_user() or {})[
+                        "id"
+                    ]
+                ),
+            )
+        )
+
+        return json_ok(
+            supplier=supplier
+        )
+
+    except (
+        SubscriptionError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return json_error(
+            str(exc),
+            409,
+        )
 
 @app.get(
     "/api/platform/billing/payments"

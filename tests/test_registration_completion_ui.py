@@ -24,26 +24,51 @@ class RegistrationCompletionUiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_completion_has_real_application_timeline(self) -> None:
-        self.assertEqual(
-            5,
-            self.template.count(
-                'data-state="'
-            ),
-        )
+        with open(
+            "templates/registration_complete.html",
+            encoding="utf-8",
+        ) as handle:
+            template = handle.read()
 
         self.assertIn(
-            'data-state="complete"',
-            self.template,
+            'class="application-timeline"',
+            template,
         )
 
-        self.assertIn(
-            'data-state="current"',
-            self.template,
-        )
+        for key in (
+            "completion_step_submitted",
+            "completion_step_review",
+            "completion_step_payment",
+            "completion_step_activation",
+        ):
+            self.assertIn(
+                f'data-pi18n="{key}"',
+                template,
+            )
 
         self.assertIn(
-            "APPLICATION_TIMELINE_V2",
-            self.css,
+            "{% if result.payment_required %}",
+            template,
+        )
+
+        self.assertNotIn(
+            'data-pi18n="completion_step_company_approval"',
+            template,
+        )
+
+        self.assertNotIn(
+            "Review by our team",
+            template,
+        )
+
+        self.assertNotIn(
+            "Company approval",
+            template,
+        )
+
+        self.assertNotIn(
+            "result.recovery_code",
+            template,
         )
 
     def test_completion_displays_selected_plan_and_marketplaces(self) -> None:

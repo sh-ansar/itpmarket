@@ -179,7 +179,7 @@
 
         <section
           class="application-timeline"
-          aria-label="Application progress"
+          aria-label="Registration progress"
         >
           <div
             class="application-step is-complete"
@@ -193,69 +193,45 @@
               <strong
                 data-pi18n="completion_step_submitted"
               >
-                Application submitted
+                Company registered
               </strong>
 
               <small
                 data-pi18n="completion_step_submitted_hint"
               >
-                The application has been recorded.
+                Company details have been saved.
               </small>
             </div>
           </div>
 
           <div
-            class="application-step is-current"
-            data-state="current"
+            class="application-step is-complete"
+            data-state="complete"
           >
             <span class="application-step-marker">
-              2
+              &#10003;
             </span>
 
             <div>
               <strong
                 data-pi18n="completion_step_review"
               >
-                Review by our team
+                Plan selected
               </strong>
 
-              <small
-                data-pi18n="completion_step_review_hint"
-              >
-                Company information is being reviewed.
+              <small>
+                {{ result.plan.name if result.plan else "Spyon" }}
               </small>
             </div>
           </div>
 
+          {% if result.payment_required %}
           <div
-            class="application-step"
-            data-state="pending"
+            class="application-step is-current"
+            data-state="current"
           >
             <span class="application-step-marker">
               3
-            </span>
-
-            <div>
-              <strong
-                data-pi18n="completion_step_company_approval"
-              >
-                Company approval
-              </strong>
-
-              <small
-                data-pi18n="completion_step_company_approval_hint"
-              >
-                Marketplace access will be confirmed.
-              </small>
-            </div>
-          </div>
-
-          <div
-            class="application-step{% if not result.payment_required %} is-skipped{% endif %}"
-            data-state="{% if result.payment_required %}pending{% else %}skipped{% endif %}"
-          >
-            <span class="application-step-marker">
-              4
             </span>
 
             <div>
@@ -265,83 +241,60 @@
                 Payment
               </strong>
 
-              {% if result.payment_required %}
-                <small
-                  data-pi18n="completion_step_payment_hint"
-                >
-                  Payment becomes available after approval.
-                </small>
-              {% else %}
-                <small
-                  data-pi18n="completion_step_payment_trial"
-                >
-                  Payment is not required for the trial plan.
-                </small>
-              {% endif %}
+              <small
+                data-pi18n="completion_step_payment_hint"
+              >
+                Open Spyon and create an invoice.
+              </small>
             </div>
           </div>
-
+          {% else %}
           <div
-            class="application-step"
-            data-state="pending"
+            class="application-step is-complete"
+            data-state="complete"
           >
             <span class="application-step-marker">
-              5
+              &#10003;
             </span>
 
             <div>
               <strong
                 data-pi18n="completion_step_activation"
               >
-                Access activation
+                Trial activated
               </strong>
 
               <small
-                data-pi18n="completion_step_activation_hint"
+                data-pi18n="completion_step_payment_trial"
               >
-                Access will be activated after all required steps.
+                Payment is not required for the trial period.
               </small>
             </div>
           </div>
+          {% endif %}
         </section>
 
         <div class="completion-next-action">
           <strong
             data-pi18n="completion_next_action"
           >
-            Next action
+            What next
           </strong>
 
           {% if result.payment_required %}
-            <p
-              data-pi18n="completion_next_action_paid"
-            >
-              Wait for company approval.
-              The payment step will follow after review.
-            </p>
+          <p
+            data-pi18n="completion_next_action_paid"
+          >
+            Open Spyon, create an invoice and upload payment confirmation.
+          </p>
           {% else %}
-            <p
-              data-pi18n="completion_next_action_trial"
-            >
-              Wait for company approval.
-              The trial plan does not require payment.
-            </p>
+          <p
+            data-pi18n="completion_next_action_trial"
+          >
+            Trial is ready. Connect marketplaces separately in Settings.
+          </p>
           {% endif %}
         </div>
-
-        {% if result.recovery_code %}
-          <div class="credential-box">
-            <span
-              data-pi18n="completion_recovery"
-            >
-              Recovery code &mdash; store it securely
-            </span>
-
-            <code>
-              {{ result.recovery_code }}
-            </code>
-          </div>
-        {% endif %}
 
         <div class="completion-actions">
           <a

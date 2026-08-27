@@ -44,6 +44,8 @@ git switch production
 git pull --ff-only origin production
 git switch -c feature/<name>
 
+$env:ITP_STORAGE_BACKEND = 'sqlite'
+$env:ITP_ENV = 'test'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m compileall -q -x '(\.venv|\.git|runtime|data|__pycache__)' .
 .\.venv\Scripts\python.exe -m pip check

@@ -61,9 +61,8 @@
         <button class="profile" id="profileButton"><span>{{ current_user.display_name[:1] | upper }}</span><div><b>{{ current_user.display_name }}</b></div><i>⌄</i></button>
         <div class="profile-menu" id="profileMenu" hidden>
           <div class="profile-menu__identity"><b>{{ current_user.display_name }}</b><small>{{ current_user.email }}</small>{% if current_tenant %}<small class="tenant-name">{{ current_tenant.name }}</small>{% endif %}</div>
-          {% if current_user.platform_role == 'superadmin' %}<a class="profile-menu-link" href="{{ url_for('platform_index') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Админ панель</span></a>{% endif %}
+          {% if current_user.platform_role == 'superadmin' %}<a class="profile-menu-link" href="{{ url_for('platform_root') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/navigation/overview.svg') }}" alt=""><span data-i18n="platform_panel">Админ панель</span></a>{% endif %}
           <button data-page-link="settings"><img class="button-icon" src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""><span data-i18n="nav_settings">Настройки</span></button>
-          <button id="openPassword"><img class="button-icon" src="{{ url_for('static', filename='icons/check.svg') }}" alt=""><span data-i18n="change_password">Изменить пароль</span></button>
           <a class="profile-menu-link profile-menu-logout" href="{{ url_for('logout') }}"><img class="button-icon" src="{{ url_for('static', filename='icons/close.svg') }}" alt=""><span data-i18n="logout">Выйти</span></a>
         </div>
       </div>
@@ -281,7 +280,46 @@
           {% endif %}
           {% if current_user.permissions.manage_company %}<article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/users.svg') }}" alt=""></span><div><h3 data-i18n="company_profile">Компания</h3><p>Все поля обязательны. Без заполненного профиля подключение площадок и запуск операций недоступны.</p></div></div><div class="form-grid"><label><span data-i18n="company_name">Название компании</span><input id="tenantName" required></label><label><span data-i18n="company_registration_number">Регистрационный номер / БИН</span><input id="tenantRegistrationNumber" required></label><label><span data-i18n="company_email">Email компании</span><input id="tenantContactEmail" type="email" required></label><label><span data-i18n="company_phone">Телефон компании</span><input id="tenantContactPhone" required></label><label><span data-i18n="company_legal_address">&#1070;&#1088;&#1080;&#1076;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span><input id="tenantLegalAddress"></label><label><span data-i18n="company_actual_address">&#1060;&#1072;&#1082;&#1090;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span><input id="tenantActualAddress"></label></div></article>{% endif %}
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/language.svg') }}" alt=""></span><div><h3 data-i18n="interface">Интерфейс</h3><p data-i18n="interface_text">Локализация и валюта отображения.</p></div></div><div class="form-grid"><label><span data-i18n="language">Язык</span><select id="prefLocale"><option value="ru">Русский</option><option value="kk">Қазақша</option><option value="en">English</option></select></label><label class="form-span-2"><span data-i18n="theme">Тема</span><div class="theme-options" id="prefTheme"><button type="button" data-theme-option="system"><img src="{{ url_for('static', filename='icons/system.svg') }}" alt=""><span data-i18n="theme_system">Системная</span></button><button type="button" data-theme-option="light"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><span data-i18n="theme_light">Светлая</span></button><button type="button" data-theme-option="dark"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""><span data-i18n="theme_dark">Тёмная</span></button></div></label><label><span data-i18n="display_currency">Валюта отображения</span><select id="prefCurrency"><option>KZT</option><option>RUB</option><option>USD</option><option>EUR</option></select></label><label><span data-i18n="monthly_units">План продаж, ед./мес.</span><input id="prefUnits" type="number" min="0"></label></div></article>
+          <article class="settings-card security-settings-card" id="securitySettings">
+            <div class="card-title">
+              <span>
+                <img src="{{ url_for('static', filename='icons/check.svg') }}" alt="">
+              </span>
+              <div>
+                <h3>&#1041;&#1077;&#1079;&#1086;&#1087;&#1072;&#1089;&#1085;&#1086;&#1089;&#1090;&#1100;</h3>
+                <p>&#1055;&#1072;&#1088;&#1086;&#1083;&#1100; &#1080; &#1079;&#1072;&#1097;&#1080;&#1090;&#1072; &#1091;&#1095;&#1105;&#1090;&#1085;&#1086;&#1081; &#1079;&#1072;&#1087;&#1080;&#1089;&#1080;.</p>
+              </div>
+            </div>
+
+            <div class="settings-inline-actions">
+              <button
+                class="secondary"
+                id="openPasswordSettings"
+                type="button"
+              >
+                <img
+                  class="button-icon"
+                  src="{{ url_for('static', filename='icons/check.svg') }}"
+                  alt=""
+                >
+                <span>
+                  &#1048;&#1079;&#1084;&#1077;&#1085;&#1080;&#1090;&#1100; &#1087;&#1072;&#1088;&#1086;&#1083;&#1100;
+                </span>
+              </button>
+            </div>
+          </article>
+
           <article class="settings-card telegram-settings" id="telegramSettings" hidden><div class="card-title"><span class="telegram-mark">TG</span><div><h3>Telegram-уведомления</h3><p>Привяжите личный чат через безопасный вход в боте. Пароль не сохраняется.</p></div></div><div class="telegram-status"><i id="telegramStatusDot"></i><div><b id="telegramStatusTitle">Не подключено</b><span id="telegramStatusText">Откройте бота и выполните /login</span></div></div><div class="settings-inline-actions"><a class="secondary" id="openTelegramBot" href="#" target="_blank" rel="noopener noreferrer">Открыть бота</a><button class="secondary" id="toggleTelegramNotifications" type="button" hidden>Приостановить</button><button class="danger-soft secondary" id="disconnectTelegram" type="button" hidden>Отключить</button></div></article>
+          <article class="settings-card notification-preferences-card" data-settings-section="system">
+            <div class="card-title"><span><img src="{{ url_for('static', filename='icons/settings.svg') }}" alt=""></span><div><h3>Уведомления</h3><p>Выберите каналы для рабочих, площадочных и биллинговых событий. Уведомления безопасности обязательны.</p></div></div>
+            <div class="notification-preferences-grid" id="notificationPreferences">
+              {% for category,label in [('operations','Операции'),('marketplaces','Площадки'),('billing','Биллинг')] %}
+              <fieldset data-notification-category="{{ category }}"><legend>{{ label }}</legend><label><input type="checkbox" data-notification-channel="in_app_enabled"> В приложении</label><label><input type="checkbox" data-notification-channel="email_enabled"> Email</label><label><input type="checkbox" data-notification-channel="telegram_enabled"> Telegram</label></fieldset>
+              {% endfor %}
+              <fieldset class="notification-security"><legend>Безопасность</legend><p>Смена пароля и другие критические события всегда доставляются во все каналы.</p></fieldset>
+            </div>
+            <small class="system-settings-save-state" id="notificationPreferencesSaveState" aria-live="polite"></small>
+          </article>
           <article class="settings-card"><div class="card-title"><span><img src="{{ url_for('static', filename='icons/currency.svg') }}" alt=""></span><div><h3 data-i18n="exchange_rates">Курсы валют к тенге</h3><p data-i18n="rates_text">Курс фиксируется для расчётов пользователя.</p></div></div><div class="form-grid"><label>1 RUB = KZT<input id="prefRub" type="number" min="0" step="0.0001"></label><label>1 USD = KZT<input id="prefUsd" type="number" min="0" step="0.01"></label><label>1 EUR = KZT<input id="prefEur" type="number" min="0" step="0.01"></label></div></article>
         </div>
       </section>
@@ -362,6 +400,66 @@
     </form>
   </div>
 </div>
+<div
+  class="modal"
+  id="settingsConfirmModal"
+  hidden
+>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <small>SECURITY</small>
+        <h3>
+          &#1055;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1076;&#1080;&#1090;&#1077; &#1080;&#1079;&#1084;&#1077;&#1085;&#1077;&#1085;&#1080;&#1103;
+        </h3>
+      </div>
+
+      <button
+        class="icon modal-close"
+        type="button"
+        aria-label="Close"
+      >
+        &#215;
+      </button>
+    </div>
+
+    <form id="settingsConfirmForm">
+      <p class="modal-description">
+        &#1044;&#1083;&#1103; &#1080;&#1079;&#1084;&#1077;&#1085;&#1077;&#1085;&#1080;&#1103; &#1076;&#1072;&#1085;&#1085;&#1099;&#1093; &#1082;&#1086;&#1084;&#1087;&#1072;&#1085;&#1080;&#1080; &#1087;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1076;&#1080;&#1090;&#1077; &#1083;&#1080;&#1095;&#1085;&#1086;&#1089;&#1090;&#1100; &#1090;&#1077;&#1082;&#1091;&#1097;&#1080;&#1084; &#1087;&#1072;&#1088;&#1086;&#1083;&#1077;&#1084;.
+      </p>
+
+      <label>
+        <span>
+          &#1058;&#1077;&#1082;&#1091;&#1097;&#1080;&#1081; &#1087;&#1072;&#1088;&#1086;&#1083;&#1100;
+        </span>
+
+        <input
+          name="current_password"
+          type="password"
+          autocomplete="current-password"
+          required
+        >
+      </label>
+
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary modal-close"
+        >
+          &#1054;&#1090;&#1084;&#1077;&#1085;&#1072;
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          &#1055;&#1086;&#1076;&#1090;&#1074;&#1077;&#1088;&#1076;&#1080;&#1090;&#1100; &#1080; &#1089;&#1086;&#1093;&#1088;&#1072;&#1085;&#1080;&#1090;&#1100;
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="12" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
 {% if current_user.permissions.manage_users %}
 <div class="modal" id="userModal" hidden>

@@ -50,7 +50,7 @@
     </h1>
 
     <p data-pi18n="register_intro">
-      Submit the application for review by our team.
+      Create your company account and choose a plan.
     </p>
 
     <div class="onboarding-points">
@@ -58,10 +58,10 @@
         Company details are required
       </span>
       <span data-pi18n="register_point_review">
-        Data collection is unavailable before approval
+        Confirm your email before signing in
       </span>
       <span data-pi18n="register_point_access">
-        Marketplace access is assigned to the company
+        Marketplaces are connected separately after registration
       </span>
     </div>
   </section>
@@ -92,6 +92,12 @@
         type="hidden"
         name="theme"
         value="system"
+      >
+      <input
+        type="hidden"
+        name="wizard_step"
+        id="registrationWizardStep"
+        value="{{ request.form.get('wizard_step', 'company') }}"
       >
 
       {% with messages = get_flashed_messages(with_categories=true) %}

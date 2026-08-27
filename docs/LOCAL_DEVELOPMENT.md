@@ -62,6 +62,8 @@ $env:DATABASE_URL = 'postgresql://spyon:LOCAL_PASSWORD@127.0.0.1:55433/spyon_dev
 ## Проверки
 
 ```powershell
+$env:ITP_STORAGE_BACKEND = 'sqlite'
+$env:ITP_ENV = 'test'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m compileall -q -x '(\.venv|\.git|runtime|data|__pycache__)' .
 .\.venv\Scripts\python.exe -m pip check

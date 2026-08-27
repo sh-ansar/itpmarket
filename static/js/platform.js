@@ -620,5 +620,189 @@
   $('#refreshPlatform')?.addEventListener('click', load);
   window.ITPUI?.onLocale(() => snapshot && render(snapshot));
   window.PlatformAdmin = {api, toast, load};
+
+  const billingSupplierLabels={
+    name:'\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435',
+    registration_number:'\u0411\u0418\u041d',
+    legal_address:'\u042e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u0439 \u0430\u0434\u0440\u0435\u0441',
+    iban:'IBAN',
+    bank_name:'\u0411\u0430\u043d\u043a',
+    bic:'\u0411\u0418\u041a',
+    kbe:'\u041a\u0411\u0435',
+    payment_purpose_code:'\u041a\u041d\u041f',
+    invoice_prefix:'\u041f\u0440\u0435\u0444\u0438\u043a\u0441 \u0441\u0447\u0451\u0442\u0430',
+    service_name:'\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0443\u0441\u043b\u0443\u0433\u0438',
+    agreement_basis:'\u041e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0435',
+    executor_name:'\u0418\u0441\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c'
+  };
+
+  function renderBillingSupplierSettings(supplier={}){
+    const form=$('#billingSupplierForm');
+    if(!form)return;
+
+    [
+      'name',
+      'registration_number',
+      'legal_address',
+      'iban',
+      'bank_name',
+      'bic',
+      'kbe',
+      'payment_purpose_code',
+      'invoice_prefix',
+      'service_name',
+      'agreement_basis',
+      'executor_name',
+      'vat_rate',
+      'invoice_due_days'
+    ].forEach(name=>{
+      const input=form.elements.namedItem(name);
+      if(input){
+        input.value=supplier[name]??'';
+      }
+    });
+
+    const vatEnabled=form.elements.namedItem('vat_enabled');
+    const vatRate=form.elements.namedItem('vat_rate');
+
+    if(vatEnabled){
+      vatEnabled.checked=Boolean(supplier.vat_enabled);
+    }
+
+    if(vatRate){
+      vatRate.disabled=!Boolean(supplier.vat_enabled);
+    }
+
+    const status=$('#billingSupplierStatus');
+    const missingHost=$('#billingSupplierMissing');
+    const missing=Array.isArray(supplier.missing_fields)
+      ?supplier.missing_fields
+      :[];
+
+    if(status){
+      status.className=
+        `billing-supplier-status ${supplier.is_complete?'ready':'incomplete'}`;
+
+      status.textContent=supplier.is_complete
+        ?'\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u044b'
+        :'\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435';
+    }
+
+    if(missingHost){
+      missingHost.textContent=missing.length
+        ?'\u041d\u0435 \u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d\u043e: '+
+          missing.map(field=>billingSupplierLabels[field]||field).join(', ')
+        :'';
+    }
+  }
+
+  async function loadBillingSupplierSettings(){
+    const form=$('#billingSupplierForm');
+    if(!form)return;
+
+    const status=$('#billingSupplierStatus');
+
+    try{
+      if(status){
+        status.className='billing-supplier-status loading-state';
+        status.textContent='\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430\u2026';
+      }
+
+      const response=await api(
+        '/api/platform/billing/supplier-settings'
+      );
+
+      renderBillingSupplierSettings(
+        response.supplier||{}
+      );
+    }catch(error){
+      if(status){
+        status.className='billing-supplier-status incomplete';
+        status.textContent=error.message;
+      }
+
+      toast(
+        error.message,
+        true
+      );
+    }
+  }
+
+  const billingSupplierForm=$('#billingSupplierForm');
+
+  billingSupplierForm?.elements
+    .namedItem('vat_enabled')
+    ?.addEventListener('change',event=>{
+      const rate=billingSupplierForm.elements.namedItem('vat_rate');
+
+      if(rate){
+        rate.disabled=!event.target.checked;
+
+        if(!event.target.checked){
+          rate.value='0';
+        }
+      }
+    });
+
+  billingSupplierForm?.addEventListener('submit',async event=>{
+    event.preventDefault();
+
+    const form=event.currentTarget;
+    const button=$('#saveBillingSupplier');
+
+    try{
+      if(button){
+        button.disabled=true;
+      }
+
+      const body=Object.fromEntries(
+        new FormData(form).entries()
+      );
+
+      body.vat_enabled=Boolean(
+        form.elements.namedItem('vat_enabled')?.checked
+      );
+
+      body.vat_rate=Number(
+        body.vat_rate||0
+      );
+
+      body.invoice_due_days=Number(
+        body.invoice_due_days||5
+      );
+
+      const response=await api(
+        '/api/platform/billing/supplier-settings',
+        {
+          method:'PUT',
+          body
+        }
+      );
+
+      renderBillingSupplierSettings(
+        response.supplier||{}
+      );
+
+      toast(
+        '\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b'
+      );
+    }catch(error){
+      toast(
+        error.message,
+        true
+      );
+    }finally{
+      if(button){
+        button.disabled=false;
+      }
+    }
+  });
+
+  $('#refreshPlatform')?.addEventListener('click',()=>{
+    void loadBillingSupplierSettings();
+  });
+
+  void loadBillingSupplierSettings();
+
   load();
 })();

@@ -138,6 +138,10 @@ class NotificationService:
         channel = self.email_service
         if channel is not None:
             for row in rows:
+                preferences = self.preferences_for_user(int(row[1]))
+                category = str(row[2])
+                if not preferences.get(category, {}).get("email_enabled", True):
+                    continue
                 try:
                     channel.queue_notification(
                         tenant_id=int(row[0]) if row[0] is not None else None,
@@ -316,14 +320,22 @@ class NotificationService:
         conn = self._connect()
         try:
             items = [dict(row) for row in conn.execute(
-                """SELECT id,tenant_id,user_id,category,event_type,level,title,message,
-                          action_url,created_at,read_at
-                   FROM app_notifications WHERE user_id=?
-                   ORDER BY id DESC LIMIT ?""",
+                """SELECT n.id,n.tenant_id,n.user_id,n.category,n.event_type,n.level,
+                          n.title,n.message,n.action_url,n.created_at,n.read_at
+                   FROM app_notifications n
+                   LEFT JOIN notification_preferences p
+                     ON p.user_id=n.user_id AND p.category=n.category
+                   WHERE n.user_id=?
+                     AND (n.category='security' OR COALESCE(p.in_app_enabled,1)=1)
+                   ORDER BY n.id DESC LIMIT ?""",
                 (int(user_id), max(1, min(int(limit), 200))),
             ).fetchall()]
             unread = int(conn.execute(
-                "SELECT COUNT(*) FROM app_notifications WHERE user_id=? AND read_at IS NULL",
+                """SELECT COUNT(*) FROM app_notifications n
+                   LEFT JOIN notification_preferences p
+                     ON p.user_id=n.user_id AND p.category=n.category
+                   WHERE n.user_id=? AND n.read_at IS NULL
+                     AND (n.category='security' OR COALESCE(p.in_app_enabled,1)=1)""",
                 (int(user_id),),
             ).fetchone()[0])
             return {"items": items, "unread": unread}

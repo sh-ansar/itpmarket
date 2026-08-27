@@ -37,7 +37,7 @@ SQLite является локальным backend по умолчанию. Prod
 
 ## Компании, пользователи и безопасность
 
-- Регистрация создаёт компанию в статусе `pending` и владельца без доступа к маркетплейсам. `superadmin` платформы рассматривает компанию, подтверждает или отклоняет её и выдаёт доступ к конкретным площадкам.
+- Регистрация создаёт подтверждённую компанию и владельца без доступа к маркетплейсам. После подтверждения email выбранный trial активируется автоматически, а платный пакет переходит в `awaiting_invoice`; ручное подтверждение компании или тарифа не требуется. Проверка остаётся только для конкретного подключения marketplace и для платежа.
 - Роли компании: `viewer` (просмотр), `operator` (просмотр, изменение товарных состояний, запуск/остановка операций и отчёты) и `admin` (все права компании, включая профиль, подключения, фильтры и пользователей).
 - Эффективный доступ к площадке — пересечение разрешения компании, активного подключения и персонального разрешения сотрудника. Эти проверки повторяются в backend и при выполнении отложенного расписания.
 - Каталоги, подключения, товарные состояния, задания, отчёты и расписания фильтруются по tenant. Изоляция нескольких компаний покрыта тестами.
@@ -74,16 +74,16 @@ SQLite является локальным backend по умолчанию. Prod
 
 | Функция | Назначение | Backend module | UI/API | Внешняя зависимость | Подтверждённый статус |
 | --- | --- | --- | --- | --- | --- |
-| Регистрация и вход | Создание pending-компании, session auth, recovery и logout | `auth_service.py`, `saas_service.py`, `app.py` | публичные страницы и auth API | SMTP не является обязательным runtime-сервисом | `PASS` unit/HTTP |
-| Super Admin | Рассмотрение компаний, grants площадок, source rules, тарифы | `saas_service.py`, `subscription_service.py` | отдельные platform routes/pages | нет | `PASS` unit |
+| Регистрация и вход | Самообслуживаемое создание компании, email confirmation, session auth и logout | `auth_service.py`, `saas_service.py`, `app.py` | публичные страницы и auth API | SMTP не является обязательным runtime-сервисом | `PASS` unit/HTTP |
+| Super Admin | Компании, supplier requisites, source rules, пакеты и подтверждение платежей | `saas_service.py`, `subscription_service.py`, `billing_service.py` | отдельные platform routes/pages | нет | `PASS` unit |
 | Пользователи/RBAC | Роли, персональные права и marketplace overrides | `tenant_security.py`, `auth_service.py` | company settings/API | нет | `PASS` unit |
 | Каталог компании | Tenant-снимок, категории, атрибуты, алиасы и фильтры | `catalog_configuration_service.py`, `data_service.py` | товары, фильтры и API | данные площадок | `PASS` unit |
 | Единый товар и остатки | Tenant-scoped physical product, purchase cost, linked marketplace listings и сводка без дублей | `inventory_service.py`, `app.py` | product drawer, `/api/inventory/summary` | заполнение пользователем | `PASS` unit/HTTP |
 | Межплощадочный matching | Динамические предложения, confirm/reject, защита уже заполненных складских товаров | `inventory_service.py` | product drawer и product match API | качество артикулов/характеристик | `PASS` unit/HTTP; только с ручным подтверждением |
-| Подписки | Планы, оплаты, feature/position/daily limits, add-ons | `subscription_service.py` | публичные тарифы и settings/platform API | ручное подтверждение оплаты | `PASS` unit |
+| Подписки | Планы, счета, оплаты, feature/position/daily limits, add-ons; замена неоплаченного пакета сохраняет историю и supersedes proof | `subscription_service.py`, `billing_service.py` | settings/platform API | ручное подтверждение оплаты | `PASS` unit |
 | Jobs | Subprocess lifecycle, concurrency, stop, logs и status cache | `task_manager.py`, `app.py` | operations API/UI | Python/Chrome/сеть по типу job | `PASS` unit и local runtime |
 | Scheduler | Запуск due schedules с повторной авторизацией и лимитами | `scheduler_service.py`, `saas_service.py` | operations/settings API/UI | процесс приложения | `PASS` unit; production task не проверялась локально |
-| Уведомления | Состояния jobs и окончание подписки | `notification_service.py` | notification API/UI | нет | `PASS` code/unit paths |
+| Уведомления | Состояния jobs, marketplaces, billing и окончание подписки; пользовательские каналы с обязательной доставкой security-событий | `notification_service.py` | notification API/UI | нет | `PASS` code/unit paths |
 | Telegram-бот | Вход в личном чате, персональная привязка, доставка без повторной постановки, retry/pause/logout | `telegram_bot.py`, `app.py` | Bot API и Settings status API/UI | Telegram Bot API, secret token в runtime env | `PASS` unit/API; `getMe` подтверждает настроенного бота |
 | Отчёты | Tenant/marketplace-scoped экспорт market intelligence | `engine/export_market_intelligence.py`, `engine/export_report.py` | reports/operations UI | файловая система, данные площадок | `PASS` unit/code; реальный production export не запускался |
 | Dashboard | Агрегаты каталога, цен, конкурентов и операций | `data_service.py`, `public_product_service.py`, `app.py` | dashboard UI/API | актуальные данные сборщиков | `PASS` unit/code; содержимое зависит от sync |

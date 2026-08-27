@@ -406,6 +406,36 @@ class AuthService:
             conn.close()
         return self.public_user(value)
 
+    def verify_password(
+        self,
+        user_id: int,
+        password: str,
+    ) -> bool:
+        """Verify the current password without creating a login session."""
+        conn = self._connect()
+
+        try:
+            row = conn.execute(
+                """
+                SELECT password_hash
+                FROM app_users
+                WHERE id=?
+                  AND is_active=1
+                LIMIT 1
+                """,
+                (int(user_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row is None:
+            return False
+
+        return check_password_hash(
+            str(row["password_hash"] or ""),
+            password or "",
+        )
+
     def issue_auth_token(
         self,
         user_id: int,

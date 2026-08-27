@@ -1459,6 +1459,8 @@ class SaaSService:
         request_id: int,
         actor_user_id: int | None,
         request_status: str = "pending",
+        *,
+        grant_marketplaces: bool = True,
     ) -> dict[str, Any]:
         tenant_status = canonical_company_status(request_status)
         stamp = now_iso()
@@ -1523,9 +1525,16 @@ class SaaSService:
                     """,
                     (tenant_id, item["code"], item["name"], "disabled", stamp, stamp),
                 )
-            if tenant_status == "approved":
+            if (
+                tenant_status == "approved"
+                and grant_marketplaces
+            ):
                 self._write_marketplace_access(
-                    conn, tenant_id, profile["selected_integrations"], actor_user_id, stamp
+                    conn,
+                    tenant_id,
+                    profile["selected_integrations"],
+                    actor_user_id,
+                    stamp,
                 )
             request_workflow_status = "pending" if tenant_status == "pending" else tenant_status
             conn.execute(

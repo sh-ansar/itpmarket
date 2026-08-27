@@ -543,3 +543,35 @@ html[data-theme="dark"] .billing-decision-actions .billing-decision-submit.decli
     width:100%;
   }
 }
+/* Spyon billing supplier settings UI */
+.billing-supplier-panel{margin-bottom:22px}
+.billing-supplier-head{align-items:flex-start}
+.billing-supplier-state{display:grid;justify-items:end;gap:5px;max-width:420px;text-align:right}
+.billing-supplier-state small{color:var(--muted);font-size:10px;line-height:1.45}
+.billing-supplier-status{display:inline-flex;align-items:center;min-height:30px;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800}
+.billing-supplier-status.ready{background:#e8f7f1;color:var(--green)}
+.billing-supplier-status.incomplete{background:#fff6dc;color:#8b630e}
+.billing-supplier-status.loading-state{background:var(--bg);color:var(--muted)}
+.billing-supplier-form{margin-top:16px}
+.billing-supplier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.billing-supplier-grid>label{display:grid;gap:6px;color:var(--muted);font-size:10px}
+.billing-supplier-grid input{width:100%;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);outline:none}
+.billing-supplier-grid input:focus{border-color:var(--blue)}
+.billing-supplier-grid input:disabled{opacity:.55;cursor:not-allowed}
+.billing-wide{grid-column:1/-1}
+.billing-vat-box{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end}
+.billing-vat-box>label{display:grid;gap:6px;color:var(--muted);font-size:10px}
+.billing-checkbox{display:flex!important;align-items:center;gap:8px;min-height:42px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+.billing-checkbox input{width:16px!important;min-height:16px!important}
+.billing-supplier-actions{display:flex;justify-content:flex-end;margin-top:16px}
+.billing-supplier-actions button{min-height:42px}
+html[data-theme="dark"] .billing-supplier-status.ready{background:rgba(24,166,106,.15)}
+html[data-theme="dark"] .billing-supplier-status.incomplete{background:rgba(216,154,24,.15)}
+@media(max-width:760px){
+  .billing-supplier-head{display:grid;gap:12px}
+  .billing-supplier-state{justify-items:start;text-align:left}
+  .billing-supplier-grid{grid-template-columns:1fr}
+  .billing-wide{grid-column:auto}
+  .billing-vat-box{grid-template-columns:1fr}
+  .billing-supplier-actions button{width:100%}
+}

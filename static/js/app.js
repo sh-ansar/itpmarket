@@ -280,7 +280,7 @@
   const PAGE_PERMISSIONS={dashboard:'view_dashboard',products:'view_products',operations:'view_operations',schedules:'view_operations',reports:'view_reports',users:'manage_users',settings:'view_settings'};
   function navigate(page){
     if(PAGE_PERMISSIONS[page]&&!can(PAGE_PERMISSIONS[page]))return toast('Недостаточно прав.',true);
-    state.page=page;$$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`));$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page));renderPageHeading();
+    state.page=page;$$('.page').forEach(x=>x.classList.toggle('active',x.id===`page-${page}`));$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page));renderPageHeading();syncSettingsSectionNav();
     if(page==='products'){loadProducts();if(can('view_inventory'))loadInventorySummary()}
     if(page==='operations')loadTasks();if(page==='reports')loadReports();if(page==='schedules')loadSchedules();if(page==='settings')loadSettings();if(page==='users')loadUsers();
     $('#sidebar').classList.remove('open');$('#mobileMenu')?.setAttribute('aria-expanded','false');closeHelp();updateHelpButton();
@@ -792,8 +792,20 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     const paymentProof=billing.payment_proof||{};
 
     const active=Boolean(ent.active);
-    const pending=(data.requests||[]).find(item=>item.status==='pending');
-    const scheduled=(data.requests||[]).find(item=>item.status==='scheduled');
+    const requests=data.requests||[];
+    const pending=requests.find(item=>item.status==='pending');
+    const scheduled=requests.find(item=>item.status==='scheduled');
+    const paymentReview=requests.find(
+      item=>item.status==='payment_review'
+    );
+    const replaceable=requests.find(
+      item=>[
+        'pending',
+        'awaiting_invoice',
+        'awaiting_payment',
+        'payment_rejected'
+      ].includes(item.status)
+    );
 
     const quotas=Object.entries(ent.marketplaces||{}).map(([code,q])=>
       `<article class="subscription-quota ${q.enabled?'':'disabled'}">
@@ -1160,9 +1172,9 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
             type="button"
             class="secondary"
             id="requestSubscriptionPlan"
-            ${pending?'disabled':''}
+            ${paymentReview?'disabled':''}
           >
-            \u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u043d\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435
+            \u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043a\u0435\u0442
           </button>
 
           ${active?
@@ -1189,6 +1201,26 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         :''
       }
     `;
+
+    const planSelect=$('#subscriptionPlanSelect');
+    const preferredPlan=
+      replaceable?.plan_code
+      ||scheduled?.plan_code
+      ||current?.plan_code
+      ||'';
+
+    if(
+      planSelect
+      && preferredPlan
+      && Array.from(
+        planSelect.options
+      ).some(
+        option=>
+          option.value===preferredPlan
+      )
+    ){
+      planSelect.value=preferredPlan;
+    }
 
     let selectedMonths=Number(
       billing.periods?.[0]||1
@@ -1357,33 +1389,211 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       }
     );
 
+        const packageRequests=
+      Array.isArray(
+        data.requests
+      )
+        ?data.requests
+        :[];
+
+    const unpaidPackage=
+      packageRequests.find(
+        item=>[
+          'pending',
+          'awaiting_invoice',
+          'awaiting_payment',
+          'payment_rejected'
+        ].includes(
+          String(
+            item.status||''
+          )
+        )
+      )
+      ||null;
+
+    const packagePaymentReview=
+      packageRequests.find(
+        item=>
+          String(
+            item.status||''
+          )==='payment_review'
+      )
+      ||null;
+
+    const packageSelect=$(
+      '#subscriptionPlanSelect'
+    );
+
+    const packageButton=$(
+      '#requestSubscriptionPlan'
+    );
+
+    const preferredPlanCode=String(
+      unpaidPackage?.plan_code
+      ||current?.plan_code
+      ||''
+    );
+
+    if(
+      packageSelect
+      &&preferredPlanCode
+      &&Array.from(
+        packageSelect.options
+      ).some(
+        option=>
+          option.value===preferredPlanCode
+      )
+    ){
+      packageSelect.value=
+        preferredPlanCode;
+    }
+
+    const updatePackageButton=()=>{
+      if(
+        !packageButton
+        ||!packageSelect
+      ){
+        return;
+      }
+
+      packageButton.disabled=
+        Boolean(
+          packagePaymentReview
+        );
+
+      const selected=String(
+        packageSelect.value||''
+      );
+
+      if(
+        active
+        &&selected===String(
+          current?.plan_code||''
+        )
+        &&!unpaidPackage
+      ){
+        packageButton.textContent=
+          '\u041f\u0440\u043e\u0434\u043b\u0438\u0442\u044c \u0442\u0430\u0440\u0438\u0444';
+      }else if(
+        active
+        ||unpaidPackage
+      ){
+        packageButton.textContent=
+          '\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u0442\u0430\u0440\u0438\u0444';
+      }else{
+        packageButton.textContent=
+          '\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0442\u0430\u0440\u0438\u0444';
+      }
+    };
+
+    packageSelect?.addEventListener(
+      'change',
+      updatePackageButton
+    );
+
+    updatePackageButton();
+
     $('#requestSubscriptionPlan')?.addEventListener(
       'click',
-      async()=>{
+      async event=>{
+        const button=
+          event.currentTarget;
+
+        const selectedPlan=String(
+          packageSelect?.value||''
+        );
+
+        if(!selectedPlan){
+          toast(
+            '\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0430\u0440\u0438\u0444',
+            true
+          );
+          return;
+        }
+
+        if(packagePaymentReview){
+          toast(
+            '\u041e\u043f\u043b\u0430\u0442\u0430 \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0443\u0436\u0435 \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435. \u0421\u043c\u0435\u043d\u0430 \u0442\u0430\u0440\u0438\u0444\u0430 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430.',
+            true
+          );
+          return;
+        }
+
+        const unpaidDifferent=
+          Boolean(
+            unpaidPackage
+            &&String(
+              unpaidPackage.plan_code||''
+            )!==selectedPlan
+          );
+
+        if(unpaidDifferent){
+          const confirmed=
+            window.confirm(
+              '\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u0442\u0430\u0440\u0438\u0444 \u0435\u0449\u0451 \u043d\u0435 \u043e\u043f\u043b\u0430\u0447\u0435\u043d. '
+              +'\u041f\u0440\u0438 \u0441\u043c\u0435\u043d\u0435 \u0442\u0430\u0440\u0438\u0444\u0430 \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043d\u0435\u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u0441\u0447\u0451\u0442 \u0431\u0443\u0434\u0435\u0442 \u043e\u0442\u043c\u0435\u043d\u0451\u043d. '
+              +'\u0414\u043b\u044f \u043d\u043e\u0432\u043e\u0433\u043e \u0442\u0430\u0440\u0438\u0444\u0430 \u043d\u0443\u0436\u043d\u043e \u0431\u0443\u0434\u0435\u0442 \u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442. '
+              +'\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c?'
+            );
+
+          if(!confirmed){
+            return;
+          }
+        }else if(
+          active
+          &&!unpaidPackage
+        ){
+          const samePlan=
+            selectedPlan===String(
+              current?.plan_code||''
+            );
+
+          const confirmed=
+            window.confirm(
+              samePlan
+                ?'\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u0442\u0430\u0440\u0438\u0444 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c \u0434\u043e \u043a\u043e\u043d\u0446\u0430 \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u043e\u0433\u043e \u043f\u0435\u0440\u0438\u043e\u0434\u0430. \u041d\u043e\u0432\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434 \u043d\u0430\u0447\u043d\u0451\u0442\u0441\u044f \u0441\u0440\u0430\u0437\u0443 \u043f\u043e\u0441\u043b\u0435 \u043d\u0435\u0433\u043e. \u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0447\u0451\u0442 \u043d\u0430 \u043f\u0440\u043e\u0434\u043b\u0435\u043d\u0438\u0435?'
+                :'\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u0442\u0430\u0440\u0438\u0444 \u043e\u0441\u0442\u0430\u043d\u0435\u0442\u0441\u044f \u0430\u043a\u0442\u0438\u0432\u043d\u044b\u043c \u0434\u043e \u043a\u043e\u043d\u0446\u0430 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u043e\u0433\u043e \u043f\u0435\u0440\u0438\u043e\u0434\u0430. \u041d\u043e\u0432\u044b\u0439 \u0442\u0430\u0440\u0438\u0444 \u043d\u0430\u0447\u043d\u0451\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c \u0441\u0440\u0430\u0437\u0443 \u043f\u043e\u0441\u043b\u0435 \u043d\u0435\u0433\u043e. \u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0447\u0451\u0442 \u043d\u0430 \u043d\u043e\u0432\u044b\u0439 \u0442\u0430\u0440\u0438\u0444?'
+            );
+
+          if(!confirmed){
+            return;
+          }
+        }
+
         try{
+          button.disabled=true;
+
           await api(
             '/api/subscription/request',
             {
               method:'POST',
               body:{
                 plan_code:
-                  $('#subscriptionPlanSelect').value
+                  selectedPlan
               }
             }
           );
 
           toast(
-            '\u0417\u0430\u044f\u0432\u043a\u0430 \u043d\u0430 \u043f\u0430\u043a\u0435\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430'
+            unpaidDifferent
+              ?'\u0422\u0430\u0440\u0438\u0444 \u0437\u0430\u043c\u0435\u043d\u0451\u043d. \u0421\u0444\u043e\u0440\u043c\u0438\u0440\u0443\u0439\u0442\u0435 \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442.'
+              :'\u0422\u0430\u0440\u0438\u0444 \u0432\u044b\u0431\u0440\u0430\u043d. \u041f\u0435\u0440\u0435\u0439\u0434\u0438\u0442\u0435 \u043a \u0441\u0447\u0451\u0442\u0443.'
           );
 
-          loadSettings();
-        }catch(e){
-          toast(e.message,true);
+          await loadSettings();
+
+        }catch(error){
+          button.disabled=false;
+
+          toast(
+            error.message,
+            true
+          );
         }
       }
     );
 
-    $('#requestSubscriptionAddon')?.addEventListener(
+$('#requestSubscriptionAddon')?.addEventListener(
       'click',
       async()=>{
         try{
@@ -1430,13 +1640,1079 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   }
   async function loadTelegramStatus(){try{renderTelegramStatus(await api('/api/telegram/status'))}catch(error){console.error(error)}}
 
+  const SETTINGS_SECTIONS = [
+    {
+      code:'company',
+      label:'\u0414\u0430\u043d\u043d\u044b\u0435 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      title:'\u0414\u0430\u043d\u043d\u044b\u0435 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      description:'\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438, \u0434\u0430\u043d\u043d\u044b\u0435 \u0443\u0447\u0451\u0442\u043d\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u0438 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c.'
+    },
+    {
+      code:'marketplaces',
+      label:'\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      title:'\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      description:'\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u0439\u0442\u0435 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u044b, \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0439\u0442\u0435 \u043f\u0440\u043e\u0434\u0430\u0432\u0446\u043e\u0432 \u0438 \u0443\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u0430\u043c\u0438 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430.'
+    },
+    {
+      code:'subscription',
+      label:'\u041f\u0430\u043a\u0435\u0442 \u0438 \u043b\u0438\u043c\u0438\u0442\u044b',
+      title:'\u041f\u0430\u043a\u0435\u0442 \u0438 \u043b\u0438\u043c\u0438\u0442\u044b',
+      description:'\u0422\u0430\u0440\u0438\u0444, \u043f\u0435\u0440\u0438\u043e\u0434 \u043e\u043f\u043b\u0430\u0442\u044b, \u0441\u0447\u0435\u0442\u0430, \u043b\u0438\u043c\u0438\u0442\u044b \u0438 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438.'
+    },
+    {
+      code:'system',
+      label:'\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438',
+      title:'\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438',
+      description:'\u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441, \u0432\u0430\u043b\u044e\u0442\u0430, \u043a\u0443\u0440\u0441\u044b \u0438 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.'
+    }
+  ];
+
+  let activeSettingsSection='company';
+
+  function settingsSectionForCard(card){
+    if(!card)return 'system';
+
+    if(
+      card.id==='subscriptionSettingsCard'
+      ||card.querySelector('#subscriptionSettings')
+    ){
+      return 'subscription';
+    }
+
+    if(
+      card.id==='securitySettings'
+      ||card.querySelector('#tenantName')
+      ||card.querySelector('#tenantRegistrationNumber')
+      ||card.querySelector('#tenantContactEmail')
+      ||card.querySelector('#openPasswordSettings')
+    ){
+      return 'company';
+    }
+
+    if(
+      card.querySelector('#catalogAttributeSearch')
+      ||card.querySelector('#catalogAttributeMarketplace')
+      ||card.querySelector('[data-marketplace-code]')
+      ||card.querySelector('[data-marketplace-settings]')
+      ||card.querySelector('.marketplace-settings')
+      ||card.querySelector('.marketplace-connections')
+      ||card.querySelector('.integration-settings')
+    ){
+      return 'marketplaces';
+    }
+
+    if(
+      card.id==='telegramSettings'
+      ||card.querySelector('#prefLocale')
+      ||card.querySelector('#prefCurrency')
+      ||card.querySelector('#prefUnits')
+      ||card.querySelector('#prefRub')
+      ||card.querySelector('#prefUsd')
+      ||card.querySelector('#prefEur')
+      ||card.querySelector('#cfgOzonClientUrls')
+    ){
+      return 'system';
+    }
+
+    const text=String(
+      card.textContent||''
+    ).toLocaleLowerCase();
+
+    if(
+      text.includes('\u043f\u043b\u043e\u0449\u0430\u0434')
+      ||text.includes('marketplace')
+      ||text.includes('\u043c\u0430\u0433\u0430\u0437\u0438\u043d')
+      ||text.includes('\u0438\u043d\u0442\u0435\u0433\u0440\u0430\u0446')
+      ||text.includes('seller')
+    ){
+      return 'marketplaces';
+    }
+
+    return 'system';
+  }
+
+  function ensureSettingsIntro(page){
+    let intro=$('#settingsSectionIntro');
+
+    if(intro){
+      return intro;
+    }
+
+    intro=document.createElement('div');
+    intro.id='settingsSectionIntro';
+    intro.className='settings-section-intro';
+
+    intro.innerHTML=`
+      <h2 id="settingsSectionTitle"></h2>
+      <p id="settingsSectionDescription"></p>
+    `;
+
+    const firstCard=$(
+      '.settings-card',
+      page
+    );
+
+    if(firstCard){
+      firstCard.parentNode.insertBefore(
+        intro,
+        firstCard
+      );
+    }else{
+      page.prepend(
+        intro
+      );
+    }
+
+    return intro;
+  }
+
+  function hideLegacySettingsHeadings(page){
+    if(!page)return;
+
+    const marketplaceSection=$(
+      '.marketplace-settings-section',
+      page
+    );
+
+    if(!marketplaceSection){
+      return;
+    }
+
+    /*
+     * The subsection intro already contains the title and description.
+     * Keep only marketplace connection controls below it.
+     */
+    const ownHeading=
+      marketplaceSection.querySelector(
+        '.settings-section-head'
+      );
+
+    if(ownHeading){
+      ownHeading.hidden=true;
+    }
+
+    marketplaceSection.dataset.settingsSection=
+      'marketplaces';
+  }
+
+
+  function restoreTenantSettingsInputs(){
+    const tenant=
+      state.settings?.tenant
+      ||{};
+
+    const values={
+      '#tenantName':
+        tenant.name||'',
+
+      '#tenantRegistrationNumber':
+        tenant.registration_number||'',
+
+      '#tenantContactEmail':
+        tenant.contact_email||'',
+
+      '#tenantContactPhone':
+        tenant.contact_phone||'',
+
+      '#tenantLegalAddress':
+        tenant.legal_address||'',
+
+      '#tenantActualAddress':
+        tenant.actual_address||''
+    };
+
+    Object.entries(
+      values
+    ).forEach(
+      ([selector,value])=>{
+        const input=$(selector);
+
+        if(input){
+          input.value=value;
+        }
+      }
+    );
+  }
+
+  function decoratePasswordInput(
+    input,
+    generatedId
+  ){
+    if(
+      !input
+      ||input.dataset.passwordEyeReady==='true'
+    ){
+      return;
+    }
+
+    input.dataset.passwordEyeReady=
+      'true';
+
+    if(!input.id){
+      input.id=generatedId;
+    }
+
+    let wrapper=
+      input.parentElement?.classList.contains(
+        'password-control'
+      )
+        ?input.parentElement
+        :null;
+
+    if(!wrapper){
+      wrapper=document.createElement(
+        'span'
+      );
+
+      wrapper.className=
+        'password-control settings-password-control';
+
+      input.parentNode.insertBefore(
+        wrapper,
+        input
+      );
+
+      wrapper.appendChild(
+        input
+      );
+    }else{
+      wrapper.classList.add(
+        'settings-password-control'
+      );
+    }
+
+    if(
+      wrapper.querySelector(
+        '.settings-password-toggle'
+      )
+    ){
+      return;
+    }
+
+    const button=
+      document.createElement(
+        'button'
+      );
+
+    button.type='button';
+
+    button.className=
+      'password-toggle settings-password-toggle';
+
+    button.setAttribute(
+      'aria-label',
+      'Show password'
+    );
+
+    button.innerHTML=
+      '<img src="/static/icons/eye.svg" alt="">';
+
+    button.addEventListener(
+      'click',
+      ()=>{
+        const visible=
+          input.type==='text';
+
+        input.type=
+          visible
+            ?'password'
+            :'text';
+
+        button.setAttribute(
+          'aria-label',
+          visible
+            ?'Show password'
+            :'Hide password'
+        );
+
+        input.focus();
+      }
+    );
+
+    wrapper.appendChild(
+      button
+    );
+  }
+
+  function decorateSettingsPasswords(){
+    const inputs=[
+      [
+        '#passwordForm [name="current_password"]',
+        'settingsCurrentPassword'
+      ],
+      [
+        '#passwordForm [name="new_password"]',
+        'settingsNewPassword'
+      ],
+      [
+        '#passwordForm [name="new_password_confirm"]',
+        'settingsNewPasswordConfirm'
+      ],
+      [
+        '#settingsConfirmForm [name="current_password"]',
+        'settingsConfirmCurrentPassword'
+      ]
+    ];
+
+    inputs.forEach(
+      ([selector,id])=>{
+        decoratePasswordInput(
+          $(selector),
+          id
+        );
+      }
+    );
+  }
+
+  function bindCompanySettingsRollback(){
+    const modal=$(
+      '#settingsConfirmModal'
+    );
+
+    if(
+      !modal
+      ||modal.dataset.companyRollbackBound==='true'
+    ){
+      return;
+    }
+
+    modal.dataset.companyRollbackBound=
+      'true';
+
+    modal.querySelectorAll(
+      '.modal-close'
+    ).forEach(
+      button=>{
+        button.addEventListener(
+          'click',
+          ()=>{
+            restoreTenantSettingsInputs();
+
+            $('#settingsConfirmForm')
+              ?.reset();
+          }
+        );
+      }
+    );
+
+    modal.addEventListener(
+      'click',
+      event=>{
+        if(event.target===modal){
+          restoreTenantSettingsInputs();
+
+          $('#settingsConfirmForm')
+            ?.reset();
+        }
+      }
+    );
+  }
+
+  function applySettingsRegressionFixes(page){
+    if(!page)return;
+
+    const commandBar=
+      page.querySelector(
+        '.page-command-bar'
+      );
+
+    if(
+      commandBar
+      &&(
+        commandBar.children.length===0
+        ||!commandBar.querySelector(
+          '#saveSettings'
+        )
+      )
+    ){
+      commandBar.hidden=true;
+    }
+
+    decorateSettingsPasswords();
+    bindCompanySettingsRollback();
+  }
+
+
+  function configureInlinePasswordSettings(){
+    const securityCard=$(
+      '#securitySettings'
+    );
+
+    const passwordForm=$(
+      '#passwordForm'
+    );
+
+    if(
+      !securityCard
+      ||!passwordForm
+    ){
+      return;
+    }
+
+    const openButton=$(
+      '#openPasswordSettings'
+    );
+
+    if(openButton){
+      openButton.remove();
+    }
+
+    if(
+      passwordForm.parentElement!==securityCard
+      &&!securityCard.contains(passwordForm)
+    ){
+      const actions=passwordForm.querySelector(
+        '.modal-actions'
+      );
+
+      if(actions){
+        actions.querySelectorAll(
+          '.modal-close'
+        ).forEach(
+          button=>button.remove()
+        );
+
+        actions.classList.remove(
+          'modal-actions'
+        );
+
+        actions.classList.add(
+          'settings-password-actions'
+        );
+
+        const submit=actions.querySelector(
+          'button:not([type="button"])'
+        );
+
+        if(submit){
+          submit.textContent=
+            '\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c';
+        }
+      }
+
+      passwordForm.classList.add(
+        'settings-password-form'
+      );
+
+      securityCard.appendChild(
+        passwordForm
+      );
+    }
+
+    const modal=$(
+      '#passwordModal'
+    );
+
+    if(modal){
+      modal.hidden=true;
+
+      if(!modal.contains(passwordForm)){
+        modal.remove();
+      }
+    }
+  }
+
+  function moveCompanySaveButton(){
+    const companyCard=
+      $('#tenantName')
+        ?.closest('.settings-card');
+
+    const saveButton=$(
+      '#saveSettings'
+    );
+
+    if(
+      !companyCard
+      ||!saveButton
+    ){
+      return;
+    }
+
+    let actions=companyCard.querySelector(
+      '.company-settings-actions'
+    );
+
+    if(!actions){
+      actions=document.createElement(
+        'div'
+      );
+
+      actions.className=
+        'company-settings-actions';
+
+      companyCard.appendChild(
+        actions
+      );
+    }
+
+    if(
+      saveButton.parentElement!==actions
+    ){
+      actions.appendChild(
+        saveButton
+      );
+    }
+
+    saveButton.textContent=
+      '\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435';
+  }
+
+  function systemPreferencesPayload(){
+    return {
+      locale:
+        $('#prefLocale')?.value
+        ||'ru',
+
+      theme:
+        window.ITPUI?.getTheme()
+        ||'system',
+
+      display_currency:
+        $('#prefCurrency')?.value
+        ||'KZT',
+
+      default_monthly_units:
+        Number(
+          $('#prefUnits')?.value
+          ||0
+        ),
+
+      rub_to_kzt:
+        Number(
+          $('#prefRub')?.value
+          ||0
+        ),
+
+      usd_to_kzt:
+        Number(
+          $('#prefUsd')?.value
+          ||0
+        ),
+
+      eur_to_kzt:
+        Number(
+          $('#prefEur')?.value
+          ||0
+        )
+    };
+  }
+
+  function systemSettingsValid(){
+    return [
+      '#prefUnits',
+      '#prefRub',
+      '#prefUsd',
+      '#prefEur'
+    ].every(selector=>{
+      const input=$(
+        selector
+      );
+
+      return (
+        !input
+        ||String(
+          input.value??''
+        ).trim()!==''
+      );
+    });
+  }
+
+  function ensureSystemSaveState(){
+    const card=
+      $('#prefLocale')
+        ?.closest('.settings-card');
+
+    if(!card){
+      return null;
+    }
+
+    let status=$(
+      '#systemSettingsSaveState'
+    );
+
+    if(!status){
+      status=document.createElement(
+        'div'
+      );
+
+      status.id=
+        'systemSettingsSaveState';
+
+      status.className=
+        'system-settings-save-state';
+
+      card.appendChild(
+        status
+      );
+    }
+
+    return status;
+  }
+
+  function setSystemSaveState(
+    text,
+    state=''
+  ){
+    const status=
+      ensureSystemSaveState();
+
+    if(!status)return;
+
+    status.textContent=text||'';
+    status.dataset.state=state;
+  }
+
+  let systemSettingsSaveTimer=null;
+  let systemSettingsSaveVersion=0;
+
+  async function saveSystemSettings(){
+    const version=
+      ++systemSettingsSaveVersion;
+
+    if(
+      !systemSettingsValid()
+    ){
+      setSystemSaveState(
+        '\u0417\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435',
+        'error'
+      );
+      return;
+    }
+
+    const preferences=
+      systemPreferencesPayload();
+
+    const body={
+      preferences
+    };
+
+    if(
+      user.platform_role==='superadmin'
+      &&$('#cfgOzonClientUrls')
+    ){
+      body.config={
+        ozon:{
+          client_catalog_urls:
+            $('#cfgOzonClientUrls').value,
+
+          market_category_urls:
+            $('#cfgOzonMarketUrls')?.value
+            ||'',
+
+          expected_seller:
+            $('#cfgOzonExpectedSeller')
+              ?.value
+              ?.trim()
+            ||''
+        }
+      };
+    }
+
+    setSystemSaveState(
+      '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435\u2026',
+      'saving'
+    );
+
+    try{
+      const result=await api(
+        '/api/settings',
+        {
+          method:'PUT',
+          body
+        }
+      );
+
+      if(
+        version!==systemSettingsSaveVersion
+      ){
+        return;
+      }
+
+      state.settings=
+        state.settings||{};
+
+      state.settings.preferences=
+        result.preferences
+        ||preferences;
+
+      applyI18n(
+        preferences.locale
+      );
+
+      setSystemSaveState(
+        '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e',
+        'saved'
+      );
+
+    }catch(error){
+      if(
+        version!==systemSettingsSaveVersion
+      ){
+        return;
+      }
+
+      setSystemSaveState(
+        error.message
+        ||'\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c',
+        'error'
+      );
+    }
+  }
+
+  function queueSystemSettingsSave(
+    delay=700
+  ){
+    if(systemSettingsSaveTimer){
+      clearTimeout(
+        systemSettingsSaveTimer
+      );
+    }
+
+    setSystemSaveState(
+      '\u0415\u0441\u0442\u044c \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f',
+      'pending'
+    );
+
+    systemSettingsSaveTimer=
+      window.setTimeout(
+        ()=>{
+          systemSettingsSaveTimer=null;
+          saveSystemSettings();
+        },
+        delay
+      );
+  }
+
+  function bindSystemSettingsAutosave(){
+    const root=$(
+      '#page-settings'
+    );
+
+    if(
+      !root
+      ||root.dataset.systemAutosaveBound==='true'
+    ){
+      return;
+    }
+
+    root.dataset.systemAutosaveBound=
+      'true';
+
+    [
+      '#prefUnits',
+      '#prefRub',
+      '#prefUsd',
+      '#prefEur'
+    ].forEach(selector=>{
+      const input=$(
+        selector
+      );
+
+      input?.addEventListener(
+        'input',
+        ()=>{
+          queueSystemSettingsSave(
+            700
+          );
+        }
+      );
+    });
+
+    [
+      '#prefLocale',
+      '#prefCurrency'
+    ].forEach(selector=>{
+      const input=$(
+        selector
+      );
+
+      input?.addEventListener(
+        'change',
+        ()=>{
+          queueSystemSettingsSave(
+            100
+          );
+        }
+      );
+    });
+
+    $$('#prefTheme [data-theme-option]').forEach(
+      button=>{
+        button.addEventListener(
+          'click',
+          ()=>{
+            queueSystemSettingsSave(
+              150
+            );
+          }
+        );
+      }
+    );
+
+    [
+      '#cfgOzonClientUrls',
+      '#cfgOzonMarketUrls',
+      '#cfgOzonExpectedSeller'
+    ].forEach(selector=>{
+      const input=$(
+        selector
+      );
+
+      input?.addEventListener(
+        'input',
+        ()=>{
+          queueSystemSettingsSave(
+            700
+          );
+        }
+      );
+    });
+  }
+
+  function configureSettingsUX(page){
+    if(!page)return;
+
+    hideLegacySettingsHeadings(
+      page
+    );
+
+    moveCompanySaveButton();
+    configureInlinePasswordSettings();
+    bindSystemSettingsAutosave();
+    ensureSystemSaveState();
+
+    applySettingsRegressionFixes(page);
+}
+
+
+  function setSettingsSection(
+    section,
+    {
+      persist=true
+    }={}
+  ){
+    const page=$('#page-settings');
+
+    if(!page)return;
+
+    const definition=
+      SETTINGS_SECTIONS.find(
+        item=>item.code===section
+      )
+      ||SETTINGS_SECTIONS[0];
+
+    section=definition.code;
+    activeSettingsSection=section;
+
+    $$('.settings-card',page).forEach(
+      card=>{
+        const cardSection=
+          card.dataset.settingsSection
+          ||settingsSectionForCard(card);
+
+        card.dataset.settingsSection=
+          cardSection;
+
+        card.classList.toggle(
+          'settings-section-hidden',
+          cardSection!==section
+        );
+      }
+    );
+
+    /*
+     * Marketplace connection block is not a settings-card in the
+     * original template, therefore it must be switched explicitly.
+     */
+    const marketplaceSection=$(
+      '.marketplace-settings-section',
+      page
+    );
+
+    if(marketplaceSection){
+      marketplaceSection.hidden=
+        section!=='marketplaces';
+    }
+
+    $$('#settingsSectionNav [data-settings-section]').forEach(
+      button=>{
+        const active=
+          button.dataset.settingsSection===section;
+
+        button.classList.toggle(
+          'active',
+          active
+        );
+
+        button.setAttribute(
+          'aria-selected',
+          active?'true':'false'
+        );
+      }
+    );
+
+    const title=$(
+      '#settingsSectionTitle'
+    );
+
+    const description=$(
+      '#settingsSectionDescription'
+    );
+
+    if(title){
+      title.textContent=
+        definition.title;
+    }
+
+    if(description){
+      description.textContent=
+        definition.description;
+    }
+
+    if(persist){
+      try{
+        sessionStorage.setItem(
+          'spyon_settings_section',
+          section
+        );
+      }catch(_error){}
+    }
+  }
+
+
+  function ensureSettingsSections(){
+    const page=$('#page-settings');
+    const title=$('#pageTitle');
+
+    const innerHeader=
+      title?.closest('.page-section-header__inner')
+      ||title?.closest('.page-section-header');
+
+    if(
+      !page
+      ||!title
+      ||!innerHeader
+    ){
+      return;
+    }
+
+    let nav=$(
+      '#settingsSectionNav'
+    );
+
+    if(!nav){
+      nav=document.createElement(
+        'nav'
+      );
+
+      nav.id='settingsSectionNav';
+      nav.className='settings-section-nav';
+
+      nav.setAttribute(
+        'aria-label',
+        '\u0420\u0430\u0437\u0434\u0435\u043b\u044b \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a'
+      );
+
+      nav.setAttribute(
+        'role',
+        'tablist'
+      );
+
+      nav.innerHTML=
+        SETTINGS_SECTIONS.map(
+          item=>`
+            <button
+              type="button"
+              role="tab"
+              data-settings-section="${item.code}"
+              aria-selected="false"
+            >
+              ${item.label}
+            </button>
+          `
+        ).join('');
+
+      innerHeader.classList.add(
+        'settings-page-header-inner'
+      );
+
+      innerHeader.appendChild(
+        nav
+      );
+
+      $$(
+        '[data-settings-section]',
+        nav
+      ).forEach(button=>{
+        button.onclick=()=>{
+          setSettingsSection(
+            button.dataset.settingsSection
+          );
+        };
+      });
+    }
+
+    ensureSettingsIntro(
+      page
+    );
+
+    configureSettingsUX(
+      page
+    );
+
+    $$('.settings-card',page).forEach(card=>{
+      card.dataset.settingsSection=
+        settingsSectionForCard(
+          card
+        );
+    });
+
+    let initial=
+      activeSettingsSection
+      ||'company';
+
+    try{
+      initial=
+        sessionStorage.getItem(
+          'spyon_settings_section'
+        )
+        ||initial;
+    }catch(_error){}
+
+    nav.hidden=false;
+
+    setSettingsSection(
+      initial,
+      {
+        persist:false
+      }
+    );
+  }
+
+  function syncSettingsSectionNav(){
+    const nav=$(
+      '#settingsSectionNav'
+    );
+
+    if(state.page==='settings'){
+      ensureSettingsSections();
+      return;
+    }
+
+    if(nav){
+      nav.hidden=true;
+    }
+  }
+
+
   async function loadSettings(){
     try{
       const d=await api('/api/settings');state.settings=d;const p=d.preferences||{};
-      $('#prefLocale').value=p.locale||'ru';state.theme=p.theme||window.ITPUI?.getTheme()||'system';
-      window.ITPUI?.setTheme(state.theme,{store:true,emit:false});
+      $('#prefLocale').value=p.locale||'ru';
+      state.theme=window.ITPUI?.getTheme()||localStorage.getItem('itp_theme')||p.theme||'system';
       $('#prefCurrency').value=p.display_currency||'KZT';$('#prefUnits').value=p.default_monthly_units??1;
-      $('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;
+       $('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;
+       renderNotificationPreferences(d.notification_preferences||{});
       const tenant=d.tenant||{};
       renderSubscriptionSettings(d.subscription);
       loadTelegramStatus();
@@ -1458,12 +2734,172 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       }
     }catch(e){toast(e.message,true)}
   }
-  async function saveSettings(){
-    const preferences={locale:$('#prefLocale').value,theme:window.ITPUI?.getTheme()||'system',display_currency:$('#prefCurrency').value,default_monthly_units:Number($('#prefUnits').value),rub_to_kzt:Number($('#prefRub').value),usd_to_kzt:Number($('#prefUsd').value),eur_to_kzt:Number($('#prefEur').value)};
+  function renderNotificationPreferences(preferences){
+    $$('[data-notification-category]').forEach(group=>{
+      const value=preferences[group.dataset.notificationCategory]||{};
+      $$('[data-notification-channel]',group).forEach(input=>{
+        input.checked=value[input.dataset.notificationChannel]!==false;
+      });
+    });
+  }
+  function notificationPreferencesPayload(){
+    const value={};
+    $$('[data-notification-category]').forEach(group=>{
+      const category=group.dataset.notificationCategory;
+      value[category]={};
+      $$('[data-notification-channel]',group).forEach(input=>{
+        value[category][input.dataset.notificationChannel]=input.checked;
+      });
+    });
+    return value;
+  }
+  async function saveNotificationPreferences(){
+    const status=$('#notificationPreferencesSaveState');
+    if(status){status.textContent='Сохранение…';status.dataset.state='saving';}
+    try{
+      const result=await api('/api/settings',{method:'PUT',body:{notification_preferences:notificationPreferencesPayload()}});
+      renderNotificationPreferences(result.notification_preferences||{});
+      if(status){status.textContent='Сохранено';status.dataset.state='saved';}
+    }catch(error){
+      if(status){status.textContent=error.message;status.dataset.state='error';}
+      toast(error.message,true);
+    }
+  }
+  function tenantSettingsPayload(){
+    if(!can('manage_company')||!$('#tenantName'))return null;
+
+    return {
+      name:$('#tenantName').value.trim(),
+      registration_number:$('#tenantRegistrationNumber').value.trim(),
+      contact_email:$('#tenantContactEmail').value.trim(),
+      contact_phone:$('#tenantContactPhone').value.trim(),
+      legal_address:$('#tenantLegalAddress').value.trim(),
+      actual_address:$('#tenantActualAddress').value.trim()
+    };
+  }
+
+  function tenantSettingsChanged(next){
+    if(!next)return false;
+
+    const current=state.settings?.tenant||{};
+
+    return Object.keys(next).some(
+      key=>String(next[key]??'').trim()!==String(current[key]??'').trim()
+    );
+  }
+
+  async function persistSettings(currentPassword=''){
+    const preferences={
+      locale:$('#prefLocale').value,
+      theme:window.ITPUI?.getTheme()||'system',
+      display_currency:$('#prefCurrency').value,
+      default_monthly_units:Number($('#prefUnits').value),
+      rub_to_kzt:Number($('#prefRub').value),
+      usd_to_kzt:Number($('#prefUsd').value),
+      eur_to_kzt:Number($('#prefEur').value)
+    };
+
     const body={preferences};
-    if(can('manage_company')&&$('#tenantName'))body.tenant={name:$('#tenantName').value.trim(),registration_number:$('#tenantRegistrationNumber').value.trim(),contact_email:$('#tenantContactEmail').value.trim(),contact_phone:$('#tenantContactPhone').value.trim(),legal_address:$('#tenantLegalAddress').value.trim(),actual_address:$('#tenantActualAddress').value.trim()};
-    if(user.platform_role==='superadmin'&&$('#cfgOzonClientUrls'))body.config={ozon:{client_catalog_urls:$('#cfgOzonClientUrls').value,market_category_urls:$('#cfgOzonMarketUrls').value,expected_seller:$('#cfgOzonExpectedSeller').value.trim()}};
-    try{const d=await api('/api/settings',{method:'PUT',body});if(d.tenant){state.settings.tenant=d.tenant;user.tenant_profile_complete=true;applyPermissions()}applyI18n(preferences.locale);toast(t('settings_saved','Настройки сохранены'));loadOverview();loadProducts();}catch(e){toast(e.message,true)}
+    const tenant=tenantSettingsPayload();
+
+    if(tenant){
+      body.tenant=tenant;
+    }
+
+    if(currentPassword){
+      body.current_password=currentPassword;
+    }
+
+    if(
+      user.platform_role==='superadmin'
+      && $('#cfgOzonClientUrls')
+    ){
+      body.config={
+        ozon:{
+          client_catalog_urls:$('#cfgOzonClientUrls').value,
+          market_category_urls:$('#cfgOzonMarketUrls').value,
+          expected_seller:$('#cfgOzonExpectedSeller').value.trim()
+        }
+      };
+    }
+
+    try{
+      const d=await api(
+        '/api/settings',
+        {
+          method:'PUT',
+          body
+        }
+      );
+
+      if(d.tenant){
+        state.settings=state.settings||{};
+        state.settings.tenant=d.tenant;
+        user.tenant_profile_complete=true;
+        applyPermissions();
+      }
+
+      applyI18n(
+        preferences.locale
+      );
+
+      toast(
+        t(
+          'settings_saved',
+          '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b'
+        )
+      );
+
+      loadOverview();
+      loadProducts();
+
+      return true;
+    }catch(e){
+      if(currentPassword){
+        restoreTenantSettingsInputs();
+
+        $('#settingsConfirmForm')
+          ?.reset();
+
+        hideModals();
+      }
+
+
+      toast(
+        e.message,
+        true
+      );
+
+      return false;
+    }
+  }
+
+  async function saveSettings(){
+    const tenant=tenantSettingsPayload();
+
+    if(
+      tenant
+      && tenantSettingsChanged(tenant)
+      && user.platform_role!=='superadmin'
+      && $('#settingsConfirmForm')
+    ){
+      $('#settingsConfirmForm').reset();
+
+      showModal(
+        'settingsConfirmModal'
+      );
+
+      window.setTimeout(
+        ()=>{
+          $('#settingsConfirmForm [name="current_password"]')?.focus();
+        },
+        0
+      );
+
+      return;
+    }
+
+    await persistSettings();
   }
 
   const scheduleStatus=v=>({
@@ -1739,6 +3175,9 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
 
   function bind(){
     initMultiSelects();
+    $$('[data-notification-channel]').forEach(input=>{
+      input.onchange=saveNotificationPreferences;
+    });
     $$('.nav').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
     $$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));
     $('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))};
@@ -1749,7 +3188,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#notificationList'))$('#notificationList').onclick=async event=>{const item=event.target.closest('[data-notification-id]');if(!item)return;try{await api(`/api/notifications/${item.dataset.notificationId}/read`,{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
     if($('#toggleTelegramNotifications'))$('#toggleTelegramNotifications').onclick=async()=>{const enabled=$('#toggleTelegramNotifications').dataset.enabled==='true';try{await api('/api/telegram/enabled',{method:'POST',body:{enabled:!enabled}});await loadTelegramStatus();toast(enabled?'Telegram-уведомления приостановлены':'Telegram-уведомления включены')}catch(error){toast(error.message,true)}};
     if($('#disconnectTelegram'))$('#disconnectTelegram').onclick=async()=>{if(!confirm('Отвязать Telegram от аккаунта Spyon?'))return;try{await api('/api/telegram/disconnect',{method:'POST',body:{}});await loadTelegramStatus();toast('Telegram отключён')}catch(error){toast(error.message,true)}};
-    $('#profileMenu').onclick=e=>e.stopPropagation();$('#openPassword').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
+    $('#profileMenu').onclick=e=>e.stopPropagation();if($('#openPasswordSettings'))$('#openPasswordSettings').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
     $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang});if(state.page==='dashboard')loadOverview()});
     if($('#languageSelect'))$('#languageSelect').onchange=e=>{applyI18n(e.target.value);persistUiPreference({locale:e.target.value});if(state.page==='dashboard')loadOverview()};
     if($('#helpButton'))$('#helpButton').onclick=e=>{e.stopPropagation();openHelp()};if($('#closeHelp'))$('#closeHelp').onclick=()=>closeHelp();if($('#helpBackdrop'))$('#helpBackdrop').onclick=()=>closeHelp();
@@ -1773,7 +3212,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#enableVisibleCatalogFilters'))$('#enableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=true);queueCatalogFilterSave()};
     if($('#disableVisibleCatalogFilters'))$('#disableVisibleCatalogFilters').onclick=()=>{$$('.catalog-filter-option:not([hidden]) [data-catalog-filter-key]').forEach(node=>node.checked=false);queueCatalogFilterSave()};
     if($('#refreshCatalogAttributes'))$('#refreshCatalogAttributes').onclick=async()=>{try{await api('/api/catalog/attributes/refresh',{method:'POST',timeoutMs:120000});await loadCatalogConfiguration({settings:true});toast('Характеристики обновлены');}catch(e){toast(e.message,true)}};
-    $('#saveSettings').onclick=saveSettings;if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleAction'))$('#scheduleAction').onchange=()=>updateScheduleSeller();if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
+    $('#saveSettings').onclick=saveSettings;if($('#settingsConfirmForm'))$('#settingsConfirmForm').onsubmit=async e=>{e.preventDefault();const password=String(new FormData(e.target).get('current_password')||'');const saved=await persistSettings(password);if(saved){hideModals();e.target.reset();}};if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleAction'))$('#scheduleAction').onchange=()=>updateScheduleSeller();if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
     $('#passwordForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));try{await api('/api/account/password',{method:'POST',body:f});toast(t('password_changed','Пароль изменён'));hideModals();e.target.reset();}catch(err){toast(err.message,true)}};
     if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};
     document.addEventListener('click',e=>{closeMultiSelects();const menu=$('#profileMenu'),button=$('#profileButton');if(menu&&!menu.hidden&&!menu.contains(e.target)&&!button.contains(e.target))menu.hidden=true;const nav=$('#sidebar'),mobile=$('#mobileMenu');if(nav?.classList.contains('open')&&!nav.contains(e.target)&&!mobile?.contains(e.target)){nav.classList.remove('open');mobile?.setAttribute('aria-expanded','false')};$$('.modal:not([hidden])').forEach(modal=>{if(e.target===modal)modal.hidden=true});});
