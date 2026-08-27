@@ -157,6 +157,34 @@ class OzonRuntimeContractTests(unittest.TestCase):
             )
             launch.assert_not_called()
 
+    def test_production_never_auto_opens_a_session_zero_browser(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_production_browser_") as folder:
+            session = BrowserSession(58792, "https://www.ozon.ru/seller/example/", Path(folder))
+            with patch.dict(os.environ, {"ITP_ENV": "production"}, clear=True), patch.object(
+                session, "_debugger_ready", return_value=False
+            ), patch.object(session, "_adopt_profile_debugger", return_value=False):
+                with self.assertRaisesRegex(RuntimeError, "Ozon браузер не открыт"):
+                    session.ensure_debug_browser()
+
+    def test_interactive_launcher_reuses_only_its_profile_marker(self) -> None:
+        import importlib.util
+
+        launcher_path = ROOT / "scripts" / "open_ozon_browsers.py"
+        spec = importlib.util.spec_from_file_location("open_ozon_browsers", launcher_path)
+        self.assertIsNotNone(spec)
+        launcher = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        sys.modules[spec.name] = launcher
+        spec.loader.exec_module(launcher)
+        with tempfile.TemporaryDirectory(prefix="ozon_launcher_") as folder:
+            profile = Path(folder)
+            profile.joinpath(".spyon_devtools_port").write_text("42777", encoding="ascii")
+            with patch.object(launcher, "debugger_ready", return_value=True):
+                result = launcher.start_browser(profile, 43111, "https://www.ozon.ru/seller/example/", dry_run=False)
+        self.assertEqual("reused", result["status"])
+        self.assertEqual(42777, result["port"])
+        self.assertNotIn("--headless", launcher_path.read_text(encoding="utf-8"))
+
     def test_self_test_starts_without_manual_pythonpath(self) -> None:
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)

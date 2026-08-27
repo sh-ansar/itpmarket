@@ -78,6 +78,23 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\diagnose_runtime.ps1 -Mode Local
 ```
 
+## Версионные юридические документы
+
+DOCX в `docs/legal` являются единственным юридическим источником текста и
+должны попадать в feature change вместе с PDF. Не редактируйте текст при
+преобразовании. Реестр `legal_documents.py` ограничивает типы и версии,
+поэтому произвольные пути и хеши из HTTP не принимаются. При добавлении новой
+версии сохраните старые файлы, добавьте запись в реестр и один раз создайте
+статический PDF:
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+.\.venv\Scripts\python.exe .\scripts\generate_legal_pdfs.py
+```
+
+После публикации PDF версии не перегенерируются. Для локальной проверки
+запустите `tests/test_legal_documents.py` вместе с миграционными тестами.
+
 Диагностика выводит `PASS/WARN/FAIL` для branch/worktree, Python, зависимостей, Playwright, БД, Chrome/ChromeDriver, каталогов и ACL, профилей, scheduler, порта и HTTP. Она не печатает секреты и возвращает код 1 только при `FAIL`; отсутствие live-профиля или незапущенное локальное приложение — `WARN`.
 
 После старта должны отвечать:
@@ -101,6 +118,8 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/api/public/plans
 ```
 
 Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru использует `collectors\ozon\chrome_vpn_profile`, Ozon.kz — отдельный `collectors\ozon\chrome_kz_profile` и Chrome remote debugging. После обновления legacy-профиль сохраняется только за тем активным seller во всех компаниях, чей source URL точно совпал с открытой seller-вкладкой этого профиля; найденная привязка хранится рядом как несекретный owner marker и повторно проверяется по текущему source URL. Очереди enrichment/price дополнительно ограничиваются `product_sources` выбранного seller, поэтому прежние товары другого магазина из общего legacy registry не попадут в его операцию. Все остальные продавцы используют `.runtime\browser_profiles\t<tenant>\<marketplace>\s<seller>` и не разделяют legacy-сессию. Если профиль пуст, вкладка не совпала однозначно или marker стал неактуален, применяется seller-scoped путь. Если Chrome для профиля уже работает, сборщик повторно использует порт из `DevToolsActivePort`, не завершает чужой процесс и не создаёт второй экземпляр профиля. Не копируйте и не коммитьте профили, cookies или их содержимое. Без подтверждённого seller/source URL и сессии обозначайте проверку как `BLOCKED`, а не как успешную.
+
+В production `ITP_ENV=production` по умолчанию запрещает автоматическое создание Chrome из процесса сборщика: он подключается только к уже открытому browser того же seller. Откройте все активные seller-scoped браузеры в интерактивной сессии командой `\.venv\Scripts\python.exe .\scripts\open_ozon_browsers.py`; `--dry-run` безопасно покажет план. Скрипт никогда не использует `--headless`, не завершает Chrome и переиспользует только порт, сохранённый в profile этого seller.
 
 ## Частые проблемы
 

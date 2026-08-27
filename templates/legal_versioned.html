@@ -1,0 +1,18 @@
+{% if not embedded %}
+<!doctype html><html lang="ru"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ legal.title }} — Spyon</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
+</head><body class="legal-page">
+{% endif %}
+<article class="legal-document legal-versioned-document">
+  <header class="legal-document-head">
+    <p class="eyebrow">SPYON · LEGAL</p>
+    <h1>{{ legal.title }}</h1>
+    <div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div>
+    <a class="site-button secondary" href="{{ url_for('legal_current_pdf', document=legal.type, download=1) }}">Скачать PDF</a>
+  </header>
+  <div class="legal-source-note">Официальная редакция документа доступна на русском языке.</div>
+  <section class="legal-source-content">{{ document_html }}</section>
+</article>
+{% if not embedded %}</body></html>{% endif %}

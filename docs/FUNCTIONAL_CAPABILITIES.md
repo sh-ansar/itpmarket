@@ -129,4 +129,17 @@ A successful reset consumes the token atomically, replaces the password hash
 and increments session_version so previously issued sessions become invalid.
 
 Production schema changes are tracked by checksum and safe additive migrations
+
+## Юридические документы и электронный акцепт
+
+Публичные immutable-редакции доступны по `/legal/offer` и `/legal/privacy`
+(versioned URL остаются `/legal/<type>/1.0`). PDF доступны для просмотра по
+`/legal/offer/pdf` и `/legal/privacy/pdf`; добавьте `?download=1` для
+`Content-Disposition: attachment`.
+Серверный реестр в `legal_documents.py` — единственный источник номера,
+версии и SHA-256: хеш вычисляется по точному versioned DOCX из `docs/legal`.
+Регистрация требует отдельного акцепта оферты и privacy. В той же транзакции,
+что создаёт пользователя и компанию, сохраняются две записи
+`legal_acceptances` с документом, хешем, UTC-временем, IP, User-Agent,
+локалью и точной формулировкой чекбокса. Принятые документы видны в Settings.
 can be applied automatically during deployment after a verified backup.

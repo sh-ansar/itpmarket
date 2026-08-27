@@ -3850,6 +3850,8 @@ html[data-theme="dark"] .settings-section-nav button.active {
   width: 100%;
 }
 
+.legal-documents-list{display:grid;gap:10px}.legal-document-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.legal-document-item b,.legal-document-item small{display:block}.legal-document-item small{margin-top:4px;color:var(--muted)}.legal-document-item>div:last-child{display:flex;gap:7px;flex-wrap:wrap}.legal-document-item .secondary{min-height:34px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}@media(max-width:600px){.legal-document-item{align-items:flex-start;flex-direction:column}.legal-document-item>div:last-child{width:100%}.legal-document-item .secondary{flex:1;justify-content:center;text-align:center}}
+
 .settings-password-control > input {
   width: 100%;
   padding-right: 44px !important;

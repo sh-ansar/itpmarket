@@ -618,28 +618,18 @@
               {% if request.form.get('privacy_consent') %}checked{% endif %}
               required
             >
-            <span
-              class="consent-text"
-              data-pi18n="register_privacy"
-            >
-              I agree to personal data processing and the privacy policy.
-            </span>
+            <span class="consent-text">Я ознакомился(ась) с <button type="button" class="legal-inline-link" data-legal-modal="privacy">Политикой конфиденциальности Spyon</button> и даю согласие на сбор и обработку моих персональных данных на изложенных в ней условиях.</span>
           </label>
 
           <label>
             <input
               type="checkbox"
-              name="terms_consent"
+              name="offer_acceptance"
               value="1"
-              {% if request.form.get('terms_consent') %}checked{% endif %}
+              {% if request.form.get('offer_acceptance') %}checked{% endif %}
               required
             >
-            <span
-              class="consent-text"
-              data-pi18n="register_terms"
-            >
-              I accept the terms of use.
-            </span>
+            <span class="consent-text">Я подтверждаю, что уполномочен действовать от имени указанной компании, ознакомился и принимаю условия <button type="button" class="legal-inline-link" data-legal-modal="offer">Публичной оферты Spyon</button>.</span>
           </label>
         </div>
       </section>
@@ -701,6 +691,13 @@
     </form>
   </section>
 </main>
+
+<div class="legal-modal-backdrop" id="legalModalBackdrop" hidden></div>
+<section class="legal-modal" id="legalModal" role="dialog" aria-modal="true" aria-labelledby="legalModalTitle" hidden>
+  <header class="legal-modal-head"><div><h2 id="legalModalTitle">Юридический документ</h2><p id="legalModalMeta"></p></div><button class="secondary" type="button" id="closeLegalModal" aria-label="Закрыть">×</button></header>
+  <div class="legal-modal-content" id="legalModalContent" tabindex="0"></div>
+  <footer class="legal-modal-footer"><a class="secondary" id="legalModalPdf" href="#">Скачать PDF</a><button class="primary" type="button" id="closeLegalModalFooter">Закрыть</button></footer>
+</section>
 
 <script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/public_i18n_runtime.js') }}?v={{ version }}"></script>

@@ -292,6 +292,9 @@ class AuthService:
         tenant_id: int | None = None,
         platform_role: str = "",
         email_verified: bool = False,
+        legal_acceptances: list[dict[str, Any]] | None = None,
+        conn: Any | None = None,
+        commit: bool = True,
     ) -> tuple[dict[str, Any], str]:
         email_value = normalize_email(email)
         name_value = (display_name or "").strip()
@@ -308,7 +311,8 @@ class AuthService:
         validate_password(password, email_value, name_value)
         recovery_code = generate_recovery_code()
         stamp = now_iso()
-        conn = self._connect()
+        owns_connection = conn is None
+        conn = conn or self._connect()
         try:
             cursor = conn.execute(
                 """
@@ -350,17 +354,45 @@ class AuthService:
                     """,
                     (resolved_tenant_id,user_id,role_value,1,stamp),
                 )
+            if legal_acceptances:
+                if resolved_tenant_id is None:
+                    raise ValueError("Для юридического акцепта требуется компания.")
+                for acceptance in legal_acceptances:
+                    conn.execute(
+                        """INSERT INTO legal_acceptances(
+                            user_id,tenant_id,document_type,document_number,
+                            document_version,document_sha256,accepted_at,ip_address,
+                            user_agent,locale,acceptance_text,source,created_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            user_id,
+                            int(resolved_tenant_id),
+                            str(acceptance["document_type"]),
+                            str(acceptance["document_number"]),
+                            str(acceptance["document_version"]),
+                            str(acceptance["document_sha256"]),
+                            str(acceptance["accepted_at"]),
+                            str(acceptance.get("ip_address") or ""),
+                            str(acceptance.get("user_agent") or ""),
+                            str(acceptance.get("locale") or "ru"),
+                            str(acceptance["acceptance_text"]),
+                            str(acceptance.get("source") or "registration"),
+                            stamp,
+                        ),
+                    )
             self._event(conn, actor_user_id or user_id, "user_created", "user", str(user_id), {
                 "email": email_value,
                 "role": role_value,
             })
-            conn.commit()
+            if commit:
+                conn.commit()
             row = conn.execute(self._user_select()+" WHERE u.id=? LIMIT 1", (user_id,)).fetchone()
             return self.public_user(self._attach_marketplaces(conn, row)) or {}, recovery_code
         except integrity_error_types() as exc:
             raise ValueError("Пользователь с такой почтой уже существует.") from exc
         finally:
-            conn.close()
+            if owns_connection:
+                conn.close()
 
     def authenticate(
         self,

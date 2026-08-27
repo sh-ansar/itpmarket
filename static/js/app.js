@@ -2775,7 +2775,8 @@ $('#requestSubscriptionAddon')?.addEventListener(
       state.theme=window.ITPUI?.getTheme()||localStorage.getItem('itp_theme')||p.theme||'system';
       $('#prefCurrency').value=p.display_currency||'KZT';$('#prefUnits').value=p.default_monthly_units??1;
        $('#prefRub').value=p.rub_to_kzt??5.5;$('#prefUsd').value=p.usd_to_kzt??520;$('#prefEur').value=p.eur_to_kzt??565;
-       renderNotificationPreferences(d.notification_preferences||{});
+      renderNotificationPreferences(d.notification_preferences||{});
+      renderLegalDocuments(d.legal_documents||[]);
       const tenant=d.tenant||{};
       renderSubscriptionSettings(d.subscription);
       renderSubscriptionStatusBanner(d.subscription);
@@ -2797,6 +2798,10 @@ $('#requestSubscriptionAddon')?.addEventListener(
         $('#cfgOzonCurrentOffers').value=ozon.current_offers??0;
       }
     }catch(e){toast(e.message,true)}
+  }
+  function renderLegalDocuments(documents){
+    const target=$('#legalDocumentsList');if(!target)return;
+    target.innerHTML=documents.length?documents.map(item=>`<article class="legal-document-item"><div><b>${esc(item.title||'Юридический документ')}</b><small>Версия ${esc(item.version||'—')}${item.accepted_at?` · Принято: ${esc(dateText(item.accepted_at))}`:''}</small></div><div><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}.pdf">PDF</a></div></article>`).join(''):'<div class="empty">Нет зафиксированных юридических документов.</div>';
   }
   function renderNotificationPreferences(preferences){
     $$('[data-notification-category]').forEach(group=>{

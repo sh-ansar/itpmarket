@@ -55,6 +55,7 @@ from task_manager import TaskManager
 from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
+from legal_documents import LEGAL_DOCUMENTS
 from marketplace_registry import (
     LEGACY_MARKETPLACE_CODES,
     MARKETPLACE_CODES,
@@ -1950,6 +1951,7 @@ def before_request() -> Any:
     if not AUTH.has_users() and request.endpoint not in {
         "setup", "setup_complete", "static", "health", "ready", "landing",
         "registration", "registration_complete", "legal_document",
+        "legal_document_version", "legal_pdf",
         "api_public_plans",
     }:
         if is_api_request():
@@ -2433,7 +2435,7 @@ def registration() -> Any:
             "estimated_products": request.form.get("estimated_products", "0"),
             "comment": request.form.get("comment", ""),
             "privacy_consent": request.form.get("privacy_consent") == "1",
-            "terms_consent": request.form.get("terms_consent") == "1",
+            "offer_acceptance": request.form.get("offer_acceptance") == "1",
             "locale": request.form.get("locale", "ru"),
             "launch_mode": "self_service",
             "template_code": request.form.get("template_code", ""),
@@ -2455,25 +2457,43 @@ def registration() -> Any:
                 "email": payload["email"],
                 "workspace_profile": profile,
             }
-            provision = SAAS.provision_tenant_from_request(
-                request_id,
-                None,
-                "approved",
-                grant_marketplaces=False,
-            )
             verification_required = bool(
                 email_service().settings.enabled
             )
-
-            user, _recovery_code = AUTH.create_user(
-                payload["email"],
-                payload["contact_name"] or payload["company_name"],
-                password,
-                "admin",
-                None,
-                tenant_id=int(provision["tenant_id"]),
-                email_verified=not verification_required,
-            )
+            registration_conn = SAAS._connect()
+            try:
+                if isinstance(registration_conn, sqlite3.Connection):
+                    registration_conn.execute("BEGIN IMMEDIATE")
+                provision = SAAS.provision_tenant_from_request(
+                    request_id,
+                    None,
+                    "approved",
+                    grant_marketplaces=False,
+                    conn=registration_conn,
+                    commit=False,
+                )
+                user, _recovery_code = AUTH.create_user(
+                    payload["email"],
+                    payload["contact_name"] or payload["company_name"],
+                    password,
+                    "admin",
+                    None,
+                    tenant_id=int(provision["tenant_id"]),
+                    email_verified=not verification_required,
+                    legal_acceptances=LEGAL_DOCUMENTS.acceptance_records(
+                        ip_address=request.remote_addr or "",
+                        user_agent=request.headers.get("User-Agent", ""),
+                        locale=str(payload.get("locale") or "ru"),
+                    ),
+                    conn=registration_conn,
+                    commit=False,
+                )
+                registration_conn.commit()
+            except Exception:
+                registration_conn.rollback()
+                raise
+            finally:
+                registration_conn.close()
             locale = str(payload.get("locale") or "ru").strip().casefold()
             if locale not in {"ru", "kk", "en"}:
                 locale = "ru"
@@ -2626,8 +2646,48 @@ def api_public_plans() -> Any:
     )
 
 
+@app.get("/legal/<document>/<version>.pdf")
+def legal_pdf(document: str, version: str) -> Any:
+    definition = LEGAL_DOCUMENTS.get(document, version)
+    if definition is None or not definition.pdf_path.is_file():
+        abort(404)
+    download = str(request.args.get("download") or "").casefold() in {"1", "true", "yes"}
+    return send_file(
+        definition.pdf_path,
+        mimetype="application/pdf",
+        as_attachment=download,
+        download_name=f"Spyon_{definition.document_type}_{definition.version}.pdf",
+        max_age=31536000,
+    )
+
+
+@app.get("/legal/<document>/<version>")
+def legal_document_version(document: str, version: str) -> Any:
+    definition = LEGAL_DOCUMENTS.get(document, version)
+    if definition is None:
+        abort(404)
+    return render_template(
+        "legal_versioned.html",
+        legal=LEGAL_DOCUMENTS.metadata(definition),
+        document_html=LEGAL_DOCUMENTS.html(definition),
+        embedded=str(request.args.get("embed") or "").casefold() in {"1", "true"},
+    )
+
+
+@app.get("/legal/<document>/pdf")
+def legal_current_pdf(document: str) -> Any:
+    """Serve the published current PDF through a stable public URL."""
+    definition = LEGAL_DOCUMENTS.get(document)
+    if definition is None:
+        abort(404)
+    return legal_pdf(definition.document_type, definition.version)
+
+
 @app.get("/legal/<document>")
 def legal_document(document: str) -> Any:
+    definition = LEGAL_DOCUMENTS.get(document)
+    if definition is not None:
+        return legal_document_version(document, definition.version)
     if document not in {"privacy", "terms", "cookies", "consent", "offer"}: abort(404)
     locale=str(request.args.get("lang") or "ru").casefold()
     try: value=PUBLIC.legal_document(document,locale)
@@ -3496,6 +3556,15 @@ def api_events() -> Any:
 @permission_required("view_settings")
 def api_settings_get() -> Any:
     user = current_user() or {}
+    legal_conn = AUTH._connect()
+    try:
+        legal_documents = LEGAL_DOCUMENTS.accepted_documents_for_user(
+            legal_conn,
+            int(user["id"]),
+            int(user["tenant_id"]) if user.get("tenant_id") else None,
+        )
+    finally:
+        legal_conn.close()
     config_result = None
     if is_superadmin(user):
         config_result = public_config(CFG)
@@ -3514,6 +3583,7 @@ def api_settings_get() -> Any:
             if user.get("tenant_id")
             else None
         ),
+        legal_documents=legal_documents,
     )
 
 

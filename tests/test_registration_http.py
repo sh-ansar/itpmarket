@@ -73,7 +73,7 @@ class RegistrationHttpTests(unittest.TestCase):
                 "password": "SafeVaultNumber927!",
                 "password_confirm": "SafeVaultNumber927!",
                 "privacy_consent": "1",
-                "terms_consent": "1",
+                "offer_acceptance": "1",
                 "locale": "ru",
             },
         )
@@ -135,7 +135,7 @@ class RegistrationHttpTests(unittest.TestCase):
                 "password": "SafeVaultNumber927!",
                 "password_confirm": "SafeVaultNumber927!",
                 "privacy_consent": "1",
-                "terms_consent": "1",
+                "offer_acceptance": "1",
                 "locale": "ru",
             }
 

@@ -213,9 +213,17 @@ class BrowserSession:
         )
 
     def _launch_debug_browser(self) -> None:
-        if os.environ.get("OZON_AUTO_OPEN_BROWSER", "1").strip().casefold() in {"0", "false", "no", "off"}:
+        configured = os.environ.get("OZON_AUTO_OPEN_BROWSER")
+        production = os.environ.get("ITP_ENV", "").strip().casefold() == "production"
+        auto_open = (
+            configured.strip().casefold() not in {"0", "false", "no", "off"}
+            if configured is not None
+            else not production
+        )
+        if not auto_open:
             raise RuntimeError(
-                f"{self.marketplace_label} debug browser is not open and OZON_AUTO_OPEN_BROWSER is disabled."
+                "Ozon браузер не открыт. Откройте браузер Ozon и повторите "
+                "синхронизацию."
             )
         chrome = self._chrome_executable()
         self.profile_dir.mkdir(parents=True, exist_ok=True)

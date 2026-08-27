@@ -373,6 +373,27 @@ CREATE TABLE IF NOT EXISTS tenant_users (
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_users_user ON tenant_users(user_id, is_primary, is_active);
 
+CREATE TABLE IF NOT EXISTS legal_acceptances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    document_type TEXT NOT NULL CHECK(document_type IN ('offer','privacy')),
+    document_number TEXT NOT NULL,
+    document_version TEXT NOT NULL,
+    document_sha256 TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    ip_address TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    locale TEXT NOT NULL DEFAULT 'ru',
+    acceptance_text TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'registration',
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, document_type, document_version),
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_tenant ON legal_acceptances(tenant_id, accepted_at DESC);
+
 CREATE TABLE IF NOT EXISTS tenant_roles (
     tenant_id INTEGER NOT NULL,
     role_code TEXT NOT NULL,

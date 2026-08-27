@@ -1321,8 +1321,11 @@ class SaaSService:
             raise ValueError("Укажите корректную электронную почту.")
         if not bool(payload.get("privacy_consent")):
             raise ValueError("Необходимо согласие с Политикой конфиденциальности.")
-        if not bool(payload.get("terms_consent")):
-            raise ValueError("Необходимо принять Условия использования.")
+        if (
+            str(payload.get("source_page") or "") == "public_registration"
+            and not bool(payload.get("offer_acceptance"))
+        ):
+            raise ValueError("Необходимо принять Публичную оферту Spyon.")
         raw_estimated_value = payload.get("estimated_products")
         is_public_registration = (
             str(payload.get("source_page") or "")
@@ -1468,10 +1471,13 @@ class SaaSService:
         request_status: str = "pending",
         *,
         grant_marketplaces: bool = True,
+        conn: Any | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         tenant_status = canonical_company_status(request_status)
         stamp = now_iso()
-        conn = self._connect()
+        owns_connection = conn is None
+        conn = conn or self._connect()
         try:
             row = conn.execute(
                 "SELECT * FROM registration_requests WHERE id=?",
@@ -1561,7 +1567,8 @@ class SaaSService:
                 str(request_id),
                 {"status": tenant_status, "template_code": profile["template_code"]},
             )
-            conn.commit()
+            if commit:
+                conn.commit()
             tenant = dict(conn.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone())
             tenant["workspace_profile"] = profile
             request = dict(row)
@@ -1572,7 +1579,8 @@ class SaaSService:
             request["workspace_profile"] = profile
             return {"request": request, "tenant": tenant, "tenant_id": tenant_id, "workspace_profile": profile}
         finally:
-            conn.close()
+            if owns_connection:
+                conn.close()
 
     def review_registration_v2(self, request_id: int, decision: str, actor_user_id: int) -> dict[str, Any]:
         raw_decision = str(decision or "").casefold()

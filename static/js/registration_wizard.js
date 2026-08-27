@@ -542,6 +542,74 @@
     });
   }
 
+  var legalModal = document.getElementById("legalModal");
+  var legalBackdrop = document.getElementById("legalModalBackdrop");
+  var legalContent = document.getElementById("legalModalContent");
+  var legalTitle = document.getElementById("legalModalTitle");
+  var legalMeta = document.getElementById("legalModalMeta");
+  var legalPdf = document.getElementById("legalModalPdf");
+  var legalReturnFocus = null;
+
+  function closeLegalModal() {
+    if (!legalModal) {
+      return;
+    }
+    legalModal.hidden = true;
+    if (legalBackdrop) {
+      legalBackdrop.hidden = true;
+    }
+    document.body.classList.remove("legal-modal-open");
+    if (legalReturnFocus && legalReturnFocus.isConnected) {
+      legalReturnFocus.focus();
+    }
+    legalReturnFocus = null;
+  }
+
+  function openLegalModal(documentType, trigger) {
+    if (!legalModal || !legalContent) {
+      return;
+    }
+    legalReturnFocus = trigger;
+    legalModal.hidden = false;
+    if (legalBackdrop) {
+      legalBackdrop.hidden = false;
+    }
+    document.body.classList.add("legal-modal-open");
+    var documentUrl = "/legal/" + encodeURIComponent(documentType);
+    var pdfUrl = documentUrl + "/pdf";
+    legalContent.innerHTML = "";
+    legalTitle.textContent = documentType === "offer" ? "Публичная оферта Spyon" : "Политика конфиденциальности Spyon";
+    legalMeta.textContent = documentType === "offer" ? "№ SPYON-OF-001 · Версия 1.0" : "№ SPYON-PD-001 · Версия 1.0";
+    legalPdf.href = pdfUrl + "?download=1";
+    var viewer = document.createElement("iframe");
+    viewer.className = "legal-modal-viewer";
+    viewer.title = legalTitle.textContent;
+    viewer.src = pdfUrl;
+    viewer.setAttribute("loading", "eager");
+    legalContent.appendChild(viewer);
+    var fallback = document.createElement("p");
+    fallback.className = "legal-modal-fallback";
+    fallback.innerHTML = 'Документ временно недоступен. <a target="_blank" rel="noopener" href="' + documentUrl + '">Откройте его в новой вкладке</a> или <a href="' + pdfUrl + '?download=1">скачайте PDF</a>.';
+    legalContent.appendChild(fallback);
+    legalContent.focus();
+  }
+
+  document.querySelectorAll("[data-legal-modal]").forEach(function (link) {
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      openLegalModal(link.dataset.legalModal, link);
+    });
+  });
+  document.getElementById("closeLegalModal")?.addEventListener("click", closeLegalModal);
+  document.getElementById("closeLegalModalFooter")?.addEventListener("click", closeLegalModal);
+  legalBackdrop?.addEventListener("click", closeLegalModal);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && legalModal && !legalModal.hidden) {
+      closeLegalModal();
+    }
+  });
+
   if (previous) {
     previous.addEventListener(
       "click",

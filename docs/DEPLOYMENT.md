@@ -75,6 +75,7 @@ Backup-helper определяет major-версию PostgreSQL-сервера 
 4. `migrations/20260819_email_auth_notifications_v1.sql`.
 5. `migrations/20260820_company_addresses_v1.sql`.
 6. `migrations/20260827_self_service_billing_v1.sql` — self-service registration fields, subscriptions, invoices and payment-proof storage. An unpaid invoice is reissued by the application: the source invoice is cancelled and a new one is created; no manual database change is required.
+7. `migrations/20260827_legal_acceptances_v1.sql` — immutable evidence of offer/privacy acceptance during registration.
 
 Все миграции аддитивны. Вторая не переносит и не объединяет карточки автоматически; она добавляет отсутствующие default-права системных ролей (`admin` и `operator`) без удаления персональных overrides. Третья создаёт только персональные Telegram-привязки и журнал доставки; токен в PostgreSQL не хранится. После применения `engine/postgres_initialize.py --check` должен увидеть новые таблицы; только затем разрешён restart приложения. В рамках локальной feature-разработки эти миграции к production не применяются.
 
@@ -143,6 +144,17 @@ Worker использует long polling внутри единственного
 Transactional SMTP is required in `.runtime\production.env`: set `ITP_EMAIL_ENABLED=1`, a non-local `ITP_SMTP_HOST`, `ITP_MAIL_FROM`, `ITP_SMTP_SECURITY=starttls` or `smtps`, and a public HTTPS `SPYON_PUBLIC_URL`. Set SMTP username and password together when the provider requires authentication. `scripts\diagnose_runtime.ps1 -Mode Production` validates this contract without showing secret values; the optional real-send test remains opt-in through `ITP_EMAIL_INTEGRATION_TEST=1`.
 
 Для Ozon после deploy проверьте пути обеих площадок: непустой collector-local legacy Chrome profile может получить только один активный продавец во всех компаниях, чей source URL однозначно совпал с seller-вкладкой этого браузера; owner marker должен содержать только seller ID и нормализованный публичный seller URL. Каждый другой продавец использует отдельный seller-scoped профиль, а enrichment/price queue должна содержать только статьи из `product_sources` выбранного source URL. Ozon.ru должен подключаться к PostgreSQL schema `ozon_ru`, а повторный Ozon.kz запуск с уже открытым профилем — использовать его `DevToolsActivePort`, не создавать конфликтующий Chrome и не завершать процессы других sellers.
+
+### Visible Ozon browsers
+
+Production collectors run in Session 0 and must only attach to a visible browser opened by an interactive user. `ITP_ENV=production` therefore disables implicit Ozon Chrome creation unless `OZON_AUTO_OPEN_BROWSER` is explicitly enabled (it should remain disabled in production). After deployment, while signed in as the interactive Windows user, register the separate logon task once:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File C:\Spyon\current\scripts\register_ozon_browser_task.ps1
+```
+
+It creates only `\Spyon\Spyon Ozon Browsers` with `InteractiveToken` / “Run only when user is logged on”, launches `open_ozon_browsers.py` at logon, and stores no password. It neither changes nor restarts `Spyon Production`. Do not run this registration from a developer workstation or a Session-0 service account.
 
 ## Post-deploy verification
 
