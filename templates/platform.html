@@ -19,7 +19,7 @@
 </header>
 
 <main class="platform-main">
-  <section class="platform-title"><div><span>ADMIN CONTROL</span><h1>{% if platform_section == 'packages' %}Пакеты и лимиты{% elif platform_section == 'link-rules' %}Правила ссылок{% elif platform_section == 'payments' %}Оплаты и сроки{% else %}Компании и заявки{% endif %}</h1><p>{% if platform_section == 'packages' %}Функции, площадки, лимиты позиций и запусков.{% elif platform_section == 'link-rules' %}Распознавание магазинов и формирование ссылок для каждой площадки.{% elif platform_section == 'payments' %}Подтверждённые оплаты, активные периоды и ближайшие продления.{% else %}Регистрация, подтверждение, пакет, площадки и пользователи в одном списке.{% endif %}</p></div><button id="refreshPlatform" data-i18n="platform_refresh">Обновить</button></section>
+  <section class="platform-title"><div><span>ADMIN CONTROL</span><h1>{% if platform_section == 'packages' %}Пакеты и лимиты{% elif platform_section == 'link-rules' %}Правила ссылок{% elif platform_section == 'payments' %}Оплаты и сроки{% else %}Компании{% endif %}</h1><p>{% if platform_section == 'packages' %}Функции, площадки, лимиты позиций и запусков.{% elif platform_section == 'link-rules' %}Распознавание магазинов и формирование ссылок для каждой площадки.{% elif platform_section == 'payments' %}Подтверждённые оплаты, активные периоды и ближайшие продления.{% else %}Рабочие пространства, пакеты, площадки и пользователи в одном списке.{% endif %}</p></div><button id="refreshPlatform" data-i18n="platform_refresh">Обновить</button></section>
   {% if platform_section == 'companies' %}
   <section class="platform-kpis" id="platformKpis"><article><small>—</small><b>—</b></article></section>
 
@@ -27,7 +27,7 @@
     <div class="panel-head"><div><span>WORKSPACES</span><h2 data-i18n="platform_companies">Компании</h2></div></div>
     <div class="company-table-wrap">
       <table class="company-table">
-        <thead><tr><th data-i18n="company_name">Компания</th><th data-i18n="status">Статус / заявка</th><th data-i18n="platform_owner">Владелец</th><th data-i18n="platform_connected">Площадки</th><th>Пакет</th><th>Следующее продление</th><th data-i18n="actions">Действие</th></tr></thead>
+        <thead><tr><th data-i18n="company_name">Компания</th><th data-i18n="status">Статус</th><th data-i18n="platform_owner">Владелец</th><th data-i18n="platform_connected">Площадки</th><th>Пакет</th><th>Следующее продление</th><th data-i18n="actions">Действие</th></tr></thead>
         <tbody id="tenantTableBody"><tr><td colspan="7" class="loading" data-i18n="loading_catalog">Загрузка…</td></tr></tbody>
       </table>
     </div>
@@ -38,7 +38,6 @@
     <div class="panel-head"><div><span>SUBSCRIPTIONS</span><h2>Пакеты, лимиты и подтверждения</h2><p>Настраивайте функции, площадки, дневные запуски, позиции, цену и срок.</p></div></div>
     <div class="subscription-admin-block"><h3>Пакеты</h3><div id="subscriptionPlans" class="subscription-admin-grid"><div class="loading">Загрузка…</div></div></div>
     <div class="subscription-admin-block"><h3>Дополнительные позиции</h3><div id="subscriptionAddons" class="subscription-admin-grid"><div class="loading">Загрузка…</div></div></div>
-    <div class="subscription-admin-block"><h3>Ожидают подтверждения</h3><div id="subscriptionRequests" class="request-list"><div class="loading">Загрузка…</div></div></div>
   </section>
   {% elif platform_section == 'link-rules' %}
   <section class="platform-panel" id="source-rules">

@@ -98,6 +98,15 @@ class RegistrationHttpTests(unittest.TestCase):
         self.assertEqual(("approved", tenant_id), request_row)
         self.assertFalse(any(item["is_allowed"] for item in self.saas.marketplace_access(tenant_id)))
 
+    def test_public_registration_runtime_has_no_manual_approval_copy(self) -> None:
+        runtime = (
+            Path(__file__).resolve().parents[1]
+            / "static" / "js" / "public_i18n_runtime.js"
+        ).read_text(encoding="utf-8-sig").casefold()
+        self.assertNotIn("после подтверждения супер-администратором", runtime)
+        self.assertNotIn("super-administrator approval", runtime)
+        self.assertIn("доступ откроется после подтверждения оплаты", runtime)
+
     def test_registration_rejects_missing_required_commercial_fields(self) -> None:
         def csrf_token() -> str:
             page = self.client.get("/register")

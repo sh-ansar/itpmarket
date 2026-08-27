@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import app as webapp
 from auth_service import AuthService
+from engine.postgres_migrations import validate_pending_migration
 from schema import ensure_database
 
 
@@ -126,10 +127,13 @@ class ProductionDeploymentTests(unittest.TestCase):
         )
         schemas = manifest["schemas"]
         self.assertEqual({"app", "ozon_ru", "ozon_kz"}, set(schemas))
-        self.assertEqual(108, sum(len(tables) for tables in schemas.values()))
+        self.assertEqual(111, sum(len(tables) for tables in schemas.values()))
         self.assertIn("auth_tokens", schemas["app"])
         self.assertIn("email_outbox", schemas["app"])
         self.assertIn("notification_preferences", schemas["app"])
+        self.assertIn("billing_sequences", schemas["app"])
+        self.assertIn("subscription_invoices", schemas["app"])
+        self.assertIn("subscription_payment_proofs", schemas["app"])
         self.assertIn("tenants", schemas["app"])
         self.assertIn("tenant_inventory_products", schemas["app"])
         self.assertIn("tenant_product_listings", schemas["app"])
@@ -139,6 +143,25 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("telegram_notification_deliveries", schemas["app"])
         self.assertIn("products", schemas["ozon_ru"])
         self.assertIn("ozon_kz_products", schemas["ozon_kz"])
+
+    def test_self_service_billing_migration_is_safe_for_auto_deploy(self) -> None:
+        migration = (
+            ROOT / "migrations" / "20260827_self_service_billing_v1.sql"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn("SPYON-AUTO-MIGRATION", migration)
+        self.assertTrue(migration.lstrip().startswith("-- SPYON-AUTO-MIGRATION"))
+        self.assertIn("BEGIN;", migration)
+        self.assertTrue(migration.rstrip().endswith("COMMIT;"))
+        for table in (
+            "subscription_invoices",
+            "subscription_payment_proofs",
+            "billing_sequences",
+        ):
+            self.assertIn(f"app.{table}", migration)
+        validate_pending_migration(
+            ROOT / "migrations" / "20260827_self_service_billing_v1.sql",
+            migration,
+        )
 
 
 if __name__ == "__main__":

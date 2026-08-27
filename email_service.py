@@ -40,7 +40,7 @@ TEMPLATE_SUBJECTS = {
     "password_reset": "Восстановление пароля Spyon",
     "password_changed": "Пароль Spyon изменён",
     "user_invitation": "Приглашение в Spyon",
-    "registration_received": "Заявка Spyon получена",
+    "registration_received": "Регистрация Spyon завершена",
     "company_approved": "Компания одобрена в Spyon",
     "company_rejected": "Решение по заявке Spyon",
     "subscription_expiry": "Срок подписки Spyon заканчивается",

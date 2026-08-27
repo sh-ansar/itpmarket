@@ -84,8 +84,11 @@
       "v9_product_cache",
       "v9_run_metrics",
       "auth_tokens",
+      "billing_sequences",
       "email_outbox",
-      "notification_preferences"
+      "notification_preferences",
+      "subscription_invoices",
+      "subscription_payment_proofs"
     ],
     "ozon_ru": [
       "catalog_snapshots",

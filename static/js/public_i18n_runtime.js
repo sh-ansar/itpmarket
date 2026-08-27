@@ -20,21 +20,30 @@
   };
   Object.assign(extra.ru, {
     register_step_plan:'ПАКЕТ', register_plan_title:'Выберите пакет',
-    register_plan_hint:'Оплата пока не выполняется. Выбранный пакет, цена и срок начнут действовать только после подтверждения супер-администратором.',
+    register_plan_hint:'Пробный пакет активируется сразу. Для платного пакета после регистрации сформируется счёт: доступ откроется после подтверждения оплаты.',
+    register_intro:'Создайте рабочее пространство и выберите пакет.', register_point_review:'Подтвердите email, чтобы завершить активацию учётной записи',
+    register_required_hint:'Укажите реальные данные для счёта и рабочего пространства.', register_marketplaces_hint:'Выберите хотя бы одну площадку. Подключение магазина настраивается после регистрации.',
+    register_submit:'Зарегистрироваться', public_cta_button:'Зарегистрироваться',
     register_consents_title:'Согласия и отправка', register_guide_step:'Шаг {current} из {total}',
     register_guide_fill:'заполните текущий блок', register_guide_review:'проверьте согласия и отправьте форму',
     register_guide_next:'Далее', register_guide_submit:'К отправке'
   });
   Object.assign(extra.kk, {
     register_step_plan:'ПАКЕТ', register_plan_title:'Пакетті таңдаңыз',
-    register_plan_hint:'Қазір төлем алынбайды. Таңдалған пакет, баға және мерзім супер-әкімші растағаннан кейін ғана басталады.',
+    register_plan_hint:'Сынақ пакеті бірден іске қосылады. Ақылы пакетке тіркелгеннен кейін шот жасалады: қолжетімділік төлем расталған соң ашылады.',
+    register_intro:'Жұмыс кеңістігін жасап, пакетті таңдаңыз.', register_point_review:'Тіркелгіні белсендіруді аяқтау үшін email-ды растаңыз',
+    register_required_hint:'Шот пен жұмыс кеңістігі үшін нақты деректерді көрсетіңіз.', register_marketplaces_hint:'Кемінде бір маркетплейсті таңдаңыз. Дүкенді қосу тіркелгеннен кейін бапталады.',
+    register_submit:'Тіркелу', public_cta_button:'Тіркелу',
     register_consents_title:'Келісімдер және жіберу', register_guide_step:'{current} / {total} қадам',
     register_guide_fill:'ағымдағы бөлімді толтырыңыз', register_guide_review:'келісімдерді тексеріп, нысанды жіберіңіз',
     register_guide_next:'Келесі', register_guide_submit:'Жіберуге өту'
   });
   Object.assign(extra.en, {
     register_step_plan:'PLAN', register_plan_title:'Choose a plan',
-    register_plan_hint:'No payment is taken now. The selected plan, price, and term start only after super-administrator approval.',
+    register_plan_hint:'The trial starts immediately. For a paid plan, registration creates an invoice and access opens after payment confirmation.',
+    register_intro:'Create your workspace and choose a plan.', register_point_review:'Confirm your email to finish activating the account',
+    register_required_hint:'Enter accurate details for the invoice and workspace.', register_marketplaces_hint:'Select at least one marketplace. Store connection is configured after registration.',
+    register_submit:'Register', public_cta_button:'Register',
     register_consents_title:'Consents and submission', register_guide_step:'Step {current} of {total}',
     register_guide_fill:'complete the current section', register_guide_review:'review consents and submit the form',
     register_guide_next:'Next', register_guide_submit:'Go to submission'

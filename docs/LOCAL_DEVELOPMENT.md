@@ -55,7 +55,7 @@ $env:DATABASE_URL = 'postgresql://spyon:LOCAL_PASSWORD@127.0.0.1:55433/spyon_dev
 
 `--check` только читает состояние и завершится ошибкой, если схемы не готовы. Инициализация без `--check` и миграционные команды меняют БД; запускайте их только для явно выбранной новой dev-БД после просмотра плана в `docs/POSTGRESQL_MIGRATION_RU.md`.
 
-Для существующей dev PostgreSQL миграции применяются явно и по порядку: `migrations/20260818_multi_seller_v1.sql`, `migrations/20260818_inventory_matching_v1.sql`, затем `migrations/20260818_telegram_notifications_v1.sql`. Миграции добавляют таблицы/индексы и отсутствующие default-права, не объединяют карточки автоматически и не удаляют персональные overrides.
+Для существующей dev PostgreSQL миграции применяются явно через `engine/postgres_migrations.py apply`. В частности, `20260827_self_service_billing_v1.sql` добавляет self-service поля регистрации, счета и подтверждения оплаты. Миграции аддитивны: они добавляют таблицы/индексы и отсутствующие поля, не объединяют карточки автоматически и не удаляют персональные overrides.
 
 Для локального теста Telegram используйте отдельного dev-бота и задайте `ITP_TELEGRAM_BOT_ENABLED=1`, `ITP_TELEGRAM_BOT_TOKEN`, `ITP_TELEGRAM_BOT_USERNAME` и `SPYON_PUBLIC_URL`. Реальный token не записывайте в `.env.example`, код, логи или тестовые fixtures.
 
