@@ -126,6 +126,12 @@ class PostgresMigrationRunnerTests(
                 path.name,
             )
 
+            if path.name not in BASELINE_MARKERS:
+                validate_pending_migration(
+                    path,
+                    text,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,8 +4,8 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS app.legal_acceptances (
     id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES app.app_users(id) ON DELETE CASCADE,
-    tenant_id BIGINT NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES app.app_users(id),
+    tenant_id BIGINT NOT NULL REFERENCES app.tenants(id),
     document_type TEXT NOT NULL CHECK (document_type IN ('offer', 'privacy')),
     document_number TEXT NOT NULL,
     document_version TEXT NOT NULL,
