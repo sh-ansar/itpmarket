@@ -58,7 +58,7 @@
     }).join('');
     const example = rule.examples?.find(value => String(value).startsWith('http')) || rule.examples?.[0] || '';
     return `<details class="source-rule-card" data-source-rule-code="${esc(code)}"${code === 'kaspi' ? ' open' : ''}>
-      <summary><span><small>MARKETPLACE</small><strong>${esc(catalogItem.name || code)}</strong></span><code>${esc(code)}</code></summary>
+      <summary><span><strong>${esc(catalogItem.name || code)}</strong></span><code>${esc(code)}</code></summary>
       <div class="source-rule-body">
         <p>${esc(t('marketplace_rule_one_per_line', 'Массивы заполняются по одному значению в строке. Regex должен содержать named group seller_id, product_id/product_slug или seller_name.'))}</p>
         <div class="source-rule-fields">${fields}</div>

@@ -33,7 +33,7 @@
     const approval=item.approval_status||'draft';
     const statusText=item.is_connected?t('marketplace_connected','Подключено'):approval==='pending'?'Ожидает подтверждения':approval==='rejected'?'Отклонено — можно отправить заново':t('marketplace_available','Доступно');
     return `<article class="settings-card tenant-marketplace-card ${item.is_connected ? 'connected' : ''}" data-marketplace-code="${esc(item.code)}">
-      <div class="marketplace-card-head"><div><small>MARKETPLACE</small><h3>${esc(item.name)}</h3></div><span class="marketplace-approval ${esc(approval)}">${esc(statusText)}</span></div>
+      <div class="marketplace-card-head"><div><h3>${esc(item.name)}</h3></div><span class="marketplace-approval ${esc(approval)}">${esc(statusText)}</span></div>
       <p>${esc(item.description || '')}</p>
       ${item.is_connected ? `<div class="marketplace-discovery-note"><strong>${esc(item.seller_name || item.seller_identifier)}</strong><br><a href="${esc(item.seller_url)}" target="_blank" rel="noreferrer">${esc(item.seller_url)}</a></div>` : `
         ${approval==='pending'?`<div class="marketplace-discovery-note"><strong>${esc(item.seller_name||item.seller_identifier)}</strong><br>Заявка отправлена супер-администратору. После подтверждения площадка появится в каталоге и операциях.</div>`:''}

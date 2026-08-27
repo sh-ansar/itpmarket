@@ -117,5 +117,8 @@ YYYYMMDD_name.sql filenames.
 Safe automatic migrations must contain SPYON-AUTO-MIGRATION, start with BEGIN
 and end with COMMIT. Run tests/test_postgres_migrations.py before release.
 
+For billing changes, run `tests/test_billing_invoices.py`: it covers creation,
+cancellation, and safe reissue of an unpaid invoice.
+
 The password reset regression test verifies the complete flow from requesting
 an email link through changing the password and consuming the one-use token.

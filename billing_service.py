@@ -4252,3 +4252,86 @@ class BillingService:
 
         finally:
             conn.close()
+
+    def revise_invoice(
+        self,
+        invoice_id: int,
+        tenant_id: int,
+        actor_user_id: int,
+        months_count: int,
+        *,
+        seller_snapshot: dict[str, Any],
+        due_days: int = 5,
+    ) -> dict[str, Any]:
+        """Replace an unpaid invoice before a payment proof is submitted."""
+        months = int(months_count)
+        if months not in BILLING_PERIOD_MONTHS:
+            raise SubscriptionError(
+                "Доступны периоды оплаты: 1, 2, 3, 6 или 12 месяцев."
+            )
+
+        conn = self._connect()
+        try:
+            if not isinstance(conn, PostgresConnection):
+                conn.execute("BEGIN IMMEDIATE")
+
+            query = """SELECT i.*,s.status AS subscription_status
+                       FROM subscription_invoices i
+                       JOIN tenant_subscriptions s ON s.id=i.subscription_id
+                       WHERE i.id=? AND i.tenant_id=?"""
+            if isinstance(conn, PostgresConnection):
+                query += " FOR UPDATE OF i,s"
+            invoice = conn.execute(
+                query, (int(invoice_id), int(tenant_id))
+            ).fetchone()
+            if not invoice:
+                raise SubscriptionError("Счёт не найден.")
+            if str(invoice["status"] or "") != "issued":
+                raise SubscriptionError("Этот счёт уже нельзя изменить.")
+            if str(invoice["subscription_status"] or "") != "awaiting_payment":
+                raise SubscriptionError(
+                    "Счёт можно изменить только до отправки оплаты на проверку."
+                )
+            proof = conn.execute(
+                """SELECT id FROM subscription_payment_proofs
+                   WHERE invoice_id=? LIMIT 1""",
+                (int(invoice_id),),
+            ).fetchone()
+            if proof:
+                raise SubscriptionError(
+                    "Счёт нельзя изменить после загрузки платёжного документа."
+                )
+
+            stamp = now_iso()
+            conn.execute(
+                """UPDATE subscription_invoices
+                   SET status='cancelled',cancelled_by=?,cancelled_at=?,
+                       cancel_reason=?,updated_at=?
+                   WHERE id=?""",
+                (
+                    int(actor_user_id), stamp,
+                    "Invoice revised by company administrator", stamp,
+                    int(invoice_id),
+                ),
+            )
+            conn.execute(
+                """UPDATE tenant_subscriptions
+                   SET status='awaiting_invoice',updated_at=?
+                   WHERE id=? AND status='awaiting_payment'""",
+                (stamp, int(invoice["subscription_id"])),
+            )
+            conn.commit()
+            subscription_id = int(invoice["subscription_id"])
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return self.create_invoice(
+            subscription_id,
+            months,
+            int(actor_user_id),
+            seller_snapshot=seller_snapshot,
+            due_days=int(due_days),
+        )

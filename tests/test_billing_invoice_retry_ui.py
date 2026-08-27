@@ -98,6 +98,31 @@ class BillingInvoiceRetryUITests(
             self.js_source,
         )
 
+    def test_unpaid_invoice_can_be_reissued_from_the_ui(
+        self,
+    ) -> None:
+        self.assertIn(
+            "api_subscription_invoice_revise",
+            self.app_source,
+        )
+
+        for token in (
+            "reviseSubscriptionInvoice",
+            "reviseSubscriptionInvoiceMonths",
+            "/revise",
+            "payment_review",
+            "Текущий неоплаченный счёт будет отменён",
+        ):
+            self.assertIn(
+                token,
+                self.js_source,
+            )
+
+        self.assertNotIn(
+            "const packagePaymentReview",
+            self.js_source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

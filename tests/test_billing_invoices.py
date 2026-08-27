@@ -341,6 +341,53 @@ class BillingInvoiceTests(unittest.TestCase):
             stored["buyer"]["name"],
         )
 
+    def test_unpaid_invoice_can_be_revised_with_a_new_period(self) -> None:
+        reviewed = self._approve_for_invoice("starter")
+        seller = {
+            "name": "ITP Mining",
+            "registration_number": "161240002661",
+            "iban": "KZ20722S000001855383",
+            "bank_name": "KASPI BANK",
+            "bic": "CASPKZKA",
+            "kbe": "17",
+            "payment_purpose_code": "851",
+            "vat_rate": 0,
+        }
+        original = self.billing.create_invoice(
+            int(reviewed["id"]),
+            1,
+            int(self.admin["id"]),
+            seller_snapshot=seller,
+        )
+
+        revised = self.billing.revise_invoice(
+            int(original["id"]),
+            self.tenant_id,
+            int(self.admin["id"]),
+            6,
+            seller_snapshot=seller,
+        )
+
+        self.assertNotEqual(original["id"], revised["id"])
+        self.assertEqual(6, revised["months_count"])
+        self.assertEqual("issued", revised["status"])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            previous_status = conn.execute(
+                "SELECT status FROM subscription_invoices WHERE id=?",
+                (int(original["id"]),),
+            ).fetchone()[0]
+            subscription_status = conn.execute(
+                "SELECT status FROM tenant_subscriptions WHERE id=?",
+                (int(reviewed["id"]),),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual("cancelled", previous_status)
+        self.assertEqual("awaiting_payment", subscription_status)
+
     def test_invoice_rejects_unsupported_period(self) -> None:
         reviewed = self._approve_for_invoice(
             "starter"

@@ -4209,6 +4209,37 @@ def api_subscription_invoice_pdf(
         )
 
 
+@app.post("/api/subscription/invoice/<int:invoice_id>/revise")
+@permission_required("manage_company")
+def api_subscription_invoice_revise(invoice_id: int) -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        billing = billing_service()
+        supplier = billing.supplier_settings()
+        if not supplier.get("is_complete"):
+            raise SubscriptionError(
+                "Реквизиты для выставления счёта ещё не настроены."
+            )
+        seller_snapshot = dict(supplier)
+        seller_snapshot.pop("is_complete", None)
+        seller_snapshot.pop("missing_fields", None)
+        invoice = billing.revise_invoice(
+            int(invoice_id),
+            int(user["tenant_id"]),
+            int(user["id"]),
+            int(payload.get("months_count") or 0),
+            seller_snapshot=seller_snapshot,
+            due_days=int(supplier.get("invoice_due_days") or 5),
+        )
+        billing.generate_invoice_pdf(int(invoice["id"]))
+        return json_ok(
+            billing=billing.tenant_billing_snapshot(int(user["tenant_id"]))
+        )
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
 @app.post(
     "/api/subscription/invoice/<int:invoice_id>/payment-proof"
 )

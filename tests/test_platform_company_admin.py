@@ -169,7 +169,7 @@ class PlatformCompanyAdminTests(unittest.TestCase):
     def test_logout_and_split_platform_pages(self) -> None:
         self.login(int(self.root["id"]))
         for page, heading in (
-            ("/platform", "Компании и заявки"),
+            ("/platform", "Компании"),
             ("/platform/packages", "Пакеты и лимиты"),
             ("/platform/link-rules", "Правила ссылок"),
             ("/platform/payments", "Оплаты и сроки"),

@@ -803,6 +803,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         'pending',
         'awaiting_invoice',
         'awaiting_payment',
+        'payment_review',
         'payment_rejected'
       ].includes(item.status)
     );
@@ -886,6 +887,18 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
           || billingStatus==='payment_review'
           || billingStatus==='payment_rejected'
         );
+
+      const canReviseInvoice=
+        can('manage_company')
+        &&billingStatus==='awaiting_payment'
+        &&!paymentProof.id;
+
+      const invoicePeriods=(
+        Array.isArray(billing.periods)
+        &&billing.periods.length
+      )
+        ?billing.periods
+        :[1,2,3,6,12];
 
       const proofStatusLabel={
         under_review:'\u041d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435',
@@ -1051,6 +1064,18 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
                     PDF \u0441\u0447\u0451\u0442\u0430 \u0435\u0449\u0451 \u043d\u0435 \u0433\u043e\u0442\u043e\u0432
                   </span>`
             }
+            ${canReviseInvoice?
+              `<label class="subscription-invoice-revise">
+                <span>Срок</span>
+                <select id="reviseSubscriptionInvoiceMonths">
+                  ${invoicePeriods.map(months=>`<option value="${Number(months)}" ${Number(months)===Number(invoice.months_count)?'selected':''}>${Number(months)} мес.</option>`).join('')}
+                </select>
+              </label>
+              <button type="button" class="secondary" id="reviseSubscriptionInvoice">
+                Изменить счёт
+              </button>`
+              :''
+            }
           </div>
 
           ${paymentProofHtml}
@@ -1172,7 +1197,6 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
             type="button"
             class="secondary"
             id="requestSubscriptionPlan"
-            ${paymentReview?'disabled':''}
           >
             \u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043a\u0435\u0442
           </button>
@@ -1294,6 +1318,29 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       }
     );
 
+    $('#reviseSubscriptionInvoice')?.addEventListener(
+      'click',
+      async event=>{
+        const button=event.currentTarget;
+        const months=Number(
+          $('#reviseSubscriptionInvoiceMonths')?.value||0
+        );
+        if(!window.confirm('Текущий неоплаченный счёт будет отменён и сформирован заново. Продолжить?'))return;
+        try{
+          button.disabled=true;
+          await api(
+            `/api/subscription/invoice/${Number(invoice.id)}/revise`,
+            {method:'POST',body:{months_count:months}}
+          );
+          toast('Счёт обновлён');
+          await loadSettings();
+        }catch(error){
+          button.disabled=false;
+          toast(error.message,true);
+        }
+      }
+    );
+
     const paymentProofInput=$(
       '#subscriptionPaymentProofFile'
     );
@@ -1402,21 +1449,13 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
           'pending',
           'awaiting_invoice',
           'awaiting_payment',
+          'payment_review',
           'payment_rejected'
         ].includes(
           String(
             item.status||''
           )
         )
-      )
-      ||null;
-
-    const packagePaymentReview=
-      packageRequests.find(
-        item=>
-          String(
-            item.status||''
-          )==='payment_review'
       )
       ||null;
 
@@ -1456,10 +1495,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         return;
       }
 
-      packageButton.disabled=
-        Boolean(
-          packagePaymentReview
-        );
+      packageButton.disabled=false;
 
       const selected=String(
         packageSelect.value||''
@@ -1506,14 +1542,6 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         if(!selectedPlan){
           toast(
             '\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0430\u0440\u0438\u0444',
-            true
-          );
-          return;
-        }
-
-        if(packagePaymentReview){
-          toast(
-            '\u041e\u043f\u043b\u0430\u0442\u0430 \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0443\u0436\u0435 \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435. \u0421\u043c\u0435\u043d\u0430 \u0442\u0430\u0440\u0438\u0444\u0430 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u0430.',
             true
           );
           return;
@@ -3181,7 +3209,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     $$('.nav').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
     $$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));
     $('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))};
-    $('#profileButton').onclick=e=>{e.stopPropagation();$('#profileMenu').hidden=!$('#profileMenu').hidden};
+    $('#profileButton').onclick=e=>{e.stopPropagation();const menu=$('#profileMenu'),open=menu.hidden;menu.hidden=!open;e.currentTarget.setAttribute('aria-expanded',String(open));};
     if($('#notificationButton'))$('#notificationButton').onclick=async e=>{e.stopPropagation();const drawer=$('#notificationDrawer');drawer.hidden=!drawer.hidden;$('#notificationButton').setAttribute('aria-expanded',String(!drawer.hidden));if(!drawer.hidden)await loadNotifications({announce:false})};
     if($('#closeNotifications'))$('#closeNotifications').onclick=closeNotifications;
     if($('#readAllNotifications'))$('#readAllNotifications').onclick=async()=>{try{await api('/api/notifications/read-all',{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
@@ -3215,7 +3243,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     $('#saveSettings').onclick=saveSettings;if($('#settingsConfirmForm'))$('#settingsConfirmForm').onsubmit=async e=>{e.preventDefault();const password=String(new FormData(e.target).get('current_password')||'');const saved=await persistSettings(password);if(saved){hideModals();e.target.reset();}};if($('#addSchedule'))$('#addSchedule').onclick=openScheduleModal;if($('#scheduleRecurrence'))$('#scheduleRecurrence').onchange=updateScheduleFields;if($('#scheduleAction'))$('#scheduleAction').onchange=()=>updateScheduleSeller();if($('#scheduleForm'))$('#scheduleForm').onsubmit=createSchedule;
     $('#passwordForm').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));try{await api('/api/account/password',{method:'POST',body:f});toast(t('password_changed','Пароль изменён'));hideModals();e.target.reset();}catch(err){toast(err.message,true)}};
     if($('#addUser'))$('#addUser').onclick=()=>showModal('userModal');if($('#userForm'))$('#userForm').onsubmit=async e=>{e.preventDefault();try{const fd=new FormData(e.target),body=Object.fromEntries(fd);const d=await api('/api/users',{method:'POST',body});toast(`Пользователь создан. Код восстановления: ${d.recovery_code}`);hideModals();e.target.reset();loadUsers();}catch(err){toast(err.message,true)}};
-    document.addEventListener('click',e=>{closeMultiSelects();const menu=$('#profileMenu'),button=$('#profileButton');if(menu&&!menu.hidden&&!menu.contains(e.target)&&!button.contains(e.target))menu.hidden=true;const nav=$('#sidebar'),mobile=$('#mobileMenu');if(nav?.classList.contains('open')&&!nav.contains(e.target)&&!mobile?.contains(e.target)){nav.classList.remove('open');mobile?.setAttribute('aria-expanded','false')};$$('.modal:not([hidden])').forEach(modal=>{if(e.target===modal)modal.hidden=true});});
+    document.addEventListener('click',e=>{closeMultiSelects();const menu=$('#profileMenu'),button=$('#profileButton');if(menu&&!menu.hidden&&!menu.contains(e.target)&&!button.contains(e.target)){menu.hidden=true;button?.setAttribute('aria-expanded','false')}const nav=$('#sidebar'),mobile=$('#mobileMenu');if(nav?.classList.contains('open')&&!nav.contains(e.target)&&!mobile?.contains(e.target)){nav.classList.remove('open');mobile?.setAttribute('aria-expanded','false')};$$('.modal:not([hidden])').forEach(modal=>{if(e.target===modal)modal.hidden=true});});
     document.addEventListener('keydown',e=>{
       const helpOpen=$('#helpDrawer')?.classList.contains('open');
       if(e.key==='Tab'&&helpOpen){const nodes=helpFocusable();if(nodes.length){const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}}

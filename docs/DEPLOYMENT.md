@@ -74,7 +74,7 @@ Backup-helper определяет major-версию PostgreSQL-сервера 
 3. `migrations/20260818_telegram_notifications_v1.sql`.
 4. `migrations/20260819_email_auth_notifications_v1.sql`.
 5. `migrations/20260820_company_addresses_v1.sql`.
-6. `migrations/20260827_self_service_billing_v1.sql` — self-service registration fields, subscriptions, invoices and payment-proof storage.
+6. `migrations/20260827_self_service_billing_v1.sql` — self-service registration fields, subscriptions, invoices and payment-proof storage. An unpaid invoice is reissued by the application: the source invoice is cancelled and a new one is created; no manual database change is required.
 
 Все миграции аддитивны. Вторая не переносит и не объединяет карточки автоматически; она добавляет отсутствующие default-права системных ролей (`admin` и `operator`) без удаления персональных overrides. Третья создаёт только персональные Telegram-привязки и журнал доставки; токен в PostgreSQL не хранится. После применения `engine/postgres_initialize.py --check` должен увидеть новые таблицы; только затем разрешён restart приложения. В рамках локальной feature-разработки эти миграции к production не применяются.
 
