@@ -10,6 +10,7 @@ import app as webapp
 
 from auth_service import AuthService
 from billing_service import BillingService
+from notification_service import NotificationService
 from schema import ensure_database
 from subscription_service import (
     SubscriptionService,
@@ -591,6 +592,16 @@ class BillingPlatformHttpTests(
                 ]
             )
         )
+
+        inbox = NotificationService(self.db_path).list_for_user(
+            int(self.tenant_admin["id"])
+        )
+        event = next(
+            item for item in inbox["items"]
+            if item["event_type"] == "payment_confirmed"
+        )
+        self.assertEqual("billing", event["category"])
+        self.assertIn("Тариф активирован до", event["message"])
 
     def test_reject_requires_reason_and_updates_queue(
         self,

@@ -81,6 +81,35 @@ class NotificationPreferencesTests(unittest.TestCase):
         self.assertEqual(1, len(self.service.list_for_user(self.user_id)["items"]))
         self.assertEqual(1, len(self.email.items))
 
+    def test_preferences_are_rendered_in_system_settings(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        template = (root / "templates" / "app.html").read_text(encoding="utf-8")
+        script = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'notification-preferences-card" data-settings-section="system"',
+            template,
+        )
+        self.assertNotIn(
+            'class="notification-security"',
+            template,
+        )
+        self.assertIn(
+            "const assignedSection=String(",
+            script,
+        )
+
+    def test_subscription_banner_and_theme_aware_expand_icon_are_global(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        template = (root / "templates" / "app.html").read_text(encoding="utf-8")
+        script = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+        styles = (root / "static" / "css" / "app.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="subscriptionStatusBanner"', template)
+        self.assertIn("function renderSubscriptionStatusBanner(snapshot)", script)
+        self.assertIn("html[data-theme=\"dark\"] .profile i img", styles)
+        self.assertIn("filter: brightness(0) !important", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

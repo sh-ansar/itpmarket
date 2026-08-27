@@ -59,6 +59,8 @@ $env:DATABASE_URL = 'postgresql://spyon:LOCAL_PASSWORD@127.0.0.1:55433/spyon_dev
 
 Для локального теста Telegram используйте отдельного dev-бота и задайте `ITP_TELEGRAM_BOT_ENABLED=1`, `ITP_TELEGRAM_BOT_TOKEN`, `ITP_TELEGRAM_BOT_USERNAME` и `SPYON_PUBLIC_URL`. Реальный token не записывайте в `.env.example`, код, логи или тестовые fixtures.
 
+SMTP локально остаётся opt-in: задайте `ITP_EMAIL_ENABLED=1`, host, sender и совместимую TLS-настройку только в локальном окружении. Для authenticated SMTP username и password должны задаваться парой.
+
 ## Проверки
 
 ```powershell

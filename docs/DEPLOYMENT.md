@@ -140,6 +140,8 @@ SPYON_PUBLIC_URL=https://spyon.kz
 
 Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После рестарта проверьте `/status` в личном чате, вход тестового пользователя и доставку специально созданного тестового уведомления.
 
+Transactional SMTP is required in `.runtime\production.env`: set `ITP_EMAIL_ENABLED=1`, a non-local `ITP_SMTP_HOST`, `ITP_MAIL_FROM`, `ITP_SMTP_SECURITY=starttls` or `smtps`, and a public HTTPS `SPYON_PUBLIC_URL`. Set SMTP username and password together when the provider requires authentication. `scripts\diagnose_runtime.ps1 -Mode Production` validates this contract without showing secret values; the optional real-send test remains opt-in through `ITP_EMAIL_INTEGRATION_TEST=1`.
+
 Для Ozon после deploy проверьте пути обеих площадок: непустой collector-local legacy Chrome profile может получить только один активный продавец во всех компаниях, чей source URL однозначно совпал с seller-вкладкой этого браузера; owner marker должен содержать только seller ID и нормализованный публичный seller URL. Каждый другой продавец использует отдельный seller-scoped профиль, а enrichment/price queue должна содержать только статьи из `product_sources` выбранного source URL. Ozon.ru должен подключаться к PostgreSQL schema `ozon_ru`, а повторный Ozon.kz запуск с уже открытым профилем — использовать его `DevToolsActivePort`, не создавать конфликтующий Chrome и не завершать процессы других sellers.
 
 ## Post-deploy verification

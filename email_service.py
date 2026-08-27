@@ -432,6 +432,8 @@ class EmailService:
             raise SmtpTlsRequiredError("smtp_tls_required")
         if settings.password and not settings.username:
             raise EmailConfigurationError("smtp_username_required")
+        if settings.username and not settings.password:
+            raise EmailConfigurationError("smtp_password_required")
 
     def _smtp_send(self, recipient: str, subject: str, plain: str, html: str) -> str:
         self._validate_configuration()

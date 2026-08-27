@@ -97,6 +97,18 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
                 tenant_id, "https://www.ozon.ru/seller/store-100/", "ozon"
             )
 
+    def test_selected_marketplaces_precede_available_marketplaces(self) -> None:
+        tenant_id = int(self.root["tenant_id"])
+        self.saas.set_marketplace_access(
+            tenant_id, ["wildberries"], int(self.root["id"])
+        )
+
+        access = self.saas.marketplace_access(tenant_id)
+
+        self.assertEqual("wildberries", access[0]["code"])
+        self.assertTrue(access[0]["is_allowed"])
+        self.assertTrue(all(not item["is_allowed"] for item in access[1:]))
+
     def test_all_six_marketplace_urls_are_detected_and_connected(self) -> None:
         tenant_id = int(self.root["tenant_id"])
         self.saas.update_tenant_profile(

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from auth_service import AuthService
 from email_service import (
+    EmailConfigurationError,
     EmailService,
     EmailSettings,
     SmtpTlsRequiredError,
@@ -866,6 +867,29 @@ class EmailAuthFlowTests(unittest.TestCase):
         with self.assertRaises(
             SmtpTlsRequiredError
         ):
+            service._validate_configuration()
+
+    def test_smtp_username_requires_password(self):
+        service = EmailService(
+            self.db_path,
+            settings=EmailSettings(
+                enabled=True,
+                host="smtp.example.com",
+                port=587,
+                username="spyon@example.com",
+                password="",
+                security="starttls",
+                require_tls=True,
+                mail_from="spyon@example.com",
+                mail_from_name="Spyon",
+                reply_to="",
+                public_url="https://spyon.example.com",
+                timeout_seconds=5,
+                max_attempts=3,
+            ),
+        )
+
+        with self.assertRaisesRegex(EmailConfigurationError, "smtp_password_required"):
             service._validate_configuration()
 
     def test_user_facing_sources_do_not_contain_encoding_damage(self):

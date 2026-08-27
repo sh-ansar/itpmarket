@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
@@ -236,6 +236,47 @@ def queue_password_changed_email(user: dict[str, Any]) -> None:
         payload={"action_url": email_action_url("login")},
         dedupe_key=f"password-changed:{int(user['id'])}:{user.get('password_changed_at') or now_epoch()}",
     )
+
+
+def notify_billing_payment_confirmed(result: dict[str, Any]) -> None:
+    """Publish one idempotent billing event per active company user."""
+    subscription = dict(result.get("subscription") or {})
+    tenant_id = int(subscription.get("tenant_id") or 0)
+    subscription_id = int(subscription.get("id") or 0)
+    payment_id = int((result.get("payment") or {}).get("id") or 0)
+    if not tenant_id or not subscription_id or not payment_id:
+        return
+
+    try:
+        ends_at = datetime.fromisoformat(
+            str(subscription.get("ends_at") or "").replace("Z", "+00:00")
+        ).strftime("%d.%m.%Y")
+    except ValueError:
+        ends_at = str(subscription.get("ends_at") or "")[:10]
+
+    status = str(subscription.get("status") or "")
+    if status == "active":
+        message = f"Оплата подтверждена. Тариф активирован до {ends_at}."
+    else:
+        message = f"Оплата подтверждена. Тариф будет действовать до {ends_at}."
+
+    for recipient in AUTH.list_users(tenant_id):
+        if not recipient.get("is_active"):
+            continue
+        notification_service().create(
+            tenant_id=tenant_id,
+            user_id=int(recipient["id"]),
+            category="billing",
+            event_type="payment_confirmed",
+            title="Оплата подтверждена",
+            message=message,
+            level="success",
+            action_url="/app#settings",
+            dedupe_key=(
+                f"billing:payment:{payment_id}:subscription:{subscription_id}:"
+                f"payment-confirmed:user:{int(recipient['id'])}"
+            ),
+        )
 
 
 
@@ -4948,6 +4989,9 @@ def api_platform_billing_payment_confirm(
                 ),
             )
         )
+
+        if not result.get("already_confirmed"):
+            notify_billing_payment_confirmed(result)
 
         return json_ok(
             result=result,

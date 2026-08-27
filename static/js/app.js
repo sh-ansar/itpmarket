@@ -1651,6 +1651,33 @@ $('#requestSubscriptionAddon')?.addEventListener(
     );
   }
 
+  function renderSubscriptionStatusBanner(snapshot){
+    const banner=$('#subscriptionStatusBanner');
+    const title=$('#subscriptionStatusBannerTitle');
+    const message=$('#subscriptionStatusBannerMessage');
+    const action=$('#subscriptionStatusBannerAction');
+    if(!banner||!title||!message||!action)return;
+
+    const data=snapshot||{};
+    const entitlement=data.entitlement||{};
+    if(entitlement.active){banner.hidden=true;return;}
+
+    const requests=Array.isArray(data.requests)?data.requests:[];
+    const billingStatus=String(data.billing?.subscription?.status||'');
+    const selected=requests.some(item=>[
+      'pending','awaiting_invoice','awaiting_payment','payment_review','payment_rejected'
+    ].includes(String(item.status||'')))||[
+      'awaiting_invoice','awaiting_payment','payment_review','payment_rejected'
+    ].includes(billingStatus);
+
+    title.textContent=selected?'Тариф ожидает оплаты':'Не выбран тариф';
+    message.textContent=selected
+      ?'Для продолжения работы необходимо оплатить выбранный тариф.'
+      :'Для продолжения работы выберите тариф и выполните оплату.';
+    action.textContent=selected?'Перейти к оплате':'Выбрать тариф';
+    banner.hidden=false;
+  }
+
 
   function renderTelegramStatus(data){
     state.telegram=data||{};const card=$('#telegramSettings');if(!card)return;
@@ -1691,7 +1718,7 @@ $('#requestSubscriptionAddon')?.addEventListener(
       code:'system',
       label:'\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438',
       title:'\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438',
-      description:'\u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441, \u0432\u0430\u043b\u044e\u0442\u0430, \u043a\u0443\u0440\u0441\u044b \u0438 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.'
+      description:'\u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441, \u0432\u0430\u043b\u044e\u0442\u0430, \u043a\u0443\u0440\u0441\u044b, \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0438 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.'
     }
   ];
 
@@ -1699,6 +1726,14 @@ $('#requestSubscriptionAddon')?.addEventListener(
 
   function settingsSectionForCard(card){
     if(!card)return 'system';
+
+    const assignedSection=String(
+      card.dataset.settingsSection||''
+    );
+
+    if(SETTINGS_SECTIONS.some(item=>item.code===assignedSection)){
+      return assignedSection;
+    }
 
     if(
       card.id==='subscriptionSettingsCard'
@@ -2743,6 +2778,7 @@ $('#requestSubscriptionAddon')?.addEventListener(
        renderNotificationPreferences(d.notification_preferences||{});
       const tenant=d.tenant||{};
       renderSubscriptionSettings(d.subscription);
+      renderSubscriptionStatusBanner(d.subscription);
       loadTelegramStatus();
       if($('#tenantName')){
         $('#tenantName').value=tenant.name||'';$('#tenantRegistrationNumber').value=tenant.registration_number||'';
@@ -3208,6 +3244,10 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     });
     $$('.nav').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
     $$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));
+    $('#subscriptionStatusBannerAction')?.addEventListener('click',()=>{
+      activeSettingsSection='subscription';
+      navigate('settings');
+    });
     $('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))};
     $('#profileButton').onclick=e=>{e.stopPropagation();const menu=$('#profileMenu'),open=menu.hidden;menu.hidden=!open;e.currentTarget.setAttribute('aria-expanded',String(open));};
     if($('#notificationButton'))$('#notificationButton').onclick=async e=>{e.stopPropagation();const drawer=$('#notificationDrawer');drawer.hidden=!drawer.hidden;$('#notificationButton').setAttribute('aria-expanded',String(!drawer.hidden));if(!drawer.hidden)await loadNotifications({announce:false})};
@@ -3275,6 +3315,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if(can('view_products'))jobs.push(loadOptions(),loadCatalogConfiguration({settings:can('manage_filters')}));
     if(can('view_dashboard'))jobs.push(loadOverview());
     if(can('view_operations'))jobs.push(loadTasks());
+    if(can('view_settings'))jobs.push(loadSettings());
     jobs.push(loadNotifications({announce:false}));
     Promise.allSettled(jobs).then(results=>results.filter(item=>item.status==='rejected').forEach(item=>console.error(item.reason)));
     setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(()=>{if(state.page==='dashboard')loadOverview()},15000);

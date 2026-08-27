@@ -332,6 +332,11 @@ class PlatformCompanyAdminTests(unittest.TestCase):
             "marketplace_access"
         ]
 
+        self.assertEqual(
+            6,
+            len(access),
+        )
+
         ozon_kz = next(
             item
             for item in access

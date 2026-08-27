@@ -235,6 +235,37 @@ if ($Mode -eq 'Production') {
             Add-DiagnosticResult PASS 'Telegram bot token' 'Configured (value hidden).'
         }
     }
+
+    if ([string]$env:ITP_EMAIL_ENABLED -ne '1') {
+        Add-DiagnosticResult FAIL 'SMTP email' 'Production transactional email must be enabled.'
+    }
+    else {
+        $smtpHost = [string]$env:ITP_SMTP_HOST
+        $mailFrom = [string]$env:ITP_MAIL_FROM
+        $smtpSecurity = [string]$env:ITP_SMTP_SECURITY
+        $publicUrl = [string]$env:SPYON_PUBLIC_URL
+        if (-not $smtpHost -or -not $mailFrom) {
+            Add-DiagnosticResult FAIL 'SMTP email' 'ITP_SMTP_HOST and ITP_MAIL_FROM are required.'
+        }
+        elseif ($smtpHost -match '^(localhost|127\.0\.0\.1|::1)$') {
+            Add-DiagnosticResult FAIL 'SMTP email' 'SMTP host must not point to localhost in production.'
+        }
+        elseif ($smtpSecurity -notin @('starttls', 'smtps')) {
+            Add-DiagnosticResult FAIL 'SMTP email' 'ITP_SMTP_SECURITY must be starttls or smtps in production.'
+        }
+        elseif ($publicUrl -notmatch '^https://' -or $publicUrl -match 'localhost|127\.0\.0\.1') {
+            Add-DiagnosticResult FAIL 'SMTP email' 'SPYON_PUBLIC_URL must be a public HTTPS URL.'
+        }
+        elseif (([string]$env:ITP_SMTP_USERNAME) -and -not ([string]$env:ITP_SMTP_PASSWORD)) {
+            Add-DiagnosticResult FAIL 'SMTP email' 'SMTP username is set but password is missing.'
+        }
+        elseif (([string]$env:ITP_SMTP_PASSWORD) -and -not ([string]$env:ITP_SMTP_USERNAME)) {
+            Add-DiagnosticResult FAIL 'SMTP email' 'SMTP password is set but username is missing.'
+        }
+        else {
+            Add-DiagnosticResult PASS 'SMTP email' 'Production SMTP settings are present (values hidden).'
+        }
+    }
 }
 
 $optionalEnvironment = @(

@@ -3705,11 +3705,18 @@ html[data-theme="dark"] .settings-section-nav button.active {
 
 .company-settings-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
-  margin-top: 18px;
+  margin-top: auto;
   padding-top: 16px;
   border-top: 1px solid var(--border, #dbe5ec);
+}
+
+.company-profile-card,
+.security-settings-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 486px;
 }
 
 .company-settings-actions #saveSettings {
@@ -3720,6 +3727,7 @@ html[data-theme="dark"] .settings-section-nav button.active {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+  flex: 1 1 auto;
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid var(--border, #dbe5ec);
@@ -3741,7 +3749,7 @@ html[data-theme="dark"] .settings-section-nav button.active {
 .settings-password-actions {
   display: flex;
   justify-content: flex-start;
-  margin-top: 2px;
+  margin-top: auto;
 }
 
 .settings-password-actions .primary {
@@ -3795,8 +3803,7 @@ html[data-theme="dark"] .settings-section-nav button.active {
   font-weight: 700;
 }
 
-.notification-preferences-grid label,
-.notification-security p {
+.notification-preferences-grid label {
   margin: 0;
   color: var(--muted, #64748b);
   font-size: 12px;
@@ -3818,6 +3825,11 @@ html[data-theme="dark"] .settings-section-nav button.active {
 }
 
 @media (max-width: 760px) {
+  .company-profile-card,
+  .security-settings-card {
+    min-height: 0;
+  }
+
   .company-settings-actions {
     justify-content: stretch;
   }
@@ -3945,12 +3957,30 @@ html[data-theme="dark"] .settings-password-toggle img {
   display: block;
   width: 16px;
   height: 16px;
-  filter: none !important;
+  filter: brightness(0) !important;
   transition: transform .18s ease;
+}
+
+html[data-theme="dark"] .profile i img {
+  filter: brightness(0) invert(1) !important;
 }
 
 .profile[aria-expanded="true"] i img {
   transform: rotate(180deg);
+}
+
+.subscription-status-banner {
+  align-items: center;
+}
+
+.subscription-status-banner div {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+}
+
+.subscription-status-banner button {
+  flex: 0 0 auto;
 }
 
 /* Theme selector always remains one three-part control. */

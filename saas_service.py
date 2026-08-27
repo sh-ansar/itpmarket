@@ -725,6 +725,13 @@ class SaaSService:
                 }
                 if include_unavailable or allowed:
                     result.append(item)
+            # Keep the service catalog order inside each group, but put the
+            # company's already chosen or connected marketplaces first.
+            result.sort(
+                key=lambda item: not bool(
+                    item.get("is_allowed") or item.get("is_connected")
+                )
+            )
             return result
         finally:
             conn.close()
