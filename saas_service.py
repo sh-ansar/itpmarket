@@ -632,6 +632,21 @@ class SaaSService:
             explicit.append(item)
         return explicit
 
+    def active_ozon_marketplaces(self) -> list[str]:
+        """Marketplace browser launcher input; intentionally not seller scoped."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT DISTINCT integration_code
+                   FROM tenant_integrations
+                   WHERE integration_code IN ('ozon','ozon_kz')
+                     AND status='active' AND approval_status='approved'
+                   ORDER BY integration_code"""
+            ).fetchall()
+            return [str(row[0]) for row in rows]
+        finally:
+            conn.close()
+
     def seller(
         self, tenant_id: int, tenant_seller_id: int
     ) -> dict[str, Any] | None:

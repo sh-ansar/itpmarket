@@ -188,13 +188,13 @@ class OzonRuntimeContractTests(unittest.TestCase):
         spec.loader.exec_module(launcher)
         with tempfile.TemporaryDirectory(prefix="ozon_launcher_") as folder:
             profile = Path(folder)
-            runtime = SimpleNamespace(profile_dir=profile, debug_port=43111, source_url="https://www.ozon.ru/seller/example/")
+            runtime = SimpleNamespace(marketplace_code="ozon", profile_dir=profile, debug_port=43111, source_url="https://www.ozon.ru/seller/example/")
             process = {"profile_dir": str(profile), "debug_port": 43111, "session_id": 2}
             with patch.object(launcher, "debugger_ready", return_value=True), patch.object(
                 launcher, "running_chrome_processes", return_value=[process]
             ):
                 result = launcher.start_browser(runtime, dry_run=False)
-        self.assertEqual("reused", result["status"])
+        self.assertEqual("READY", result["status"])
         self.assertEqual(43111, result["port"])
         self.assertEqual(2, result["session_id"])
         self.assertNotIn("--headless", launcher_path.read_text(encoding="utf-8"))

@@ -83,12 +83,8 @@ from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import SellerRuntimeScope, seller_scope
 from ozon_browser_runtime import (
-    OZON_LEGACY_DEBUG_PORTS,
-    OZON_LEGACY_PROFILE_PATHS,
-    configure_legacy_profiles,
-    legacy_profile_owner,
-    resolve_ozon_runtimes,
-    seller_identity as ozon_seller_identity,
+    configure_marketplace_profiles,
+    resolve_ozon_runtime,
 )
 
 VERSION = "3.8.7"
@@ -112,7 +108,7 @@ if environment_flag("ITP_TRUST_PROXY"):
     )
 
 CFG = ensure_directories(load_config())
-configure_legacy_profiles(ROOT)
+configure_marketplace_profiles(ROOT)
 DB_PATH = resolve_path(CFG, "database")
 DatabaseSettings.from_environment().assert_runtime_ready()
 ensure_database(DB_PATH)
@@ -1334,22 +1330,9 @@ def browser_profile_for_seller(
     marketplace_code: str,
     seller_sources: list[dict[str, Any]],
 ) -> Path | None:
-    """Keep an original Ozon session only for its observed active seller.
-
-    Existing installations already have VPN/cookie state in collector-local
-    profiles. The live seller URL is persisted as a non-secret owner marker;
-    every other seller remains isolated in its seller-scoped runtime profile.
-    """
-    if runtime is None:
-        return None
-    marketplace_code = str(marketplace_code or "").strip().casefold()
-    legacy_profile = OZON_LEGACY_PROFILE_PATHS.get(marketplace_code)
-    if legacy_profile is None:
-        return runtime.profile_dir
-    owner_id = legacy_profile_owner(legacy_profile, seller_sources, OZON_LEGACY_DEBUG_PORTS.get(marketplace_code, 0))
-    if int(runtime.tenant_seller_id) == int(owner_id or 0):
-        return legacy_profile.resolve()
-    return runtime.profile_dir
+    if str(marketplace_code or "").strip().casefold() in {"ozon", "ozon_kz"}:
+        return resolve_ozon_runtime(runtime.root if runtime else ROOT, marketplace_code).profile_dir
+    return runtime.profile_dir if runtime else None
 
 
 def build_action_command(
@@ -1372,35 +1355,22 @@ def build_action_command(
     selected_seller: dict[str, Any] | None = None
     active_sellers: list[dict[str, Any]] = []
     if action_platform in MARKETPLACE_CODES:
-        active_sellers = (
-            [item for item in SAAS.ozon_runtime_sellers()
-             if int(item["tenant_id"]) == tenant_id
-             and item["marketplace_code"] == action_platform]
-            if action_platform in OZON_LEGACY_PROFILE_PATHS
-            else SAAS.sellers(tenant_id, action_platform, active_only=True)
-        )
-        if tenant_seller_id not in (None, 0) or active_sellers:
+        active_sellers = SAAS.sellers(tenant_id, action_platform, active_only=True)
+        if tenant_seller_id not in (None, 0) or active_sellers or action_platform in {"ozon", "ozon_kz"}:
             selected_seller = SAAS.resolve_seller(
                 tenant_id, action_platform, tenant_seller_id
             )
     runtime = seller_scope(ROOT, tenant_id, action_platform, selected_seller)
     if runtime:
         runtime.ensure_directories()
-    legacy_seller_sources = (
-        SAAS.ozon_runtime_sellers()
-        if action_platform in OZON_LEGACY_PROFILE_PATHS
-        else []
-    )
     ozon_runtime = None
-    if action_platform in OZON_LEGACY_PROFILE_PATHS and selected_seller:
-        runtime_key = (
-            int(selected_seller["tenant_id"]), action_platform,
-            int(selected_seller.get("runtime_seller_id") or selected_seller.get("id") or 0),
+    if action_platform in {"ozon", "ozon_kz"} and selected_seller:
+        ozon_runtime = resolve_ozon_runtime(
+            ROOT, action_platform, str(selected_seller.get("source_url") or ""),
         )
-        ozon_runtime = resolve_ozon_runtimes(ROOT, legacy_seller_sources)[runtime_key]
     browser_profile = (
         ozon_runtime.profile_dir if ozon_runtime else
-        browser_profile_for_seller(runtime, action_platform, legacy_seller_sources)
+        browser_profile_for_seller(runtime, action_platform, [])
     )
 
     def connection(code: str) -> dict[str, Any]:
@@ -3243,7 +3213,9 @@ def api_task_start() -> Any:
             ROOT, int(user["tenant_id"]), task_platform, selected_seller
         )
         task_resources = (
-            task_scope.task_resources(info["resource"])
+            info["resource"]
+            if task_platform in {"ozon", "ozon_kz"}
+            else task_scope.task_resources(info["resource"])
             if task_scope else info["resource"]
         )
         if action == "full_sync_all":
@@ -3260,7 +3232,9 @@ def api_task_start() -> Any:
                 sellers = SAAS.sellers(
                     int(user["tenant_id"]), platform, active_only=True
                 )
-                if sellers:
+                if platform in {"ozon", "ozon_kz"}:
+                    task_resources.append(resource_by_platform[platform])
+                elif sellers:
                     task_resources.extend(
                         f"seller:{int(user['tenant_id'])}:{platform}:{int(seller['id'])}"
                         for seller in sellers
