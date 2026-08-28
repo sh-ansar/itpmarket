@@ -74,7 +74,7 @@ def resolve_ozon_runtime(
 
 
 def parse_chrome_processes(output: str) -> list[dict[str, Any]]:
-    """Parse top-level Chrome probes that own a profile and DevTools port."""
+    """Parse Chrome probes that own a profile, with DevTools port when present."""
     rows: list[dict[str, Any]] = []
     for line in str(output or "").splitlines():
         try:
@@ -84,19 +84,24 @@ def parse_chrome_processes(output: str) -> list[dict[str, Any]]:
         command = str(raw.get("command_line") or raw.get("CommandLine") or "")
         profile = re.search(r'--user-data-dir=(?:"([^"]+)"|(\S+))', command, re.I)
         port = re.search(r"--remote-debugging-port=(\d{1,5})", command, re.I)
-        if not profile or not port:
+        if not profile:
             continue
         try:
             session_id = int(raw.get("session_id") if raw.get("session_id") is not None else raw.get("SessionId"))
-            debug_port = int(port.group(1))
         except (TypeError, ValueError):
             continue
-        if 0 < debug_port <= 65535:
-            rows.append({
-                "profile_dir": normalize_profile_path(profile.group(1) or profile.group(2)),
-                "debug_port": debug_port, "session_id": session_id,
-                "pid": raw.get("pid") or raw.get("ProcessId"),
-            })
+        try:
+            debug_port = int(port.group(1)) if port else 0
+        except (TypeError, ValueError):
+            debug_port = 0
+        if not 0 < debug_port <= 65535:
+            debug_port = 0
+        rows.append({
+            "profile_dir": normalize_profile_path(profile.group(1) or profile.group(2)),
+            "debug_port": debug_port, "session_id": session_id,
+            "pid": raw.get("pid") or raw.get("ProcessId"),
+            "command_line": command,
+        })
     return rows
 
 
@@ -122,10 +127,17 @@ def browser_is_eligible(runtime: OzonBrowserRuntime, process: dict[str, Any], *,
 def managed_ozon_session_zero_processes(
     root: Path, processes: Iterable[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return only top-level Session-0 Chrome for the two managed profiles."""
+    """Return only top-level Session-0 Chrome for the two managed profiles.
+
+    A historical managed browser can use an obsolete DevTools port, so port
+    identity is deliberately not part of Session-0 cleanup.  The exact
+    persistent profile still prevents touching ordinary user Chrome.
+    """
     runtimes = [resolve_ozon_runtime(root, code) for code in sorted(OZON_MARKETPLACES)]
+    managed_profiles = {normalize_profile_path(runtime.profile_dir) for runtime in runtimes}
     return [
         process for process in processes
         if int(process.get("session_id") or 0) == 0
-        and any(browser_is_eligible(runtime, process, production=False) for runtime in runtimes)
+        and normalize_profile_path(process.get("profile_dir")) in managed_profiles
+        and "--type=" not in str(process.get("command_line") or "").casefold()
     ]

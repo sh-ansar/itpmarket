@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from ozon_browser_runtime import (
     browser_is_eligible,
     configure_marketplace_profiles,
     managed_ozon_session_zero_processes,
+    parse_chrome_processes,
     resolve_ozon_runtime,
 )
 
@@ -52,20 +54,44 @@ class OzonMarketplaceBrowserTests(unittest.TestCase):
         self.assertFalse(browser_is_eligible(runtime, session0, production=True))
         self.assertTrue(browser_is_eligible(runtime, session2, production=True))
 
-    def test_bootstrap_selects_only_top_level_managed_marketplace_chrome(self) -> None:
+    def test_bootstrap_selects_only_top_level_managed_session_zero_profiles(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_managed_") as folder:
             root = Path(folder)
             ru = resolve_ozon_runtime(root, "ozon")
             kz = resolve_ozon_runtime(root, "ozon_kz")
             rows = [
-                {"pid": 10, "session_id": 0, "profile_dir": str(ru.profile_dir), "debug_port": ru.debug_port},
-                {"pid": 11, "session_id": 0, "profile_dir": str(kz.profile_dir), "debug_port": kz.debug_port},
-                {"pid": 12, "session_id": 0, "profile_dir": str(ru.profile_dir), "debug_port": 45555},
-                {"pid": 13, "session_id": 0, "profile_dir": str(root / "ordinary-chrome"), "debug_port": 9222},
-                {"pid": 14, "session_id": 2, "profile_dir": str(ru.profile_dir), "debug_port": ru.debug_port},
+                {"pid": 10, "session_id": 0, "profile_dir": str(ru.profile_dir), "debug_port": 51665},
+                {"pid": 11, "session_id": 0, "profile_dir": str(kz.profile_dir), "debug_port": 51660},
+                {"pid": 12, "session_id": 0, "profile_dir": str(ru.profile_dir), "debug_port": 51665, "command_line": "chrome.exe --type=renderer"},
+                {"pid": 13, "session_id": 0, "profile_dir": str(kz.profile_dir), "debug_port": 51660, "command_line": "chrome.exe --type=gpu-process"},
+                {"pid": 14, "session_id": 0, "profile_dir": str(root / "ordinary-chrome"), "debug_port": 9222},
+                {"pid": 15, "session_id": 2, "profile_dir": str(ru.profile_dir), "debug_port": ru.debug_port},
             ]
             selected = managed_ozon_session_zero_processes(root, rows)
         self.assertEqual({10, 11}, {item["pid"] for item in selected})
+        self.assertEqual(9222, ru.debug_port)
+        self.assertEqual(9333, kz.debug_port)
+
+    def test_cleanup_parses_managed_profile_without_a_debug_port(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_managed_no_port_") as folder:
+            root = Path(folder)
+            ru = resolve_ozon_runtime(root, "ozon")
+            rows = parse_chrome_processes(
+                json.dumps({
+                    "pid": 10,
+                    "session_id": 0,
+                    "command_line": f'chrome.exe --user-data-dir="{ru.profile_dir}"',
+                })
+            )
+            selected = managed_ozon_session_zero_processes(root, rows)
+        self.assertEqual([10], [item["pid"] for item in selected])
+        self.assertEqual(0, selected[0]["debug_port"])
+
+    def test_task_registration_uses_interactive_principal(self) -> None:
+        task_script = (ROOT / "scripts" / "register_ozon_browser_task.ps1").read_text(encoding="utf-8")
+        self.assertIn("-LogonType Interactive -RunLevel LeastPrivilege", task_script)
+        self.assertNotIn("-LogonType InteractiveToken", task_script)
+        self.assertIn("New-ScheduledTaskTrigger -AtLogOn -User $UserId", task_script)
 
     def test_launcher_uses_marketplaces_not_seller_list(self) -> None:
         launcher = launcher_module()
