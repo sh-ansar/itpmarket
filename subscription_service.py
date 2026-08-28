@@ -598,6 +598,20 @@ class SubscriptionService:
                     continue
                 key = str(row["marketplace_code"] or "")
                 addon_positions[key] = addon_positions.get(key, 0) + int(row["extra_positions"] or 0) * int(row["quantity"] or 1)
+            # The paid add-on flow is deliberately independent from the
+            # legacy request/review flow.  Its positions apply only to the
+            # exact marketplace recorded in the paid order.
+            for row in conn.execute(
+                """SELECT marketplace_code,positions,quantity,valid_until
+                   FROM tenant_addon_orders
+                   WHERE tenant_id=? AND status='active'""",
+                (int(tenant_id),),
+            ).fetchall():
+                valid_until = _parse_time(row["valid_until"])
+                if valid_until and valid_until < now:
+                    continue
+                key = str(row["marketplace_code"] or "")
+                addon_positions[key] = addon_positions.get(key, 0) + int(row["positions"] or 0) * int(row["quantity"] or 1)
             configured = {
                 str(row["marketplace_code"]): dict(row)
                 for row in conn.execute(

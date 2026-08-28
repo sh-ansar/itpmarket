@@ -1201,7 +1201,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
             \u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043a\u0435\u0442
           </button>
 
-          ${active?
+          ${false?
             `<label>
               \u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438
               <select id="subscriptionAddonSelect">${addons}</select>
@@ -1225,6 +1225,19 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         :''
       }
     `;
+
+    // The legacy add-on approval widget is retained only for historical API
+    // compatibility; the current tenant UI uses invoice-backed add-on orders.
+    const legacyAddonButton=$('#requestSubscriptionAddon',host);
+    if(legacyAddonButton){
+      legacyAddonButton.closest('label')?.remove();
+      $('#subscriptionAddonSelect',host)?.closest('label')?.remove();
+      $('#subscriptionAddonMarketplace',host)?.closest('label')?.remove();
+    }
+
+    if(active){
+      host.insertAdjacentHTML('beforeend',`<section class="subscription-billing-card" id="addonBilling"><div class="loader">Загрузка add-on пакетов…</div></section>`);
+    }
 
     const planSelect=$('#subscriptionPlanSelect');
     const preferredPlan=
@@ -1621,36 +1634,36 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       }
     );
 
-$('#requestSubscriptionAddon')?.addEventListener(
-      'click',
-      async()=>{
-        try{
-          await api(
-            '/api/subscription/addons/request',
-            {
-              method:'POST',
-              body:{
-                addon_code:
-                  $('#subscriptionAddonSelect').value,
-                marketplace_code:
-                  $('#subscriptionAddonMarketplace').value,
-                quantity:1
-              }
-            }
-          );
-
-          toast(
-            '\u0417\u0430\u044f\u0432\u043a\u0430 \u043d\u0430 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0430'
-          );
-
-          loadSettings();
-        }catch(e){
-          toast(e.message,true);
-        }
-      }
-    );
+    if(active)loadAddonBilling();
   }
 
+  function addonOrderStatus(status){
+    return ({awaiting_payment:'Ожидает оплаты',under_review:'Платёж на проверке',payment_rejected:'Оплата отклонена',active:'Оплачено, дополнительные позиции активны',cancelled:'Отменено',superseded:'Заменено новым счётом'})[String(status||'')]||String(status||'—');
+  }
+
+  async function loadAddonBilling(){
+    const host=$('#addonBilling');
+    if(!host)return;
+    try{
+      const [catalogResponse,ordersResponse]=await Promise.all([api('/api/addon-billing/catalog'),api('/api/addon-billing/orders')]);
+      const addons=Array.isArray(catalogResponse.addons)?catalogResponse.addons:[];
+      const orders=Array.isArray(ordersResponse.orders)?ordersResponse.orders:[];
+      const marketplaces=Object.entries(state.settings?.subscription?.entitlement?.marketplaces||{}).filter(([,value])=>value?.enabled).map(([code])=>code);
+      host.innerHTML=`<div class="subscription-billing-head"><div><small>ADD-ON BILLING</small><h4>Купить дополнительные позиции</h4><span>Счёт формируется сразу, оплата проверяется бухгалтером.</span></div></div>${can('manage_company')?`<div class="subscription-actions addon-billing-form"><label>Площадка<select id="addonBillingMarketplace">${marketplaces.map(code=>`<option value="${esc(code)}">${esc(code)}</option>`).join('')}</select></label><label>Пакет<select id="addonBillingPackage">${addons.map(item=>`<option value="${esc(item.code)}" data-positions="${Number(item.extra_positions||0)}" data-price="${Number(item.price_amount||0)}">${esc(item.name||item.code)}</option>`).join('')}</select></label><label>Количество пакетов<input id="addonBillingQuantity" type="number" min="1" max="100" value="1"></label><div class="subscription-billing-total"><div><small id="addonBillingDetails"></small><b id="addonBillingTotal"></b></div><button type="button" class="primary" id="createAddonBillingOrder">Сформировать счёт</button></div></div>`:''}<div id="addonBillingOrders">${orders.map(addonOrderHtml).join('')||'<div class="empty compact">Счетов за дополнительные позиции пока нет.</div>'}</div>`;
+      const packageSelect=$('#addonBillingPackage',host),quantity=$('#addonBillingQuantity',host);
+      const updatePreview=()=>{const selected=packageSelect?.selectedOptions?.[0],count=Math.max(1,Number(quantity?.value||1)),positions=Number(selected?.dataset.positions||0),price=Number(selected?.dataset.price||0);$('#addonBillingDetails',host).textContent=`${number(positions)} позиций в пакете · всего ${number(positions*count)} позиций · ${money(price)} / пакет`;$('#addonBillingTotal',host).textContent=money(price*count);};
+      packageSelect?.addEventListener('change',updatePreview);quantity?.addEventListener('input',updatePreview);updatePreview();
+      $('#createAddonBillingOrder',host)?.addEventListener('click',async event=>{const button=event.currentTarget;try{button.disabled=true;await api('/api/addon-billing/orders',{method:'POST',body:{marketplace:$('#addonBillingMarketplace',host)?.value,addon_code:packageSelect?.value,quantity:Number(quantity?.value||0)}});toast('Счёт сформирован');await loadAddonBilling();}catch(error){button.disabled=false;toast(error.message,true);}});
+      $$('.addonBillingProof',host).forEach(input=>input.addEventListener('change',()=>{const button=$(`[data-upload-order="${input.dataset.orderId}"]`,host);if(button)button.disabled=!input.files?.[0];}));
+      $$('[data-upload-order]',host).forEach(button=>button.addEventListener('click',async()=>{const orderId=Number(button.dataset.uploadOrder),input=$(`[data-proof-input="${orderId}"]`,host),file=input?.files?.[0];if(!file){toast('Выберите платёжный документ',true);return;}const form=new FormData();form.append('file',file,file.name);try{button.disabled=true;await api(`/api/addon-billing/orders/${orderId}/payment-proof`,{method:'POST',body:form,timeoutMs:30000});toast('Платёжный документ отправлен на проверку');await loadAddonBilling();}catch(error){button.disabled=false;toast(error.message,true);}}));
+      $$('[data-reissue-order]',host).forEach(button=>button.addEventListener('click',async()=>{try{button.disabled=true;await api(`/api/addon-billing/orders/${Number(button.dataset.reissueOrder)}/reissue`,{method:'POST',body:{}});toast('Счёт перевыставлен');await loadAddonBilling();}catch(error){button.disabled=false;toast(error.message,true);}}));
+    }catch(error){host.innerHTML=`<div class="subscription-billing-warning">${esc(error.message)}</div>`;}
+  }
+
+  function addonOrderHtml(order){
+    const invoice=order.invoice||{},proof=order.payment_proof||{},status=String(order.status||''),canProof=['awaiting_payment','payment_rejected'].includes(status);
+    return `<article class="subscription-billing-card"><div class="subscription-billing-head"><div><h4>${esc(invoice.number||`Счёт #${order.id}`)}</h4><span>${esc(order.marketplace)} · ${esc(order.addon)} · ${number(order.total_extra_positions)} позиций</span></div><strong class="subscription-billing-status ${esc(status)}">${esc(addonOrderStatus(status))}</strong></div><div class="subscription-billing-total"><div><small>${esc(order.quantity)} пак. · ${esc(order.currency||'KZT')}</small><b>${money(order.total_price)}</b></div>${invoice.download_url?`<a class="secondary" href="${esc(invoice.download_url)}">Скачать счёт</a>`:''}${(['awaiting_payment','payment_rejected'].includes(status)&&can('manage_company'))?`<button type="button" class="secondary" data-reissue-order="${Number(order.id)}">Перевыставить</button>`:''}</div>${status==='payment_rejected'?`<div class="subscription-billing-warning">${esc(proof.review_note||'Оплата отклонена. Загрузите новый платёжный документ.')}</div>`:''}${canProof&&can('manage_company')?`<div class="subscription-actions"><input class="addonBillingProof" data-proof-input="${Number(order.id)}" data-order-id="${Number(order.id)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><button type="button" class="secondary" data-upload-order="${Number(order.id)}" disabled>Загрузить платёжный документ</button></div>`:''}</article>`;
+  }
   function renderSubscriptionStatusBanner(snapshot){
     const banner=$('#subscriptionStatusBanner');
     const title=$('#subscriptionStatusBannerTitle');

@@ -223,6 +223,23 @@
         ?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>\u0434\u043e ${esc(formatDate(item.period_end))} \u00b7 ${Number(item.months_count||0).toLocaleString()} \u043c\u0435\u0441.</small></td><td>${esc(formatDate(item.paid_at))}</td></tr>`).join('')
         :'<tr><td colspan="5" class="loading">\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0445 \u043e\u043f\u043b\u0430\u0442 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</td></tr>';
     }
+
+    const addonHost=$('#addonPaymentReviewTableBody');
+    if(addonHost){
+      const items=data.addon_payment_review_items||[];
+      addonHost.innerHTML=items.length
+        ?items.map(item=>`<tr>
+          <td><strong>${esc(item.tenant_name||'—')}</strong></td>
+          <td><strong>Дополнительные позиции</strong><small>${esc(item.marketplace_code||'—')}</small></td>
+          <td>${esc(item.addon_code||'—')}</td>
+          <td>${formatNumber(item.quantity||0)} пак. <small>${formatNumber(Number(item.positions||0)*Number(item.quantity||0))} поз.</small></td>
+          <td><strong>${esc(item.invoice_number||'—')}</strong><small>${formatNumber(item.total_price||0)} ${esc(item.currency||'KZT')}</small></td>
+          <td><a class="billing-document-link" href="/api/platform/billing/addon-payments/${Number(item.id)}/proof" target="_blank" rel="noopener">${esc(item.original_filename||'Открыть')}</a><small>${esc(formatDate(item.uploaded_at))}</small></td>
+          <td><span class="billing-status under_review">На проверке</span></td>
+          <td><div class="billing-review-actions"><button type="button" class="approve" data-addon-payment-action="approve" data-proof-id="${Number(item.id)}">Подтвердить оплату</button><button type="button" class="decline" data-addon-payment-action="reject" data-proof-id="${Number(item.id)}">Отклонить оплату</button></div></td>
+        </tr>`).join('')
+        :'<tr><td colspan="8" class="loading">Нет add-on оплат, ожидающих проверки.</td></tr>';
+    }
   }
 
   function openBillingDecision(button) {
@@ -368,6 +385,13 @@
             true
           );
         }
+        try{
+          const addonReview=await api('/api/platform/billing/addon-payments');
+          data.subscriptions={...(data.subscriptions||{}),addon_payment_review_items:addonReview.items||[]};
+        }catch(error){
+          data.subscriptions={...(data.subscriptions||{}),addon_payment_review_items:[]};
+          toast(error.message,true);
+        }
       }
 
       render(data);
@@ -386,6 +410,7 @@
     const review = event.target.closest('[data-review]');
     const preview = event.target.closest('[data-source-rule-preview]');
     const billingAction=event.target.closest('[data-billing-action]');
+    const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
     if (admin) {
       event.preventDefault();
       $('#tenantAdminForm').elements.tenant_id.value = admin.dataset.admin;
@@ -418,6 +443,21 @@
       openBillingDecision(
         billingAction
       );
+      return;
+    }
+    if(addonPaymentAction){
+      event.preventDefault();
+      const proofId=Number(addonPaymentAction.dataset.proofId||0);
+      const action=String(addonPaymentAction.dataset.addonPaymentAction||'');
+      if(!Number.isInteger(proofId)||proofId<=0||!['approve','reject'].includes(action))return;
+      const reviewNote=action==='reject'?String(window.prompt('Причина отклонения оплаты:')||'').trim():'';
+      if(action==='reject'&&!reviewNote){toast('Укажите причину отклонения оплаты.',true);return;}
+      try{
+        addonPaymentAction.disabled=true;
+        await api(`/api/platform/billing/addon-payments/${proofId}/${action}`,{method:'POST',body:action==='reject'?{review_note:reviewNote}:{}});
+        toast(action==='approve'?'Оплата подтверждена':'Оплата отклонена');
+        await load();
+      }catch(error){addonPaymentAction.disabled=false;toast(error.message,true);}
       return;
     }
     try {

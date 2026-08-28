@@ -1423,6 +1423,92 @@ CREATE TABLE IF NOT EXISTS tenant_subscription_addons (
 CREATE INDEX IF NOT EXISTS idx_tenant_subscription_addons_current
 ON tenant_subscription_addons(tenant_id,status,marketplace_code,starts_at,ends_at);
 
+CREATE TABLE IF NOT EXISTS tenant_addon_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    addon_id INTEGER NOT NULL,
+    addon_code TEXT NOT NULL,
+    marketplace_code TEXT NOT NULL,
+    positions INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price REAL NOT NULL,
+    total_price REAL NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    valid_until TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'awaiting_payment'
+        CHECK(status IN ('awaiting_payment','under_review','payment_rejected','active','cancelled','superseded')),
+    created_by INTEGER,
+    superseded_by INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(addon_id) REFERENCES subscription_addons(id),
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_addon_orders_tenant
+ON tenant_addon_orders(tenant_id,status,marketplace_code,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_addon_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL UNIQUE,
+    tenant_id INTEGER NOT NULL,
+    invoice_number TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'issued'
+        CHECK(status IN ('issued','paid','cancelled','superseded')),
+    unit_price REAL NOT NULL,
+    total_price REAL NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'KZT',
+    seller_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    buyer_snapshot_json TEXT NOT NULL DEFAULT '{}',
+    line_items_json TEXT NOT NULL DEFAULT '[]',
+    issued_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    pdf_path TEXT NOT NULL DEFAULT '',
+    pdf_sha256 TEXT NOT NULL DEFAULT '',
+    created_by INTEGER,
+    cancelled_by INTEGER,
+    cancelled_at TEXT,
+    cancel_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(order_id) REFERENCES tenant_addon_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(cancelled_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_addon_invoices_tenant
+ON tenant_addon_invoices(tenant_id,status,issued_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_addon_payment_proofs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    invoice_id INTEGER NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'under_review'
+        CHECK(status IN ('under_review','approved','rejected')),
+    original_filename TEXT NOT NULL DEFAULT '',
+    stored_path TEXT NOT NULL UNIQUE,
+    mime_type TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT NOT NULL DEFAULT '',
+    uploaded_by INTEGER,
+    uploaded_at TEXT NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at TEXT,
+    review_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(order_id) REFERENCES tenant_addon_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(invoice_id) REFERENCES tenant_addon_invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY(uploaded_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(reviewed_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_addon_payment_proofs_review
+ON tenant_addon_payment_proofs(status,uploaded_at DESC,tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_addon_payment_proofs_order
+ON tenant_addon_payment_proofs(order_id,id DESC);
+
 CREATE TABLE IF NOT EXISTS tenant_daily_usage (
     tenant_id INTEGER NOT NULL,
     usage_date TEXT NOT NULL,

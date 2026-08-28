@@ -38,6 +38,7 @@ from billing_service import (
     BillingService,
     PAYMENT_PROOF_MAX_BYTES,
 )
+from addon_billing_service import AddonBillingService
 from config import (
     ROOT,
     ensure_directories,
@@ -122,6 +123,11 @@ BILLING = BillingService(
     DB_PATH,
     document_root=ROOT,
 )
+ADDON_BILLING = AddonBillingService(
+    DB_PATH,
+    document_root=ROOT,
+    billing_service=BILLING,
+)
 EMAIL = EmailService(DB_PATH)
 NOTIFICATIONS = NotificationService(DB_PATH, EMAIL)
 TELEGRAM_LINKS = TelegramLinkService(DB_PATH)
@@ -175,6 +181,50 @@ def billing_service() -> BillingService:
         )
 
     return BILLING
+
+
+def addon_billing_service() -> AddonBillingService:
+    """Return paid add-on billing bound to the active application database."""
+    global ADDON_BILLING
+    if Path(ADDON_BILLING.db_path).resolve() != Path(DB_PATH).resolve():
+        ADDON_BILLING = AddonBillingService(
+            DB_PATH,
+            document_root=ROOT,
+            billing_service=billing_service(),
+        )
+    return ADDON_BILLING
+
+
+def addon_order_public(order: dict[str, Any]) -> dict[str, Any]:
+    """Tenant-facing order projection; prices always originate on the server."""
+    invoice = dict(order.get("invoice") or {})
+    invoice_id = int(invoice.get("id") or 0)
+    quantity = int(order.get("quantity") or 0)
+    positions = int(order.get("positions") or 0)
+    return {
+        "id": int(order["id"]),
+        "status": str(order.get("status") or ""),
+        "marketplace": str(order.get("marketplace_code") or ""),
+        "addon": str(order.get("addon_code") or ""),
+        "quantity": quantity,
+        "positions": positions,
+        "total_extra_positions": positions * quantity,
+        "unit_price": float(order.get("unit_price") or 0),
+        "total_price": float(order.get("total_price") or 0),
+        "currency": str(order.get("currency") or ""),
+        "valid_until": order.get("valid_until"),
+        "created_at": order.get("created_at"),
+        "updated_at": order.get("updated_at"),
+        "superseded_by": order.get("superseded_by"),
+        "invoice": ({
+            "id": invoice_id,
+            "number": str(invoice.get("invoice_number") or ""),
+            "status": str(invoice.get("status") or ""),
+            "due_at": invoice.get("due_at"),
+            "download_url": f"/api/addon-billing/invoices/{invoice_id}/pdf" if invoice_id else "",
+        } if invoice_id else None),
+        "payment_proof": (dict(order.get("payment_proof") or {}) or None),
+    }
 
 
 def subscription_snapshot(
@@ -4544,6 +4594,115 @@ def api_subscription_addon_request() -> Any:
         return json_error(str(exc), 409)
 
 
+@app.get("/api/addon-billing/catalog")
+@permission_required("view_settings")
+def api_addon_billing_catalog() -> Any:
+    return json_ok(addons=addon_billing_service().catalog())
+
+
+@app.get("/api/addon-billing/orders")
+@permission_required("view_settings")
+def api_addon_billing_orders() -> Any:
+    user = current_user() or {}
+    return json_ok(orders=[
+        addon_order_public(order)
+        for order in addon_billing_service().list_orders(int(user["tenant_id"]))
+    ])
+
+
+@app.post("/api/addon-billing/orders")
+@permission_required("manage_company")
+def api_addon_billing_order_create() -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        order = addon_billing_service().create_order(
+            int(user["tenant_id"]),
+            str(payload.get("addon_code") or ""),
+            str(payload.get("marketplace") or ""),
+            int(payload.get("quantity") or 0),
+            int(user["id"]),
+        )
+        return json_ok(order=addon_order_public(order))
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
+@app.get("/api/addon-billing/orders/<int:order_id>")
+@permission_required("view_settings")
+def api_addon_billing_order_get(order_id: int) -> Any:
+    user = current_user() or {}
+    order = addon_billing_service().get_order(
+        int(order_id), tenant_id=int(user["tenant_id"]),
+    )
+    if not order:
+        return json_error("Заказ add-on не найден.", 404)
+    return json_ok(order=addon_order_public(order))
+
+
+@app.post("/api/addon-billing/orders/<int:order_id>/reissue")
+@permission_required("manage_company")
+def api_addon_billing_order_reissue(order_id: int) -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    if not addon_billing_service().get_order(
+        int(order_id), tenant_id=int(user["tenant_id"])
+    ):
+        return json_error("Заказ add-on не найден.", 404)
+    try:
+        order = addon_billing_service().reissue(
+            int(order_id), int(user["id"]), tenant_id=int(user["tenant_id"]),
+            marketplace_code=str(payload.get("marketplace") or "").strip() or None,
+            addon_code=str(payload.get("addon_code") or "").strip() or None,
+            quantity=(int(payload["quantity"]) if payload.get("quantity") not in (None, "") else None),
+        )
+        return json_ok(order=addon_order_public(order))
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
+@app.get("/api/addon-billing/invoices/<int:invoice_id>/pdf")
+@permission_required("view_settings")
+def api_addon_billing_invoice_pdf(invoice_id: int) -> Any:
+    user = current_user() or {}
+    try:
+        document = addon_billing_service().invoice_file(
+            int(invoice_id), int(user["tenant_id"]),
+        )
+        invoice = document["invoice"]
+        number = re.sub(r"[^A-Za-z0-9._-]+", "-", str(invoice.get("invoice_number") or invoice_id)).strip(".-") or str(invoice_id)
+        return send_file(
+            document["path"], mimetype="application/pdf", as_attachment=True,
+            download_name=f"invoice-{number}.pdf", max_age=0,
+        )
+    except SubscriptionError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/addon-billing/orders/<int:order_id>/payment-proof")
+@permission_required("manage_company")
+def api_addon_billing_payment_proof_upload(order_id: int) -> Any:
+    user = current_user() or {}
+    if not addon_billing_service().get_order(
+        int(order_id), tenant_id=int(user["tenant_id"])
+    ):
+        return json_error("Заказ add-on не найден.", 404)
+    upload = request.files.get("file")
+    if upload is None:
+        return json_error("Выберите файл платёжного документа.", 400)
+    content = upload.read(PAYMENT_PROOF_MAX_BYTES + 1)
+    try:
+        proof = addon_billing_service().upload_payment_proof(
+            int(order_id), int(user["tenant_id"]), int(user["id"]),
+            original_filename=str(upload.filename or ""),
+            mime_type=str(upload.mimetype or upload.content_type or ""), content=content,
+        )
+        order = addon_billing_service().get_order(int(order_id), tenant_id=int(user["tenant_id"]))
+        return json_ok(proof=proof, order=addon_order_public(order or {}))
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
 @app.get("/api/platform/subscriptions")
 @platform_roles_required("superadmin")
 def api_platform_subscriptions_get() -> Any:
@@ -4771,6 +4930,64 @@ def api_platform_billing_payments_get() -> Any:
             .platform_payment_items()
         )
     )
+
+
+@app.get("/api/platform/billing/addon-payments")
+@platform_permission_required("billing.payment.view")
+def api_platform_addon_billing_payments_get() -> Any:
+    return json_ok(items=addon_billing_service().list_payments_for_accountant())
+
+
+@app.get("/api/platform/billing/addon-payments/<int:proof_id>/proof")
+@platform_permission_required("billing.payment.view")
+def api_platform_addon_billing_payment_proof(proof_id: int) -> Any:
+    try:
+        document = addon_billing_service().payment_proof_file(int(proof_id))
+        proof = document["proof"]
+        extension = Path(document["path"]).suffix.lower()
+        return send_file(
+            document["path"],
+            mimetype=str(proof.get("mime_type") or "application/octet-stream"),
+            as_attachment=True,
+            download_name=f"addon-payment-proof-{int(proof_id)}{extension}",
+            max_age=0,
+        )
+    except SubscriptionError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/billing/addon-payments/<int:proof_id>/approve")
+@platform_permission_required("billing.payment.confirm")
+def api_platform_addon_billing_payment_approve(proof_id: int) -> Any:
+    try:
+        result = addon_billing_service().approve_payment(
+            int(proof_id), int((current_user() or {})["id"]),
+        )
+        return json_ok(
+            result=result,
+            items=addon_billing_service().list_payments_for_accountant(),
+        )
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/billing/addon-payments/<int:proof_id>/reject")
+@platform_permission_required("billing.payment.reject")
+def api_platform_addon_billing_payment_reject(proof_id: int) -> Any:
+    payload = json_payload()
+    note = str(payload.get("review_note") or "").strip()
+    if not note:
+        return json_error("Укажите причину отклонения оплаты.", 400)
+    try:
+        result = addon_billing_service().reject_payment(
+            int(proof_id), int((current_user() or {})["id"]), note,
+        )
+        return json_ok(
+            result=result,
+            items=addon_billing_service().list_payments_for_accountant(),
+        )
+    except (SubscriptionError, TypeError, ValueError) as exc:
+        return json_error(str(exc), 409)
 
 
 @app.get(
