@@ -89,9 +89,53 @@ class OzonMarketplaceBrowserTests(unittest.TestCase):
 
     def test_task_registration_uses_interactive_principal(self) -> None:
         task_script = (ROOT / "scripts" / "register_ozon_browser_task.ps1").read_text(encoding="utf-8")
-        self.assertIn("-LogonType Interactive -RunLevel LeastPrivilege", task_script)
+        self.assertIn("-LogonType Interactive -RunLevel Limited", task_script)
+        self.assertNotIn("-RunLevel LeastPrivilege", task_script)
         self.assertNotIn("-LogonType InteractiveToken", task_script)
         self.assertIn("New-ScheduledTaskTrigger -AtLogOn -User $UserId", task_script)
+
+    def test_bootstrap_launches_both_marketplaces_without_db_filter(self) -> None:
+        launcher = launcher_module()
+        runtimes = {
+            "ozon": SimpleNamespace(marketplace_code="ozon"),
+            "ozon_kz": SimpleNamespace(marketplace_code="ozon_kz"),
+        }
+
+        with (
+            patch.object(
+                launcher,
+                "parse_args",
+                return_value=SimpleNamespace(dry_run=True, bootstrap=True),
+            ),
+            patch.object(
+                launcher,
+                "is_interactive_session",
+                return_value=True,
+            ),
+            patch.object(
+                launcher,
+                "active_marketplaces",
+                return_value=[],
+            ) as active_marketplaces,
+            patch.object(
+                launcher,
+                "resolve_ozon_runtime",
+                side_effect=lambda _root, code: runtimes[code],
+            ) as resolve_runtime,
+            patch.object(
+                launcher,
+                "start_browser",
+                return_value={"status": "PLANNED"},
+            ) as start_browser,
+        ):
+            self.assertEqual(0, launcher.main())
+
+        active_marketplaces.assert_not_called()
+        self.assertEqual(2, start_browser.call_count)
+        self.assertEqual(
+            {"ozon", "ozon_kz"},
+            {call.args[1] for call in resolve_runtime.call_args_list},
+        )
 
     def test_launcher_uses_marketplaces_not_seller_list(self) -> None:
         launcher = launcher_module()

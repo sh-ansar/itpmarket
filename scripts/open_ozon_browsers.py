@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 
 from config import load_config, resolve_path  # noqa: E402
 from ozon_browser_runtime import (  # noqa: E402
+    OZON_MARKETPLACES,
     browser_is_eligible,
     configure_marketplace_profiles,
     managed_ozon_session_zero_processes,
@@ -124,7 +125,11 @@ def main() -> int:
         print("Ozon browser launcher must run in an interactive Windows user session.", file=sys.stderr)
         return 2
     configure_marketplace_profiles(ROOT)
-    marketplaces = active_marketplaces()
+    marketplaces = (
+        sorted(OZON_MARKETPLACES)
+        if args.bootstrap
+        else active_marketplaces()
+    )
     if not marketplaces:
         print("No active Ozon marketplace integrations are available for browser launch.", file=sys.stderr)
         return 2
