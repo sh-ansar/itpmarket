@@ -15,10 +15,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-import zlib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +24,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config import load_config, resolve_path  # noqa: E402
-from runtime_scope import SellerRuntimeScope  # noqa: E402
+from ozon_browser_runtime import (  # noqa: E402
+    browser_is_eligible,
+    configure_legacy_profiles,
+    resolve_ozon_runtime,
+    running_chrome_processes,
+)
 from saas_service import SaaSService  # noqa: E402
 
 
@@ -40,11 +43,6 @@ def is_interactive_session() -> bool:
     ):
         return False
     return int(session_id.value) != 0
-
-
-def debug_port_for(tenant_id: int, marketplace: str, seller_id: int) -> int:
-    key = f"{int(tenant_id)}:{marketplace}:{int(seller_id)}".encode("ascii")
-    return 20000 + (zlib.crc32(key) % 30000)
 
 
 def chrome_executable() -> str:
@@ -82,10 +80,15 @@ def saved_debug_port(profile_dir: Path) -> int | None:
     return None
 
 
-def start_browser(profile_dir: Path, port: int, start_url: str, *, dry_run: bool = False) -> dict[str, Any]:
-    previous_port = saved_debug_port(profile_dir)
-    if previous_port and debugger_ready(previous_port):
-        return {"status": "reused", "profile": str(profile_dir), "port": previous_port, "url": start_url}
+def start_browser(runtime: Any, *, dry_run: bool = False) -> dict[str, Any]:
+    profile_dir, port, start_url = runtime.profile_dir, runtime.debug_port, runtime.source_url
+    processes = [item for item in running_chrome_processes() if str(item.get("profile_dir") or "").casefold() == str(profile_dir).casefold()]
+    if any(browser_is_eligible(runtime, item, production=True) for item in processes) and debugger_ready(port):
+        return {"status": "reused", "profile": str(profile_dir), "port": port, "url": start_url}
+    if any(int(item.get("debug_port") or 0) == int(port) and int(item.get("session_id") or 0) == 0 for item in processes):
+        raise RuntimeError("Профиль Ozon запущен в фоновой сессии Windows. Перезапустите интерактивный браузер Ozon.")
+    if processes:
+        raise RuntimeError("Профиль Ozon уже используется, но интерактивный браузер недоступен.")
     if dry_run:
         return {"status": "planned", "profile": str(profile_dir), "port": port, "url": start_url}
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +123,15 @@ def active_sellers() -> list[dict[str, Any]]:
 
 def seller_plan(seller: dict[str, Any]) -> dict[str, Any]:
     marketplace = str(seller["marketplace_code"])
+    sources = [item for item in active_sellers() if str(item.get("marketplace_code")) == marketplace]
+    runtime = resolve_ozon_runtime(ROOT, seller, marketplace, sources)
+    return {
+        "runtime": runtime,
+        "profile_dir": runtime.profile_dir,
+        "port": runtime.debug_port,
+        "source_url": runtime.source_url,
+        "seller": seller,
+    }
     source_url = str(seller.get("source_url") or "").strip()
     host = str(urlparse(source_url).hostname or "").casefold().removeprefix("www.")
     expected_host = "ozon.kz" if marketplace == "ozon_kz" else "ozon.ru"
@@ -146,6 +158,7 @@ def main() -> int:
     if not is_interactive_session():
         print("Ozon browser launcher must run in an interactive Windows user session.", file=sys.stderr)
         return 2
+    configure_legacy_profiles(ROOT)
     sellers = active_sellers()
     if args.seller_id:
         selected = {int(item) for item in args.seller_id}
@@ -156,7 +169,7 @@ def main() -> int:
     try:
         for seller in sellers:
             plan = seller_plan(seller)
-            result = start_browser(plan["profile_dir"], plan["port"], plan["source_url"], dry_run=args.dry_run)
+            result = start_browser(plan["runtime"], dry_run=args.dry_run)
             print(json.dumps(result, ensure_ascii=False))
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Не удалось открыть Ozon браузер: {exc}", file=sys.stderr)

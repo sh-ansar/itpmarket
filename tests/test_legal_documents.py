@@ -83,6 +83,22 @@ class LegalDocumentsTests(unittest.TestCase):
             self.assertEqual(200, stable_pdf.status_code)
             self.assertEqual("application/pdf", stable_pdf.mimetype)
             self.assertTrue(stable_pdf.data.startswith(b"%PDF"))
+
+            self.assertEqual(
+                "SAMEORIGIN",
+                stable_pdf.headers.get(
+                    "X-Frame-Options"
+                ),
+            )
+
+            self.assertIn(
+                "frame-ancestors 'self'",
+                stable_pdf.headers.get(
+                    "Content-Security-Policy",
+                    "",
+                ),
+            )
+
             stable_pdf.close()
             download = self.client.get(f"/legal/{document_type}/pdf?download=1")
             self.assertTrue(download.headers["Content-Disposition"].startswith("attachment;"))

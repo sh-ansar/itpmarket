@@ -81,6 +81,14 @@ from email_service import EmailOutboxWorker, EmailService
 from storage.database_backend import DatabaseSettings
 from storage.postgres_compat import connect_database
 from runtime_scope import SellerRuntimeScope, seller_scope
+from ozon_browser_runtime import (
+    OZON_LEGACY_DEBUG_PORTS,
+    OZON_LEGACY_PROFILE_PATHS,
+    configure_legacy_profiles,
+    legacy_profile_owner,
+    resolve_ozon_runtime,
+    seller_identity as ozon_seller_identity,
+)
 
 VERSION = "3.8.7"
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -103,6 +111,7 @@ if environment_flag("ITP_TRUST_PROXY"):
     )
 
 CFG = ensure_directories(load_config())
+configure_legacy_profiles(ROOT)
 DB_PATH = resolve_path(CFG, "database")
 DatabaseSettings.from_environment().assert_runtime_ready()
 ensure_database(DB_PATH)
@@ -1270,109 +1279,6 @@ def browser_arguments(workers: int) -> list[str]:
     return result
 
 
-OZON_LEGACY_PROFILE_PATHS = {
-    "ozon": ROOT / "collectors" / "ozon" / "chrome_vpn_profile",
-    "ozon_kz": ROOT / "collectors" / "ozon" / "chrome_kz_profile",
-}
-OZON_LEGACY_DEBUG_PORTS = {"ozon": 9222, "ozon_kz": 9333}
-
-
-def ozon_seller_identity(value: Any) -> str:
-    try:
-        parsed = urlparse(str(value or "").strip())
-    except ValueError:
-        return ""
-    host = str(parsed.hostname or "").casefold().removeprefix("www.")
-    parts = [part.casefold() for part in parsed.path.split("/") if part]
-    if host not in {"ozon.ru", "ozon.kz"} or len(parts) < 2 or parts[0] != "seller":
-        return ""
-    return f"{host}/seller/{parts[1]}"
-
-
-def legacy_ozon_profile_owner(
-    legacy_profile: Path,
-    seller_sources: list[dict[str, Any]],
-    default_debug_port: int = 0,
-) -> int | None:
-    """Bind a shared legacy profile only to the seller visible in its browser."""
-    try:
-        if not legacy_profile.is_dir() or next(legacy_profile.iterdir(), None) is None:
-            return None
-    except OSError:
-        return None
-    candidates = {
-        int(item.get("id") or 0): ozon_seller_identity(item.get("source_url"))
-        for item in seller_sources
-        if int(item.get("id") or 0) > 0
-        and ozon_seller_identity(item.get("source_url"))
-    }
-    marker_path = legacy_profile / ".spyon_seller_owner.json"
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-        marker_id = int(marker.get("seller_id") or 0)
-        if candidates.get(marker_id) == str(marker.get("seller_identity") or ""):
-            return marker_id
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        pass
-
-    ports: list[int] = (
-        [int(default_debug_port)] if 0 < int(default_debug_port or 0) <= 65535 else []
-    )
-    for name in (".spyon_devtools_port", "DevToolsActivePort"):
-        try:
-            port = int(
-                legacy_profile.joinpath(name)
-                .read_text(encoding="utf-8", errors="replace")
-                .splitlines()[0]
-            )
-        except (OSError, IndexError, ValueError):
-            continue
-        if 0 < port <= 65535:
-            ports.append(port)
-    browser_identities: set[str] = set()
-    if ports:
-        import urllib.request
-
-        for port in dict.fromkeys(ports):
-            try:
-                request = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/json/list",
-                    headers={"User-Agent": "Spyon-Profile-Owner/3.8"},
-                )
-                with urllib.request.urlopen(request, timeout=1) as response:
-                    tabs = json.loads(response.read().decode("utf-8", errors="replace"))
-                browser_identities.update(
-                    identity
-                    for identity in (
-                        ozon_seller_identity(item.get("url"))
-                        for item in tabs if isinstance(item, dict)
-                    )
-                    if identity
-                )
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                continue
-    matched = [
-        (seller_id, identity)
-        for seller_id, identity in candidates.items()
-        if identity in browser_identities
-    ]
-    if len(matched) != 1:
-        return None
-    seller_id, identity = matched[0]
-    try:
-        marker_path.write_text(
-            json.dumps(
-                {"seller_id": seller_id, "seller_identity": identity},
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ),
-            encoding="utf-8",
-        )
-    except OSError:
-        return None
-    return seller_id
-
-
 def browser_profile_for_seller(
     runtime: SellerRuntimeScope | None,
     marketplace_code: str,
@@ -1386,16 +1292,11 @@ def browser_profile_for_seller(
     """
     if runtime is None:
         return None
-    legacy_profile = OZON_LEGACY_PROFILE_PATHS.get(
-        str(marketplace_code or "").strip().casefold()
-    )
+    marketplace_code = str(marketplace_code or "").strip().casefold()
+    legacy_profile = OZON_LEGACY_PROFILE_PATHS.get(marketplace_code)
     if legacy_profile is None:
         return runtime.profile_dir
-    owner_id = legacy_ozon_profile_owner(
-        legacy_profile,
-        seller_sources,
-        OZON_LEGACY_DEBUG_PORTS.get(str(marketplace_code or "").strip().casefold(), 0),
-    )
+    owner_id = legacy_profile_owner(legacy_profile, seller_sources, OZON_LEGACY_DEBUG_PORTS.get(marketplace_code, 0))
     if int(runtime.tenant_seller_id) == int(owner_id or 0):
         return legacy_profile.resolve()
     return runtime.profile_dir
@@ -1436,8 +1337,14 @@ def build_action_command(
         if action_platform in OZON_LEGACY_PROFILE_PATHS
         else []
     )
-    browser_profile = browser_profile_for_seller(
-        runtime, action_platform, legacy_seller_sources
+    ozon_runtime = None
+    if action_platform in OZON_LEGACY_PROFILE_PATHS and selected_seller:
+        ozon_runtime = resolve_ozon_runtime(
+            ROOT, selected_seller, action_platform, legacy_seller_sources
+        )
+    browser_profile = (
+        ozon_runtime.profile_dir if ozon_runtime else
+        browser_profile_for_seller(runtime, action_platform, legacy_seller_sources)
     )
 
     def connection(code: str) -> dict[str, Any]:
@@ -1668,7 +1575,7 @@ def build_action_command(
             command += [
                 "--runtime-dir", str(runtime.base_dir),
                 "--profile-path", str(browser_profile),
-                "--debug-port", "0",
+                "--debug-port", str(ozon_runtime.debug_port if ozon_runtime else 0),
             ]
         if action == "ozon_kz_refresh_prices" and codes:
             command += ["--articles", ",".join(
@@ -1701,7 +1608,7 @@ def build_action_command(
                 "--database-path", str(runtime.registry_path),
                 "--runtime-dir", str(runtime.base_dir),
                 "--profile-path", str(browser_profile),
-                "--debug-port", "0",
+                "--debug-port", str(ozon_runtime.debug_port if ozon_runtime else 0),
             ]
         if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
             command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
@@ -1994,7 +1901,26 @@ def after_request(response: Any) -> Any:
                 user.get("tenant_id"),
             )
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+
+    # Legal PDFs are intentionally rendered inside a same-origin
+    # registration modal. All other responses remain non-frameable.
+    legal_pdf_frame = request.endpoint in {
+        "legal_pdf",
+        "legal_current_pdf",
+    }
+
+    response.headers["X-Frame-Options"] = (
+        "SAMEORIGIN"
+        if legal_pdf_frame
+        else "DENY"
+    )
+
+    frame_ancestors = (
+        "'self'"
+        if legal_pdf_frame
+        else "'none'"
+    )
+
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
@@ -2006,7 +1932,7 @@ def after_request(response: Any) -> Any:
         "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
-        "frame-ancestors 'none'"
+        f"frame-ancestors {frame_ancestors}"
     )
     if request.is_secure:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

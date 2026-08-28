@@ -209,3 +209,9 @@ are rejected by the automatic deployment path.
 
 An already applied migration file must never be edited. A new migration must be
 created instead.
+# Ozon browser prerequisite
+
+Register `\Spyon\Spyon Ozon Browsers` from the interactive RDP account with
+`scripts\register_ozon_browser_task.ps1`. The task uses `InteractiveToken` and
+opens each active Ozon seller's resolved profile after logon; it must not run as
+SYSTEM or in a background session.

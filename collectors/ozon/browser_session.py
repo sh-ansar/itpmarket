@@ -17,12 +17,21 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
 from ozon_probe_core import article_from_url, normalize_product_url, parse_catalog_html, parse_price
+from ozon_browser_runtime import (
+    browser_is_eligible,
+    normalize_profile_path,
+    running_chrome_processes,
+)
 
 
 class BrowserSession:
@@ -99,9 +108,7 @@ class BrowserSession:
 
     @staticmethod
     def _normalized_profile_path(value: Any) -> str:
-        return os.path.normcase(
-            os.path.normpath(str(value or "").strip().strip('"'))
-        )
+        return normalize_profile_path(value)
 
     def _ports_from_process_output(self, value: str) -> list[int]:
         """Extract DevTools ports only for the exact isolated profile path."""
@@ -123,30 +130,34 @@ class BrowserSession:
         return list(dict.fromkeys(ports))
 
     def _running_profile_debug_ports(self) -> list[int]:
+        return [int(item["debug_port"]) for item in self._running_profile_processes()]
+
+    def _running_profile_processes(self) -> list[dict[str, Any]]:
         if not sys.platform.startswith("win"):
             return []
-        script = (
-            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-            "ForEach-Object { [Console]::Out.WriteLine($_.CommandLine) }"
-        )
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            completed = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", script],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=8,
-                check=False,
-                creationflags=creationflags,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return []
-        return self._ports_from_process_output(completed.stdout)
+        expected = self._normalized_profile_path(self.profile_dir)
+        return [
+            item for item in running_chrome_processes()
+            if self._normalized_profile_path(item.get("profile_dir")) == expected
+        ]
 
     def _profile_debug_ports(self) -> list[int]:
         """Return candidate DevTools ports owned by this isolated profile."""
+        production_windows = (
+            sys.platform.startswith("win")
+            and os.environ.get("ITP_ENV", "").strip().casefold() == "production"
+        )
+        processes = self._running_profile_processes()
+        if production_windows:
+            expected = type("ExpectedRuntime", (), {
+                "profile_dir": self.profile_dir,
+                "debug_port": self.debug_port,
+            })()
+            return [
+                int(item["debug_port"])
+                for item in processes
+                if browser_is_eligible(expected, item, production=True)
+            ]
         ports: list[int] = []
         for name in (".spyon_devtools_port", "DevToolsActivePort"):
             try:
@@ -185,6 +196,14 @@ class BrowserSession:
                 return True
         self._set_debug_port(previous_port)
         return False
+
+    def _hidden_profile_browser(self) -> bool:
+        """Whether this exact profile is occupied by a non-interactive Chrome."""
+        return any(
+            int(item.get("debug_port") or 0) == int(self.debug_port)
+            and int(item.get("session_id") or 0) == 0
+            for item in self._running_profile_processes()
+        )
 
     @staticmethod
     def _chrome_executable() -> str:
@@ -247,6 +266,21 @@ class BrowserSession:
         print(f"{self.marketplace_label} browser opened on port {self.debug_port}. Profile: {self.profile_dir}")
 
     def ensure_debug_browser(self) -> None:
+        production_windows = (
+            sys.platform.startswith("win")
+            and os.environ.get("ITP_ENV", "").strip().casefold() == "production"
+        )
+        if production_windows:
+            if self._adopt_profile_debugger():
+                return
+            if self._hidden_profile_browser():
+                raise RuntimeError(
+                    "Профиль Ozon запущен в фоновой сессии Windows. "
+                    "Перезапустите интерактивный браузер Ozon."
+                )
+            raise RuntimeError(
+                "Браузер Ozon не открыт. Откройте браузер Ozon и повторите синхронизацию."
+            )
         if self._debugger_ready():
             self._remember_profile_debug_port()
             return

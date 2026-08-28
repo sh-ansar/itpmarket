@@ -38,6 +38,31 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+RESULT_PREFIX = "SPYON_RESULT "
+RESULT_MESSAGES = {
+    "ozon_challenge": "Ozon требует подтверждения. Откройте окно Ozon, пройдите проверку и повторите синхронизацию.",
+    "browser_not_open": "Браузер Ozon не открыт. Откройте браузер Ozon и повторите синхронизацию.",
+    "browser_hidden_session": "Браузер Ozon запущен в фоновой сессии Windows. Откройте интерактивный браузер Ozon и повторите синхронизацию.",
+    "browser_debug_unavailable": "Ozon браузер не открыт. Откройте браузер Ozon и повторите синхронизацию.",
+    "chromedriver_unavailable": "Не удалось подключиться к браузеру Ozon. Обратитесь к администратору.",
+    "network_error": "Не удалось подключиться к Ozon. Повторите попытку.",
+    "collector_failed": "Синхронизацию завершить не удалось. Повторите попытку или обратитесь к администратору.",
+}
+
+
+def structured_result(log_text: str) -> dict[str, Any] | None:
+    for line in reversed(str(log_text or "").splitlines()):
+        if not line.startswith(RESULT_PREFIX):
+            continue
+        try:
+            value = json.loads(line[len(RESULT_PREFIX):])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("reason"), str):
+            return value
+    return None
+
+
 class TaskManager:
     """Runs background commands with resource locks and persistent task history."""
 
@@ -501,6 +526,15 @@ class TaskManager:
                 if task["status"] == "completed"
                 else f"Операция завершилась с кодом {code}"
             )
+            final_result = structured_result(
+                self._read_tail(Path(str(task.get("log_file") or "")))
+            )
+            if final_result:
+                reason = str(final_result.get("reason") or "collector_failed")
+                task["result_reason"] = reason
+                task["message"] = RESULT_MESSAGES.get(reason, RESULT_MESSAGES["collector_failed"])
+            elif task["status"] == "failed":
+                task["message"] = RESULT_MESSAGES["collector_failed"]
             self._save(state)
             handle = self.log_handles.pop(task_id, None)
             try:

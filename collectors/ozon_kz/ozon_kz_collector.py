@@ -22,6 +22,7 @@ from ozon_collector import (  # noqa: E402
     Collector,
     materialize_tenant_catalog,
     result_exit_code,
+    structured_result,
 )
 from registry import now_iso  # noqa: E402
 from collectors.ozon_kz.storage import connect, ensure_schema  # noqa: E402
@@ -240,9 +241,12 @@ def main() -> int:
     collector = Collector(settings)
     limit = int(args.limit) or None
     articles = parse_articles(args.articles)
+    outcome: dict[str, Any] | None = None
+    failure: Exception | None = None
     try:
         if args.action in {"sync-catalog", "full-sync"}:
             discovered = collector.discover(limit, int(args.pages))
+            outcome = discovered
             require_success(
                 discovered,
                 "sync-catalog",
@@ -267,8 +271,11 @@ def main() -> int:
             tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
         )
         print(json.dumps({"ok": True, **mirrored, "tenant_products": tenant_count}, ensure_ascii=False))
+        outcome = {"status": "PASSED"}
         return 0
     except Exception as exc:
+        failure = exc
+        outcome = outcome or {"status": "FAILED"}
         conn = connect(settings.database_path)
         try:
             conn.execute(
@@ -282,6 +289,8 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 1
     finally:
+        if outcome is not None:
+            print("SPYON_RESULT " + json.dumps(structured_result(outcome, failure), ensure_ascii=False))
         collector.close()
 
 

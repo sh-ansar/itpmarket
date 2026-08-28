@@ -143,3 +143,9 @@ cancellation, and safe reissue of an unpaid invoice.
 
 The password reset regression test verifies the complete flow from requesting
 an email link through changing the password and consuming the one-use token.
+# Ozon interactive browser runtime
+
+On Windows production deployments, start `scripts\register_ozon_browser_task.ps1`
+from the intended RDP user session. Ozon collection only attaches to Chrome that
+uses the resolved seller profile and debug port in a non-zero Windows session.
+The web service never starts or terminates Chrome in Session 0.

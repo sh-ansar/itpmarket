@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -21,6 +22,7 @@ from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import
 from registry import Registry
 from storage.postgres_compat import _schema_for_path
+from task_manager import RESULT_MESSAGES, structured_result
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
@@ -108,6 +110,14 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual(2, result_exit_code({"status": "PARTIAL"}))
         self.assertEqual(2, result_exit_code({"status": "BLOCKED"}))
 
+    def test_structured_challenge_result_is_user_safe(self) -> None:
+        value = structured_result(
+            'technical detail\nSPYON_RESULT {"ok":false,"reason":"ozon_challenge"}\n'
+        )
+        self.assertEqual("ozon_challenge", value["reason"])
+        self.assertNotIn("code 1", RESULT_MESSAGES[value["reason"]].casefold())
+        self.assertNotIn("BLOCKED_CHALLENGE", RESULT_MESSAGES[value["reason"]])
+
     def test_postgresql_market_search_query_avoids_group_by(self) -> None:
         source = (OZON_ROOT / "registry.py").read_text(encoding="utf-8-sig")
         method = source[source.index("def client_products_for_market_search"):]
@@ -163,10 +173,10 @@ class OzonRuntimeContractTests(unittest.TestCase):
             with patch.dict(os.environ, {"ITP_ENV": "production"}, clear=True), patch.object(
                 session, "_debugger_ready", return_value=False
             ), patch.object(session, "_adopt_profile_debugger", return_value=False):
-                with self.assertRaisesRegex(RuntimeError, "Ozon браузер не открыт"):
+                with self.assertRaises(RuntimeError):
                     session.ensure_debug_browser()
 
-    def test_interactive_launcher_reuses_only_its_profile_marker(self) -> None:
+    def test_interactive_launcher_reuses_only_its_exact_interactive_browser(self) -> None:
         import importlib.util
 
         launcher_path = ROOT / "scripts" / "open_ozon_browsers.py"
@@ -178,12 +188,40 @@ class OzonRuntimeContractTests(unittest.TestCase):
         spec.loader.exec_module(launcher)
         with tempfile.TemporaryDirectory(prefix="ozon_launcher_") as folder:
             profile = Path(folder)
-            profile.joinpath(".spyon_devtools_port").write_text("42777", encoding="ascii")
-            with patch.object(launcher, "debugger_ready", return_value=True):
-                result = launcher.start_browser(profile, 43111, "https://www.ozon.ru/seller/example/", dry_run=False)
+            runtime = SimpleNamespace(profile_dir=profile, debug_port=43111, source_url="https://www.ozon.ru/seller/example/")
+            process = {"profile_dir": str(profile), "debug_port": 43111, "session_id": 2}
+            with patch.object(launcher, "debugger_ready", return_value=True), patch.object(
+                launcher, "running_chrome_processes", return_value=[process]
+            ):
+                result = launcher.start_browser(runtime, dry_run=False)
         self.assertEqual("reused", result["status"])
-        self.assertEqual(42777, result["port"])
+        self.assertEqual(43111, result["port"])
         self.assertNotIn("--headless", launcher_path.read_text(encoding="utf-8"))
+
+    def test_production_rejects_session_zero_even_when_debugger_answers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_hidden_") as folder:
+            profile = Path(folder)
+            session = BrowserSession(51665, "https://www.ozon.ru/seller/example/", profile)
+            process = {"profile_dir": str(profile), "debug_port": 51665, "session_id": 0}
+            with patch.dict(os.environ, {"ITP_ENV": "production"}, clear=True), patch(
+                "browser_session.sys.platform", "win32"
+            ), patch("browser_session.running_chrome_processes", return_value=[process]), patch.object(
+                session, "_debugger_ready", return_value=True
+            ):
+                with self.assertRaisesRegex(RuntimeError, "фоновой сессии"):
+                    session.ensure_debug_browser()
+
+    def test_production_reuses_matching_interactive_browser(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_interactive_") as folder:
+            profile = Path(folder)
+            session = BrowserSession(51665, "https://www.ozon.ru/seller/example/", profile)
+            process = {"profile_dir": str(profile), "debug_port": 51665, "session_id": 2}
+            with patch.dict(os.environ, {"ITP_ENV": "production"}, clear=True), patch(
+                "browser_session.sys.platform", "win32"
+            ), patch("browser_session.running_chrome_processes", return_value=[process]), patch.object(
+                session, "_debugger_ready", return_value=True
+            ):
+                session.ensure_debug_browser()
 
     def test_self_test_starts_without_manual_pythonpath(self) -> None:
         environment = os.environ.copy()

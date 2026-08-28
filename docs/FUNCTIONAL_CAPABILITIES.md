@@ -143,3 +143,9 @@ Production schema changes are tracked by checksum and safe additive migrations
 `legal_acceptances` с документом, хешем, UTC-временем, IP, User-Agent,
 локалью и точной формулировкой чекбокса. Принятые документы видны в Settings.
 can be applied automatically during deployment after a verified backup.
+# Ozon browser safety
+
+Ozon.ru and Ozon.kz use one seller runtime resolver. A production collection
+requires the exact seller profile, deterministic DevTools port, and an
+interactive Windows Chrome session. A challenge is reported as an
+action-required user message and leaves the existing marketplace snapshot intact.

@@ -91,6 +91,24 @@ def result_exit_code(result: dict[str, Any] | None) -> int:
     return 0 if status in {"OK", "PASSED", "READY"} else 2
 
 
+def structured_result(result: dict[str, Any] | None, error: Exception | None = None) -> dict[str, Any]:
+    status = str((result or {}).get("status") or "").upper()
+    text = str(error or "")
+    if "BLOCKED" in status:
+        reason = "ozon_challenge"
+    elif "фоновой сессии" in text:
+        reason = "browser_hidden_session"
+    elif "не открыт" in text:
+        reason = "browser_not_open"
+    elif "ChromeDriver" in text:
+        reason = "chromedriver_unavailable"
+    elif "debug" in text.casefold() or "127.0.0.1" in text:
+        reason = "browser_debug_unavailable"
+    else:
+        reason = "collector_failed"
+    return {"ok": result_exit_code(result) == 0 and error is None, "reason": reason}
+
+
 class Collector:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -890,6 +908,7 @@ def main() -> int:
     collector = Collector(settings)
     article_filter = load_article_filter(getattr(args, "articles_file", ""))
     result: dict[str, Any] | None = None
+    failure: Exception | None = None
     try:
         if args.command == "open-browser":
             result = collector.open_browser()
@@ -920,7 +939,14 @@ def main() -> int:
                 tenant_seller_id=int(args.tenant_seller_id or 0) or None,
             )
         return result_exit_code(result)
+    except Exception as exc:
+        print(f"Collector error: {exc}", file=sys.stderr)
+        result = {"status": "FAILED"}
+        failure = exc
+        return 2
     finally:
+        if result is not None:
+            print("SPYON_RESULT " + json.dumps(structured_result(result, failure), ensure_ascii=False))
         collector.close()
 
 
