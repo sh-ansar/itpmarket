@@ -87,6 +87,11 @@ class AddonBillingServiceTests(unittest.TestCase):
         self.assertEqual(5000.0, order["unit_price"])
         self.assertEqual(10000.0, order["total_price"])
         self.assertEqual("issued", order["invoice"]["status"])
+        line = order["invoice"]["line_items"][0]
+        self.assertEqual("пак.", line["unit_label"])
+        self.assertEqual(10000.0, line["amount"])
+        self.assertIn("Kaspi", line["description"])
+        self.assertIn("всего +200 позиций", line["description"])
         self.assertTrue(order["invoice"]["pdf_path"])
         self.assertEqual(1, self.pdf.calls)
         self.assertEqual([order["id"]], [item["id"] for item in self.service.list_orders(self.tenant_id)])

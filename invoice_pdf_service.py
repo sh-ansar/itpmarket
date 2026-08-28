@@ -1663,6 +1663,14 @@ class InvoicePDFService:
                     "\u043c\u0435\u0441."
                 )
 
+                explicit_description = str(
+                    item.get("description")
+                    or item.get("name")
+                    or ""
+                ).strip()
+                if explicit_description:
+                    service_name = explicit_description
+
                 values = (
                     str(row_index),
                     service_name,

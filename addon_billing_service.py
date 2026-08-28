@@ -10,7 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from billing_service import BillingService, now_iso
-from marketplace_registry import MARKETPLACE_CODES
+from marketplace_registry import MARKETPLACE_CODES, marketplace_label
 from storage.postgres_compat import PostgresConnection
 from subscription_service import SubscriptionError
 
@@ -211,11 +211,20 @@ class AddonBillingService:
             due_days = int(supplier.get("invoice_due_days") or 5)
             due_at = (datetime.now().astimezone() + timedelta(days=due_days)).isoformat(timespec="seconds")
             invoice_number = self.billing._next_invoice_number(conn, datetime.now().astimezone())
+            positions = int(addon["extra_positions"])
+            total_positions = positions * quantity_value
+            description = (
+                f"Дополнительные позиции Spyon — {marketplace_label(marketplace)}, "
+                f"пакет +{positions} позиций"
+            )
+            if quantity_value > 1:
+                description += f"; всего +{total_positions} позиций"
             lines = [{
-                "name": str(addon["name"]), "quantity": quantity_value,
-                "unit_price": unit_price, "total_amount": total_price,
+                "service_code": "addon_positions", "description": description,
+                "quantity": quantity_value, "unit_label": "пак.",
+                "unit_price": unit_price, "amount": total_price,
                 "currency": str(addon["currency"]), "marketplace": marketplace,
-                "positions": int(addon["extra_positions"]),
+                "positions": positions, "total_positions": total_positions,
             }]
             invoice_cursor = conn.execute(
                 """INSERT INTO tenant_addon_invoices(

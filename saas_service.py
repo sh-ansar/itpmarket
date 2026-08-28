@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zlib
 import re
 import sqlite3
 from datetime import datetime, timedelta
@@ -584,6 +585,53 @@ class SaaSService:
         finally:
             conn.close()
 
+    @staticmethod
+    def _legacy_ozon_runtime_id(
+        tenant_id: int, marketplace_code: str, source_url: str,
+    ) -> int:
+        key = f"{int(tenant_id)}:{marketplace_code}:{source_url.strip().casefold()}"
+        return 1_000_000_000 + (zlib.crc32(key.encode("utf-8")) & 0x7FFFFFFF)
+
+    def ozon_runtime_sellers(self) -> list[dict[str, Any]]:
+        """The single seller set used by Ozon operations and the launcher."""
+        explicit: list[dict[str, Any]] = []
+        for marketplace in ("ozon", "ozon_kz"):
+            for seller in self.active_seller_sources(marketplace):
+                seller["marketplace_code"] = marketplace
+                seller["runtime_seller_id"] = int(seller["id"])
+                explicit.append(seller)
+        known = {
+            (int(item["tenant_id"]), str(item["marketplace_code"]), str(item["source_url"]).strip().casefold())
+            for item in explicit
+        }
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT tenant_id,integration_code AS marketplace_code,seller_identifier,
+                          seller_name,seller_url AS source_url,status,approval_status
+                   FROM tenant_integrations
+                   WHERE integration_code IN ('ozon','ozon_kz')
+                     AND status='active' AND approval_status='approved'
+                     AND TRIM(COALESCE(seller_url,''))<>''
+                   ORDER BY tenant_id,integration_code"""
+            ).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            item = dict(row)
+            key = (int(item["tenant_id"]), str(item["marketplace_code"]), str(item["source_url"]).strip().casefold())
+            if key in known:
+                continue
+            item.update({
+                "id": None,
+                "runtime_seller_id": self._legacy_ozon_runtime_id(*key),
+                "external_seller_id": str(item.pop("seller_identifier") or ""),
+                "display_name": str(item.pop("seller_name") or ""),
+                "config": {}, "discovery": {}, "legacy": True,
+            })
+            explicit.append(item)
+        return explicit
+
     def seller(
         self, tenant_id: int, tenant_seller_id: int
     ) -> dict[str, Any] | None:
@@ -625,7 +673,18 @@ class SaaSService:
         if len(candidates) > 1:
             raise ValueError("Выберите продавца для запуска операции.")
 
-        # Compatibility for installations that predate explicit seller rows.
+        # Compatibility entries use the same runtime seller set as the launcher.
+        if code in {"ozon", "ozon_kz"}:
+            legacy = next(
+                (item for item in self.ozon_runtime_sellers()
+                 if item.get("legacy") and int(item["tenant_id"]) == int(tenant_id)
+                 and item["marketplace_code"] == code),
+                None,
+            )
+            if legacy:
+                return legacy
+
+        # Compatibility for non-Ozon installations that predate seller rows.
         connection = next(
             (
                 item for item in self.integrations(int(tenant_id))

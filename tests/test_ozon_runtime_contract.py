@@ -196,6 +196,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
                 result = launcher.start_browser(runtime, dry_run=False)
         self.assertEqual("reused", result["status"])
         self.assertEqual(43111, result["port"])
+        self.assertEqual(2, result["session_id"])
         self.assertNotIn("--headless", launcher_path.read_text(encoding="utf-8"))
 
     def test_production_rejects_session_zero_even_when_debugger_answers(self) -> None:

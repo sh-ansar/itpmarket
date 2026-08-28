@@ -91,7 +91,11 @@ def seller_scope(
     marketplace_code: str,
     seller: dict[str, Any] | None,
 ) -> SellerRuntimeScope | None:
-    seller_id = int((seller or {}).get("id") or 0)
+    seller_id = int(
+        (seller or {}).get("runtime_seller_id")
+        or (seller or {}).get("id")
+        or 0
+    )
     if int(tenant_id or 0) <= 0 or seller_id <= 0:
         return None
     return SellerRuntimeScope(

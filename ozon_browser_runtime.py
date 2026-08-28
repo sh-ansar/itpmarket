@@ -64,6 +64,19 @@ def deterministic_debug_port(tenant_id: int, marketplace_code: str, seller_id: i
     return 20000 + (zlib.crc32(key) % 30000)
 
 
+def runtime_seller_id(seller: dict[str, Any], marketplace_code: str) -> int:
+    """Return the persistent seller key used by browser runtime directories.
+
+    Explicit seller rows own their database id.  Older installations can still
+    have an approved integration without a seller row; such a connection gets
+    the stable id prepared by SaaSService from its tenant, marketplace and URL.
+    """
+    value = int(seller.get("runtime_seller_id") or seller.get("id") or 0)
+    if value <= 0:
+        raise ValueError("Ozon seller runtime requires a stable seller id.")
+    return value
+
+
 def _ports_in_profile(profile: Path, default_port: int) -> list[int]:
     ports = [default_port] if 0 < int(default_port) <= 65535 else []
     for name in (".spyon_devtools_port", "DevToolsActivePort"):
@@ -132,20 +145,66 @@ def resolve_ozon_runtime(root: Path, seller: dict[str, Any], marketplace_code: s
     if marketplace not in {"ozon", "ozon_kz"}:
         raise ValueError("Unsupported Ozon marketplace.")
     tenant_id = int(seller.get("tenant_id") or 0)
-    seller_id = int(seller.get("id") or 0)
+    seller_id = runtime_seller_id(seller, marketplace)
     source_url = str(seller.get("source_url") or "").strip()
     if tenant_id <= 0 or seller_id <= 0 or marketplace_for_url(source_url) != marketplace:
         raise ValueError("Ozon seller runtime requires an active seller with a matching source URL.")
     scope = SellerRuntimeScope(Path(root), tenant_id, marketplace, seller_id)
-    legacy_profile = OZON_LEGACY_PROFILE_PATHS.get(marketplace)
-    owner_id = legacy_profile_owner(legacy_profile, seller_sources, OZON_LEGACY_DEBUG_PORTS[marketplace]) if legacy_profile else None
-    is_legacy_owner = seller_id == int(owner_id or 0)
     return OzonBrowserRuntime(
         marketplace, tenant_id, seller_id, source_url,
-        legacy_profile.resolve() if is_legacy_owner and legacy_profile else scope.profile_dir,
-        OZON_LEGACY_DEBUG_PORTS[marketplace] if is_legacy_owner else deterministic_debug_port(tenant_id, marketplace, seller_id),
-        is_legacy_owner,
+        scope.profile_dir,
+        deterministic_debug_port(tenant_id, marketplace, seller_id),
+        False,
     )
+
+
+def resolve_ozon_runtimes(
+    root: Path, sellers: Iterable[dict[str, Any]],
+) -> dict[tuple[int, str, int], OzonBrowserRuntime]:
+    """Resolve all launchable Ozon sellers with collision-free DevTools ports.
+
+    Port allocation is deterministic for the same seller set and probes within
+    the dedicated 20000..49999 range only when two hashes collide.
+    """
+    values = [dict(item) for item in sellers]
+    prepared: list[tuple[tuple[int, str, int], OzonBrowserRuntime]] = []
+    for seller in values:
+        marketplace = str(seller.get("marketplace_code") or "").strip().casefold()
+        runtime = resolve_ozon_runtime(root, seller, marketplace, values)
+        prepared.append(((runtime.tenant_id, runtime.marketplace_code, runtime.tenant_seller_id), runtime))
+    used: set[int] = set()
+    result: dict[tuple[int, str, int], OzonBrowserRuntime] = {}
+    for key, runtime in sorted(prepared, key=lambda item: item[0]):
+        port = runtime.debug_port
+        while port in used:
+            port = 20000 + ((port - 20000 + 1) % 30000)
+        used.add(port)
+        result[key] = OzonBrowserRuntime(
+            runtime.marketplace_code, runtime.tenant_id,
+            runtime.tenant_seller_id, runtime.source_url,
+            runtime.profile_dir, port, False,
+        )
+    return result
+
+
+def managed_ozon_session_zero_processes(
+    root: Path, processes: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return only Session-0 Chrome processes owned by Spyon Ozon profiles."""
+    base = (Path(root) / ".runtime" / "browser_profiles").resolve()
+    legacy = {normalize_profile_path(path) for path in OZON_LEGACY_PROFILE_PATHS.values()}
+    result: list[dict[str, Any]] = []
+    for process in processes:
+        if int(process.get("session_id") or 0) != 0:
+            continue
+        profile = normalize_profile_path(process.get("profile_dir"))
+        try:
+            managed_runtime = Path(profile).resolve().is_relative_to(base)
+        except (OSError, ValueError):
+            managed_runtime = False
+        if profile in legacy or managed_runtime:
+            result.append(process)
+    return result
 
 
 def parse_chrome_processes(output: str) -> list[dict[str, Any]]:

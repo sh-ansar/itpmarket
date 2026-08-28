@@ -87,7 +87,7 @@ from ozon_browser_runtime import (
     OZON_LEGACY_PROFILE_PATHS,
     configure_legacy_profiles,
     legacy_profile_owner,
-    resolve_ozon_runtime,
+    resolve_ozon_runtimes,
     seller_identity as ozon_seller_identity,
 )
 
@@ -1372,8 +1372,12 @@ def build_action_command(
     selected_seller: dict[str, Any] | None = None
     active_sellers: list[dict[str, Any]] = []
     if action_platform in MARKETPLACE_CODES:
-        active_sellers = SAAS.sellers(
-            tenant_id, action_platform, active_only=True
+        active_sellers = (
+            [item for item in SAAS.ozon_runtime_sellers()
+             if int(item["tenant_id"]) == tenant_id
+             and item["marketplace_code"] == action_platform]
+            if action_platform in OZON_LEGACY_PROFILE_PATHS
+            else SAAS.sellers(tenant_id, action_platform, active_only=True)
         )
         if tenant_seller_id not in (None, 0) or active_sellers:
             selected_seller = SAAS.resolve_seller(
@@ -1383,15 +1387,17 @@ def build_action_command(
     if runtime:
         runtime.ensure_directories()
     legacy_seller_sources = (
-        SAAS.active_seller_sources(action_platform)
+        SAAS.ozon_runtime_sellers()
         if action_platform in OZON_LEGACY_PROFILE_PATHS
         else []
     )
     ozon_runtime = None
     if action_platform in OZON_LEGACY_PROFILE_PATHS and selected_seller:
-        ozon_runtime = resolve_ozon_runtime(
-            ROOT, selected_seller, action_platform, legacy_seller_sources
+        runtime_key = (
+            int(selected_seller["tenant_id"]), action_platform,
+            int(selected_seller.get("runtime_seller_id") or selected_seller.get("id") or 0),
         )
+        ozon_runtime = resolve_ozon_runtimes(ROOT, legacy_seller_sources)[runtime_key]
     browser_profile = (
         ozon_runtime.profile_dir if ozon_runtime else
         browser_profile_for_seller(runtime, action_platform, legacy_seller_sources)
