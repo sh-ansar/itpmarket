@@ -146,6 +146,16 @@ class AddonBillingHttpUiTests(unittest.TestCase):
         order = reissued.get_json()["order"]
         self.assertEqual("wildberries", order["marketplace"])
 
+        visible_orders_response = self.client.get(
+            "/api/addon-billing/orders"
+        )
+        self.assertEqual(200, visible_orders_response.status_code)
+        visible_orders = visible_orders_response.get_json()["orders"]
+        self.assertEqual(
+            [order["id"]],
+            [item["id"] for item in visible_orders],
+        )
+
         self._login(self.other_user)
         self.assertIn(self.client.get(f"/api/addon-billing/orders/{order['id']}").status_code, {403, 404})
         self.assertIn(self.client.get(order["invoice"]["download_url"]).status_code, {403, 404})

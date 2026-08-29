@@ -264,13 +264,31 @@ class AddonBillingService:
         finally:
             conn.close()
 
-    def list_orders(self, tenant_id: int, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_orders(
+        self,
+        tenant_id: int,
+        *,
+        limit: int = 100,
+        include_superseded: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List add-on orders visible to the tenant.
+
+        Reissued orders remain in storage for auditability, but a superseded
+        invoice must not remain visible next to its replacement in the
+        customer billing UI.
+        """
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM tenant_addon_orders WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
-                (int(tenant_id), max(1, min(int(limit), 500))),
-            ).fetchall()
+            query = "SELECT * FROM tenant_addon_orders WHERE tenant_id=?"
+            params: list[Any] = [int(tenant_id)]
+
+            if not include_superseded:
+                query += " AND status<>'superseded'"
+
+            query += " ORDER BY id DESC LIMIT ?"
+            params.append(max(1, min(int(limit), 500)))
+
+            rows = conn.execute(query, tuple(params)).fetchall()
             return [self._order_dict(conn, row) for row in rows]
         finally:
             conn.close()

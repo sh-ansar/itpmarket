@@ -136,6 +136,21 @@ class AddonBillingServiceTests(unittest.TestCase):
         self.assertEqual(replacement["id"], old["superseded_by"])
         self.assertEqual("awaiting_payment", replacement["status"])
 
+        visible = self.service.list_orders(self.tenant_id)
+        self.assertEqual(
+            [replacement["id"]],
+            [item["id"] for item in visible],
+        )
+
+        audit_history = self.service.list_orders(
+            self.tenant_id,
+            include_superseded=True,
+        )
+        self.assertEqual(
+            [replacement["id"], original["id"]],
+            [item["id"] for item in audit_history],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
