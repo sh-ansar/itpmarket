@@ -587,10 +587,7 @@
     viewer.src = pdfUrl;
     viewer.setAttribute("loading", "eager");
     legalContent.appendChild(viewer);
-    var fallback = document.createElement("p");
-    fallback.className = "legal-modal-fallback";
-    fallback.innerHTML = 'Документ временно недоступен. <a target="_blank" rel="noopener" href="' + documentUrl + '">Откройте его в новой вкладке</a> или <a href="' + pdfUrl + '?download=1">скачайте PDF</a>.';
-    legalContent.appendChild(fallback);
+
     legalContent.focus();
   }
 
@@ -602,7 +599,7 @@
     });
   });
   document.getElementById("closeLegalModal")?.addEventListener("click", closeLegalModal);
-  document.getElementById("closeLegalModalFooter")?.addEventListener("click", closeLegalModal);
+
   legalBackdrop?.addEventListener("click", closeLegalModal);
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && legalModal && !legalModal.hidden) {

@@ -694,9 +694,17 @@
 
 <div class="legal-modal-backdrop" id="legalModalBackdrop" hidden></div>
 <section class="legal-modal" id="legalModal" role="dialog" aria-modal="true" aria-labelledby="legalModalTitle" hidden>
-  <header class="legal-modal-head"><div><h2 id="legalModalTitle">Юридический документ</h2><p id="legalModalMeta"></p></div><button class="secondary" type="button" id="closeLegalModal" aria-label="Закрыть">×</button></header>
+  <header class="legal-modal-head"><div><h2 id="legalModalTitle">Юридический документ</h2><p id="legalModalMeta"></p></div><button
+      class="legal-modal-close"
+      type="button"
+      id="closeLegalModal"
+      aria-label="???????"
+      title="???????"
+    >
+      <img src="{{ url_for('static', filename='icons/close.svg') }}" alt="">
+    </button></header>
   <div class="legal-modal-content" id="legalModalContent" tabindex="0"></div>
-  <footer class="legal-modal-footer"><a class="secondary" id="legalModalPdf" href="#">Скачать PDF</a><button class="primary" type="button" id="closeLegalModalFooter">Закрыть</button></footer>
+  <footer class="legal-modal-footer"><a class="secondary" id="legalModalPdf" href="#">Скачать PDF</a></footer>
 </section>
 
 <script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script>

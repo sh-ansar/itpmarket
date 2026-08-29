@@ -510,3 +510,61 @@ label:has(input[required])
     border-radius: 12px;
   }
 }
+
+/* LEGAL_MODAL_CLOSE_V2 */
+
+.legal-modal-footer {
+  justify-content: flex-start;
+}
+
+.legal-modal-close {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--line, #dbe5ec);
+  border-radius: 10px;
+  background: var(--surface-2, #f4f8fa);
+  cursor: pointer;
+  transition:
+    background .15s ease,
+    border-color .15s ease,
+    transform .15s ease;
+}
+
+.legal-modal-close:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--blue) 40%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--blue) 7%,
+    var(--surface)
+  );
+}
+
+.legal-modal-close:active {
+  transform: scale(.96);
+}
+
+.legal-modal-close:focus-visible {
+  outline: 3px solid
+    color-mix(
+      in srgb,
+      var(--blue) 20%,
+      transparent
+    );
+  outline-offset: 2px;
+}
+
+.legal-modal-close img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
