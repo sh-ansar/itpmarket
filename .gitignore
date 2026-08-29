@@ -62,3 +62,5 @@ backups/*
 
 data/billing-assets/
 data/billing/payment-proofs/
+
+data/billing/

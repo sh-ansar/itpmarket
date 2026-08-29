@@ -137,6 +137,35 @@ class OzonMarketplaceBrowserTests(unittest.TestCase):
             {call.args[1] for call in resolve_runtime.call_args_list},
         )
 
+    def test_bootstrap_waits_for_session_zero_children_to_release_profiles(self) -> None:
+        launcher = launcher_module()
+
+        lingering = [
+            {
+                "pid": 101,
+                "session_id": 0,
+                "profile_dir": str(
+                    resolve_ozon_runtime(ROOT, "ozon").profile_dir
+                ),
+                "debug_port": 9222,
+                "command_line": "chrome.exe --type=renderer",
+            }
+        ]
+
+        with (
+            patch.object(
+                launcher,
+                "running_chrome_processes",
+                side_effect=[lingering, lingering, []],
+            ),
+            patch.object(launcher.time, "sleep"),
+        ):
+            remaining = launcher.wait_for_managed_session_zero_release(
+                timeout=1.0
+            )
+
+        self.assertEqual([], remaining)
+
     def test_launcher_uses_marketplaces_not_seller_list(self) -> None:
         launcher = launcher_module()
         runtimes = {

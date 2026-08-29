@@ -97,18 +97,80 @@ def active_marketplaces() -> list[str]:
     return SaaSService(resolve_path(config, "database")).active_ozon_marketplaces()
 
 
+def managed_session_zero_profile_processes() -> list[dict[str, Any]]:
+    """Return every Session-0 Chrome process that belongs to a managed Ozon profile."""
+    runtimes = [
+        resolve_ozon_runtime(ROOT, marketplace)
+        for marketplace in sorted(OZON_MARKETPLACES)
+    ]
+    managed_profiles = {
+        str(runtime.profile_dir).casefold()
+        for runtime in runtimes
+    }
+
+    return [
+        process
+        for process in running_chrome_processes()
+        if int(process.get("session_id") or 0) == 0
+        and str(process.get("profile_dir") or "").casefold() in managed_profiles
+    ]
+
+
+def wait_for_managed_session_zero_release(timeout: float = 10.0) -> list[int]:
+    """Wait until old Session-0 Chrome children release both permanent profiles."""
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        remaining = managed_session_zero_profile_processes()
+        if not remaining:
+            return []
+        time.sleep(0.25)
+
+    return [
+        int(process.get("pid") or 0)
+        for process in managed_session_zero_profile_processes()
+        if int(process.get("pid") or 0) > 0
+    ]
+
+
 def stop_managed_session_zero_browsers() -> list[int]:
-    """Close only top-level managed RU/KZ Session-0 Chrome processes."""
+    """Close managed Session-0 roots and wait until their children release profiles."""
     closed: list[int] = []
-    for process in managed_ozon_session_zero_processes(ROOT, running_chrome_processes()):
+
+    for process in managed_ozon_session_zero_processes(
+        ROOT,
+        running_chrome_processes(),
+    ):
         try:
             pid = int(process.get("pid") or 0)
         except (TypeError, ValueError):
             continue
+
         if pid <= 0:
             continue
-        subprocess.run(["powershell", "-NoProfile", "-Command", f"Stop-Process -Id {pid} -Force"], check=False, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"Stop-Process -Id {pid} -Force",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
         closed.append(pid)
+
+    if closed:
+        remaining = wait_for_managed_session_zero_release()
+        if remaining:
+            raise RuntimeError(
+                "Managed Ozon Session-0 Chrome processes did not terminate: "
+                + ", ".join(str(pid) for pid in remaining)
+            )
+
     return closed
 
 
