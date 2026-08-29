@@ -17,7 +17,12 @@ if str(OZON_ROOT) not in sys.path:
     sys.path.insert(0, str(OZON_ROOT))
 
 from browser_session import BrowserSession
-from ozon_collector import combined_status, result_exit_code
+from ozon_collector import (
+    Collector,
+    combined_status,
+    result_exit_code,
+    structured_result as collector_structured_result,
+)
 from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import
 from registry import Registry
@@ -98,17 +103,101 @@ class OzonRuntimeContractTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_and_blocked_results_fail_the_background_job(self) -> None:
-        self.assertEqual("PARTIAL", combined_status(
-            {"status": "PASSED"}, {"status": "PARTIAL"}
-        ))
-        self.assertEqual("BLOCKED", combined_status(
-            {"status": "PARTIAL"}, {"status": "BLOCKED"}
-        ))
-        self.assertEqual(0, result_exit_code({"status": "PASSED"}))
-        self.assertEqual(0, result_exit_code({"status": "READY"}))
-        self.assertEqual(2, result_exit_code({"status": "PARTIAL"}))
-        self.assertEqual(2, result_exit_code({"status": "BLOCKED"}))
+    def test_partial_result_completes_with_warning_while_blocked_fails(self) -> None:
+        self.assertEqual(
+            "PARTIAL",
+            combined_status(
+                {"status": "PASSED"},
+                {"status": "PARTIAL"},
+            ),
+        )
+        self.assertEqual(
+            "BLOCKED",
+            combined_status(
+                {"status": "PARTIAL"},
+                {"status": "BLOCKED"},
+            ),
+        )
+
+        self.assertEqual(
+            0,
+            result_exit_code({"status": "PASSED"}),
+        )
+        self.assertEqual(
+            0,
+            result_exit_code({"status": "READY"}),
+        )
+        self.assertEqual(
+            0,
+            result_exit_code({"status": "PARTIAL"}),
+        )
+        self.assertEqual(
+            2,
+            result_exit_code({"status": "BLOCKED"}),
+        )
+        self.assertEqual(
+            2,
+            result_exit_code({"status": "FAILED"}),
+        )
+
+        partial = collector_structured_result(
+            {"status": "PARTIAL"}
+        )
+
+        self.assertEqual(
+            {
+                "ok": True,
+                "reason": "partial_success",
+            },
+            partial,
+        )
+
+        self.assertIn(
+            "\u0447\u0430\u0441\u0442\u0438\u0447\u043d\u043e",
+            RESULT_MESSAGES["partial_success"].casefold(),
+        )
+
+    def test_full_sync_continues_after_partial_stage(self) -> None:
+        collector = Collector.__new__(Collector)
+
+        with patch.object(
+            collector,
+            "sync_catalog",
+            return_value={
+                "status": "PARTIAL",
+                "items_total": 100,
+                "items_success": 92,
+                "items_failed": 8,
+            },
+        ) as sync_catalog, patch.object(
+            collector,
+            "process",
+            return_value={
+                "status": "PARTIAL",
+                "items_total": 100,
+                "items_success": 92,
+                "items_failed": 8,
+            },
+        ) as process, patch.object(
+            collector,
+            "market_search",
+            return_value={"status": "PASSED"},
+        ) as market_search:
+            result = collector.full_sync(100)
+
+        sync_catalog.assert_called_once_with(100)
+        process.assert_called_once_with(
+            "refresh-prices",
+            100,
+        )
+        market_search.assert_called_once_with(100)
+
+        self.assertEqual(
+            "PARTIAL",
+            result["status"],
+        )
+        self.assertIsNotNone(result["prices"])
+        self.assertIsNotNone(result["market"])
 
     def test_structured_challenge_result_is_user_safe(self) -> None:
         value = structured_result(

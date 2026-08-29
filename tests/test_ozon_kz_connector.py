@@ -113,12 +113,31 @@ class OzonKzConnectorTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_collector_result_fails_the_kz_cli(self) -> None:
+    def test_partial_collector_result_is_recoverable_for_kz_cli(self) -> None:
         self.assertEqual(
-            "PASSED", require_success({"status": "PASSED"}, "refresh")["status"]
+            "PASSED",
+            require_success(
+                {"status": "PASSED"},
+                "refresh",
+            )["status"],
         )
-        with self.assertRaisesRegex(RuntimeError, "PARTIAL"):
-            require_success({"status": "PARTIAL"}, "refresh")
+
+        self.assertEqual(
+            "PARTIAL",
+            require_success(
+                {"status": "PARTIAL"},
+                "refresh",
+            )["status"],
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "BLOCKED",
+        ):
+            require_success(
+                {"status": "BLOCKED"},
+                "refresh",
+            )
 
     def test_raw_artifact_path_supports_kz_collector_directory(self) -> None:
         project_root = Path(__file__).resolve().parents[1]

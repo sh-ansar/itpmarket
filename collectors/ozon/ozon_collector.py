@@ -88,13 +88,18 @@ def result_exit_code(result: dict[str, Any] | None) -> int:
     if not isinstance(result, dict):
         return 0
     status = str(result.get("status") or "PASSED").upper()
-    return 0 if status in {"OK", "PASSED", "READY"} else 2
+    # PARTIAL means the collector completed its pass and persisted every
+    # successful item. Failed items remain eligible for a later retry.
+    # It is therefore recoverable and must not abort full-sync/materialization.
+    return 0 if status in {"OK", "PASSED", "READY", "PARTIAL"} else 2
 
 
 def structured_result(result: dict[str, Any] | None, error: Exception | None = None) -> dict[str, Any]:
     status = str((result or {}).get("status") or "").upper()
     text = str(error or "")
-    if "BLOCKED" in status:
+    if status == "PARTIAL" and error is None:
+        reason = "partial_success"
+    elif "BLOCKED" in status:
         reason = "ozon_challenge"
     elif "фоновой сессии" in text:
         reason = "browser_hidden_session"
