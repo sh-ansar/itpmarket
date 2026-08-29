@@ -158,3 +158,14 @@ resource-compatible queued operation when a worker finishes, so a blocked Ozon
 profile job cannot block a later independent seller. Ozon.ru and Ozon.kz retain
 their separate one-at-a-time browser resources. Queued operations can be stopped
 before launch and are retained across a service restart.
+
+## Public landing page
+
+The public landing page is available at `/` in Russian, Kazakh and English via
+the `lang` query parameter. It presents the live public subscription plans and
+passes the selected plan code to the existing registration flow; it does not
+create subscriptions, invoices, or marketplace connections itself. Marketplace
+names on the page are text-only channel references. The page provides a
+canonical URL, language alternates, SoftwareApplication JSON-LD and an owned
+Spyon Open Graph image; the final commercial decision and all operational data
+remain in the authenticated product.

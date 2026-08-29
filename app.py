@@ -18,6 +18,7 @@ from urllib.parse import urlparse, urlunparse
 
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     g,
@@ -2265,9 +2266,33 @@ def logout() -> Any:
 
 @app.get("/")
 def landing() -> Any:
+    locale = str(request.args.get("lang") or "ru").casefold()
+    if locale not in {"ru", "kk", "en"}:
+        locale = "ru"
     return render_template(
         "landing.html", capabilities=PUBLIC_CAPABILITIES,
         plans=subscription_service().plans(public_only=True), has_users=AUTH.has_users(),
+        public_locale=locale,
+    )
+
+
+@app.get("/robots.txt")
+def robots_txt() -> Response:
+    sitemap_url = url_for("sitemap_xml", _external=True)
+    return Response(f"User-agent: *\nAllow: /\nSitemap: {sitemap_url}\n", mimetype="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml() -> Response:
+    urls = [url_for("landing", _external=True)]
+    urls.extend(
+        url_for("legal_document", document=document.document_type, _external=True)
+        for document in LEGAL_DOCUMENTS.current_documents()
+    )
+    body = "".join(f"<url><loc>{url}</loc></url>" for url in urls)
+    return Response(
+        f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
+        mimetype="application/xml",
     )
 
 

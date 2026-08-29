@@ -7,7 +7,7 @@
   <title>{{ document.title }} — Spyon</title>
   <link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
   <script>(function(){var p=localStorage.getItem('itp_theme')||'system',d=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.dataset.theme=d;document.documentElement.style.colorScheme=d;}());</script>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/legal-v2.css') }}?v={{ version }}">
 </head>
 <body class="legal-page">
 <header class="site-header" id="siteHeader">

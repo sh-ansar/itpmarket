@@ -64,5 +64,5 @@
   };
   document.addEventListener('click',event=>{const button=event.target.closest('[data-public-lang]');if(button)apply(button.dataset.publicLang);const theme=event.target.closest('[data-public-theme]');if(theme){const current=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=current;document.documentElement.style.colorScheme=current;localStorage.setItem('itp_theme',current);}});
   document.querySelector('#languageSelect')?.addEventListener('change',event=>apply(event.target.value));
-  apply(window.ITP_LEGAL_LOCALE||localStorage.getItem('itp_lang')||'ru');
+  apply(window.ITP_LEGAL_LOCALE||window.ITP_PUBLIC_LOCALE||localStorage.getItem('itp_lang')||'ru');
 })();

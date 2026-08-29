@@ -1,19 +1,37 @@
 {% if not embedded %}
-<!doctype html><html lang="ru"><head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="app-version" content="{{ version }}">
   <title>{{ legal.title }} — Spyon</title>
-<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}">
-</head><body class="legal-page">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
+  <script>(function(){var p=localStorage.getItem('itp_theme')||'system',d=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.dataset.theme=d;document.documentElement.style.colorScheme=d;}());</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}?v={{ version }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/legal-v2.css') }}?v={{ version }}">
+</head>
+<body class="legal-page legal-versioned-page">
+<header class="site-header compact" id="siteHeader">
+  <a class="site-brand" href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon — аналитика продаж на маркетплейсах"><span>Spyon</span></a>
+  <nav class="site-nav" aria-label="Навигация"><a href="{{ url_for('landing') }}#features">Возможности</a><a href="{{ url_for('landing') }}#how">Как работает</a><a href="{{ url_for('landing') }}#pricing">Тарифы</a></nav>
+  <div class="site-tools"><button class="site-theme" data-public-theme aria-label="Переключить тему"><img class="light-icon" src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><img class="dark-icon" src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></button><label class="language-select"><span class="sr-only">Язык</span><select id="languageSelect" aria-label="Язык"><option value="ru">RU</option><option value="kk">KZ</option><option value="en">EN</option></select></label><a class="site-button secondary" href="{{ url_for('landing') }}">На главную</a></div>
+</header>
+<main class="legal-layout">
+  <aside class="legal-nav" aria-label="Юридические документы"><span>ДОКУМЕНТЫ</span><a class="{{ 'active' if legal.type == 'privacy' else '' }}" href="{{ url_for('legal_document', document='privacy') }}">Конфиденциальность</a><a class="{{ 'active' if legal.type == 'offer' else '' }}" href="{{ url_for('legal_document', document='offer') }}">Публичная оферта</a><a href="{{ url_for('legal_document', document='terms') }}">Условия использования</a><a href="{{ url_for('legal_document', document='cookies') }}">Cookies</a><a href="{{ url_for('legal_document', document='consent') }}">Согласие</a></aside>
+  <article class="legal-document legal-versioned-document">
+    <header class="legal-document-head">
+      <p class="eyebrow">SPYON · LEGAL</p>
+      <h1>{{ legal.title }}</h1>
+      <div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div>
+      <a class="site-button secondary" href="{{ url_for('legal_current_pdf', document=legal.type, download=1) }}">Скачать PDF</a>
+    </header>
+    <div class="legal-source-note">Официальная редакция документа доступна на русском языке.</div>
+    <section class="legal-source-content">{{ document_html }}</section>
+  </article>
+</main>
+<footer class="site-footer legal-site-footer"><div><a class="site-brand" href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span>Spyon</span></a><p>Информационно-аналитическая система для управления онлайн-продажами.</p></div><small>© 2026 Spyon</small></footer>
+<script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script><script src="{{ url_for('static', filename='js/public_i18n_runtime.js') }}?v={{ version }}"></script><script src="{{ url_for('static', filename='js/public.js') }}?v={{ version }}"></script>
+</body></html>
+{% else %}
+<article class="legal-document legal-versioned-document"><header class="legal-document-head"><p class="eyebrow">SPYON · LEGAL</p><h1>{{ legal.title }}</h1><div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div></header><section class="legal-source-content">{{ document_html }}</section></article>
 {% endif %}
-<article class="legal-document legal-versioned-document">
-  <header class="legal-document-head">
-    <p class="eyebrow">SPYON · LEGAL</p>
-    <h1>{{ legal.title }}</h1>
-    <div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div>
-    <a class="site-button secondary" href="{{ url_for('legal_current_pdf', document=legal.type, download=1) }}">Скачать PDF</a>
-  </header>
-  <div class="legal-source-note">Официальная редакция документа доступна на русском языке.</div>
-  <section class="legal-source-content">{{ document_html }}</section>
-</article>
-{% if not embedded %}</body></html>{% endif %}
