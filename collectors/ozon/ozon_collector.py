@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import sqlite3
 import sys
 import time
 import traceback
@@ -28,7 +27,7 @@ from reporting import generate_dashboard
 
 from collectors.ozon.market_matching import build_search_queries, evaluate_match
 from catalog_configuration_service import CatalogConfigurationService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 
 def run_id_for(mode: str) -> str:
@@ -791,7 +790,7 @@ def materialize_tenant_catalog(
         return 0
     source_urls = {str(url).strip() for url in settings.start_urls if str(url).strip()}
     conn = connect_database(settings.database_path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    configure_connection(conn, busy_timeout=30000)
     try:
         params: list[Any] = []
         where = "p.active=1"

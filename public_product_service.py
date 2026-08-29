@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from storage.postgres_compat import connect_database, database_error_types
+from storage.postgres_compat import configure_connection, connect_database, database_error_types
 
 PUBLIC_CAPABILITIES = [
     {"code": "sales_automation", "title_key": "public_cap_sales_title", "text_key": "public_cap_sales_text", "title": "Автоматизация онлайн-продаж", "text": "Регулярные операции и рабочие сценарии без постоянного ручного запуска."},
@@ -299,9 +298,7 @@ class PublicProductService:
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, busy_timeout=30000)
 
     def settings(self) -> dict[str, Any]:
         value = dict(DEFAULT_PUBLIC_SETTINGS)

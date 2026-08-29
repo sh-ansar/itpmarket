@@ -29,7 +29,6 @@ import html
 import json
 import random
 import re
-import sqlite3
 import statistics
 import sys
 import time
@@ -43,7 +42,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 try:
     from playwright.async_api import (
@@ -644,9 +643,7 @@ class Database:
                 "output_market_v7\\kaspi_market.db"
             )
         self.conn = connect_database(path, timeout=60)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
+        configure_connection(self.conn, journal_mode="WAL", synchronous="NORMAL")
         self.create_schema()
 
     def create_schema(self) -> None:

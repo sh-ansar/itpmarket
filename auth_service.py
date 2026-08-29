@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 import re
 import secrets
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from werkzeug.security import check_password_hash, generate_password_hash
-from storage.postgres_compat import connect_database, integrity_error_types
+from storage.postgres_compat import configure_connection, connect_database, integrity_error_types
 
 from schema import ensure_database
 from marketplace_registry import MARKETPLACE_CODES
@@ -101,12 +100,10 @@ class AuthService:
         finally:
             conn.close()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+    def _connect(self) -> Any:
+        return configure_connection(
+            connect_database(self.db_path, timeout=30), foreign_keys=True, busy_timeout=30000
+        )
 
     def has_users(self) -> bool:
         conn = self._connect()
@@ -116,7 +113,7 @@ class AuthService:
             conn.close()
 
     @staticmethod
-    def public_user(row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
+    def public_user(row: Any | dict[str, Any] | None) -> dict[str, Any] | None:
         if row is None:
             return None
         value = dict(row)
@@ -168,7 +165,7 @@ class AuthService:
 
     @staticmethod
     def _attach_marketplaces(
-        conn: sqlite3.Connection, row: sqlite3.Row | dict[str, Any] | None
+        conn: Any, row: Any | dict[str, Any] | None
     ) -> dict[str, Any] | None:
         if row is None:
             return None
@@ -1372,7 +1369,7 @@ class AuthService:
 
     @staticmethod
     def _event(
-        conn: sqlite3.Connection,
+        conn: Any,
         user_id: int | None,
         event_type: str,
         entity_type: str | None,

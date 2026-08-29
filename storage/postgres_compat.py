@@ -5,6 +5,7 @@ import queue
 import re
 import sqlite3
 import threading
+from contextlib import contextmanager
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -343,6 +344,8 @@ class PostgresConnection:
         value = str(query).strip()
         if not value:
             return value, ""
+        if re.match(r"^BEGIN\s+IMMEDIATE\b", value, re.I):
+            return "BEGIN", ""
         if re.match(r"^PRAGMA\b", value, re.I):
             return "SELECT 1 WHERE FALSE", ""
         if re.search(r"\bFROM\s+sqlite_master\b", value, re.I):
@@ -474,10 +477,68 @@ def connect_database(
 ) -> sqlite3.Connection | PostgresConnection:
     settings = DatabaseSettings.from_environment()
     if settings.backend is DatabaseBackend.SQLITE:
-        return sqlite3.connect(path, timeout=timeout, uri=uri)
+        connection = sqlite3.connect(path, timeout=timeout, uri=uri)
+        connection.row_factory = sqlite3.Row
+        return connection
     return PostgresConnection(
         settings.database_url, schema or _schema_for_path(path), timeout=timeout
     )
+
+
+def is_postgres_connection(connection: Any) -> bool:
+    return isinstance(connection, PostgresConnection)
+
+
+def configure_connection(
+    connection: sqlite3.Connection | PostgresConnection,
+    *,
+    foreign_keys: bool = False,
+    busy_timeout: int | None = None,
+    journal_mode: str | None = None,
+    synchronous: str | None = None,
+) -> sqlite3.Connection | PostgresConnection:
+    """Apply SQLite transport tuning only at the storage boundary.
+
+    PostgreSQL receives none of SQLite's PRAGMA statements; server-side
+    durability and FK enforcement are configured in the database itself.
+    """
+    if is_postgres_connection(connection):
+        return connection
+    if foreign_keys:
+        connection.execute("PRAGMA foreign_keys=ON")
+    if busy_timeout is not None:
+        connection.execute(f"PRAGMA busy_timeout={max(0, int(busy_timeout))}")
+    if journal_mode:
+        connection.execute(f"PRAGMA journal_mode={str(journal_mode).upper()}")
+    if synchronous:
+        connection.execute(f"PRAGMA synchronous={str(synchronous).upper()}")
+    return connection
+
+
+@contextmanager
+def transaction(
+    connection: sqlite3.Connection | PostgresConnection,
+    *,
+    immediate: bool = False,
+) -> Iterator[sqlite3.Connection | PostgresConnection]:
+    """Run a portable transaction; PostgreSQL never sees BEGIN IMMEDIATE."""
+    connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+    try:
+        yield connection
+    except Exception:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()
+
+
+def table_exists(
+    connection: sqlite3.Connection | PostgresConnection, table: str
+) -> bool:
+    row = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (str(table),)
+    ).fetchone()
+    return row is not None
 
 
 def database_error_types() -> tuple[type[BaseException], ...]:

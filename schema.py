@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
+from typing import Any
 from storage.database_backend import DatabaseBackend, DatabaseSettings
+from storage.postgres_compat import configure_connection, connect_database
 
 from marketplace_registry import MARKETPLACES
 from tenant_security import ROLE_DEFAULT_PERMISSIONS, ROLE_LABELS
@@ -1522,7 +1523,7 @@ CREATE TABLE IF NOT EXISTS tenant_daily_usage (
 """
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+def _columns(conn: Any, table: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
@@ -1532,12 +1533,14 @@ def ensure_database(path: Path) -> None:
         settings.assert_runtime_ready()
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=60)
+    conn = configure_connection(
+        connect_database(path, timeout=60),
+        foreign_keys=True,
+        busy_timeout=60000,
+        journal_mode="WAL",
+        synchronous="NORMAL",
+    )
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=60000")
         conn.executescript(BASE_SCHEMA)
         if "expected_monthly_units" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN expected_monthly_units INTEGER")

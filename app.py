@@ -6,7 +6,6 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import sys
 import threading
 import time
@@ -80,7 +79,7 @@ from notification_service import NotificationService
 from telegram_bot import TelegramBotWorker, TelegramLinkService
 from email_service import EmailOutboxWorker, EmailService
 from storage.database_backend import DatabaseSettings
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import connect_database, is_postgres_connection, table_exists
 from runtime_scope import SellerRuntimeScope, seller_scope
 from ozon_browser_runtime import (
     configure_marketplace_profiles,
@@ -1119,13 +1118,7 @@ def load_ozon_public_config() -> dict[str, Any]:
         return result
     try:
         conn = connect_database(db_path)
-        conn.row_factory = sqlite3.Row
-        tables = {
-            str(row[0]) for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        if "product_sources" in tables:
+        if table_exists(conn, "product_sources"):
             row = conn.execute(
                 """
                 SELECT
@@ -2414,7 +2407,7 @@ def registration() -> Any:
             )
             registration_conn = SAAS._connect()
             try:
-                if isinstance(registration_conn, sqlite3.Connection):
+                if not is_postgres_connection(registration_conn):
                     registration_conn.execute("BEGIN IMMEDIATE")
                 provision = SAAS.provision_tenant_from_request(
                     request_id,
@@ -3272,6 +3265,7 @@ def api_task_start() -> Any:
                 ),
                 "filters": operation_filters,
             },
+            queue_if_busy=True,
         )
         record_event("task_started", "task", task["id"], {"action": action, "scope": scope, "codes": len(codes)})
         return json_ok(task=public_task(task))
@@ -3415,7 +3409,6 @@ def api_reports() -> Any:
     user = current_user() or {}
     clause, params = tenant_visibility_predicate("r", user)
     conn = connect_database(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
             f"""
@@ -3447,7 +3440,6 @@ def api_report_download(report_id: int) -> Any:
     user = current_user() or {}
     clause, params = tenant_visibility_predicate("app_reports", user)
     conn = connect_database(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
             f"""SELECT file_name,file_path,created_by,platforms_json

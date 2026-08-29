@@ -149,3 +149,12 @@ Ozon.ru and Ozon.kz use one seller runtime resolver. A production collection
 requires the exact seller profile, deterministic DevTools port, and an
 interactive Windows Chrome session. A challenge is reported as an
 action-required user message and leaves the existing marketplace snapshot intact.
+
+## Persistent operation queue
+
+The operations service accepts work when its parallel-worker limit is full and
+persists it as `queued` in `data/tasks_state.json`. It dispatches the first
+resource-compatible queued operation when a worker finishes, so a blocked Ozon
+profile job cannot block a later independent seller. Ozon.ru and Ozon.kz retain
+their separate one-at-a-time browser resources. Queued operations can be stopped
+before launch and are retained across a service restart.

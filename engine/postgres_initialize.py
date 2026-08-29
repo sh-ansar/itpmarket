@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from engine.postgres_bootstrap import apply, sources
+from engine.postgres_schema import provision_schema
 from engine.postgres_migration import (
     finalize_target_schema,
     inventory,
@@ -36,6 +37,9 @@ def expected_schema_tables(root: Path) -> dict[str, set[str]]:
     }
     if not expected:
         raise RuntimeError("PostgreSQL schema manifest has no tables.")
+    # The manifest is the stable provisioning contract.  Legacy SQLite source
+    # discovery belongs to data import and must not expand this contract.
+    return expected
     # A migration source may contain tables introduced after the checked-in
     # manifest. Include them so upgrades remain append-only and explicit.
     for schema, path in sources(root):
@@ -126,6 +130,27 @@ def initialize(root: Path, database_url: str) -> dict[str, Any]:
     return {"ok": True, "initialized": True, **final_state, "migration": result}
 
 
+def provisioned_initialize(root: Path, database_url: str) -> dict[str, Any]:
+    """Provision canonical namespaces without consulting legacy SQLite files."""
+    state = initialization_state(root, database_url)
+    # Provisioning consists exclusively of CREATE/ALTER ... IF NOT EXISTS
+    # statements and marker inserts with ON CONFLICT DO NOTHING.  Run it even
+    # when the table manifest is already complete: a prior version may have
+    # created all tables while lacking a newly added column, index, or
+    # baseline marker.  Returning early here made --check look healthy while
+    # leaving migration adoption blocked on exactly that stale state.
+    provision = provision_schema(database_url)
+    final_state = initialization_state(root, database_url)
+    if not final_state["ready"]:
+        raise RuntimeError("PostgreSQL schema provisioning did not complete.")
+    return {
+        "ok": True,
+        "initialized": state["empty"],
+        **final_state,
+        "provision": provision,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Safely initialize PostgreSQL once; never overwrite a live database."
@@ -138,7 +163,7 @@ def main() -> int:
     if not database_url.startswith(("postgresql://", "postgres://")):
         raise SystemExit("Укажите DATABASE_URL для PostgreSQL.")
     root = args.root.resolve()
-    result = initialization_state(root, database_url) if args.check else initialize(root, database_url)
+    result = initialization_state(root, database_url) if args.check else provisioned_initialize(root, database_url)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ready") else 2
 

@@ -6,7 +6,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
-import sqlite3
 import sys
 import time
 import uuid
@@ -23,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 from schema import ensure_database
 from catalog_configuration_service import CatalogConfigurationService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 MARKET_BASE_URL = "https://market.forte.kz"
 API_BASE_URL = "https://apigw.forte.kz/fm"
@@ -413,10 +412,7 @@ def resolve_source_merchant(args: argparse.Namespace, detail: dict[str, Any]) ->
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = connect_database(db_path, timeout=60)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=60000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return configure_connection(conn, foreign_keys=True, busy_timeout=60000)
 
 
 def mark_run(conn: sqlite3.Connection, run_id: str, action: str, args: argparse.Namespace) -> None:

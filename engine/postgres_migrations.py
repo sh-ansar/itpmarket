@@ -24,20 +24,95 @@ BASELINE_MARKERS = {
         "schema_email_auth_notifications_v1",
 }
 
-FORBIDDEN_AUTO_SQL = re.compile(
-    r"\b("
-    r"DROP|"
-    r"TRUNCATE|"
-    r"DELETE|"
-    r"VACUUM|"
-    r"REINDEX"
-    r")\b",
-    re.IGNORECASE,
-)
+BASELINE_CONTRACTS = {
+    "20260818_multi_seller_v1.sql": {
+        "tables": ("tenant_marketplace_sellers", "tenant_seller_catalog_products", "tenant_seller_price_snapshots", "tenant_seller_offer_scans", "tenant_seller_offer_snapshots"),
+        "columns": (("tenant_marketplace_sellers", "config_json"), ("tenant_marketplace_sellers", "approval_status")),
+        "indexes": ("idx_tenant_sellers_approval",),
+    },
+    "20260818_inventory_matching_v1.sql": {
+        "tables": ("tenant_inventory_products", "tenant_product_listings", "tenant_product_match_decisions", "tenant_inventory_events"),
+        "columns": (("tenant_inventory_products", "internal_sku"),),
+        "indexes": ("idx_tenant_inventory_internal_sku", "idx_tenant_product_listings_inventory"),
+    },
+    "20260818_telegram_notifications_v1.sql": {
+        "tables": ("telegram_user_links", "telegram_notification_deliveries"),
+        "columns": (("telegram_user_links", "notification_start_id"),),
+        "indexes": ("idx_telegram_user_links_tenant", "idx_telegram_deliveries_user"),
+    },
+    "20260819_email_auth_notifications_v1.sql": {
+        "tables": ("auth_tokens", "email_outbox", "notification_preferences"),
+        "columns": (("app_users", "email_verified_at"), ("app_users", "session_version")),
+        "indexes": (),
+    },
+}
 
 DOLLAR_TAG_RE = re.compile(
     r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$"
 )
+
+
+def _top_level_words(statement: str) -> list[str]:
+    """Return unquoted, non-nested SQL words from a single statement."""
+    words: list[str] = []
+    index = 0
+    depth = 0
+    dollar_tag: str | None = None
+    while index < len(statement):
+        char = statement[index]
+        if dollar_tag:
+            if statement.startswith(dollar_tag, index):
+                index += len(dollar_tag)
+                dollar_tag = None
+            else:
+                index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            while index < len(statement):
+                if statement[index] == quote:
+                    if index + 1 < len(statement) and statement[index + 1] == quote:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+        if char == "$":
+            match = DOLLAR_TAG_RE.match(statement, index)
+            if match:
+                dollar_tag = match.group(0)
+                index = match.end()
+                continue
+        if char == "(":
+            depth += 1
+            index += 1
+            continue
+        if char == ")":
+            depth = max(depth - 1, 0)
+            index += 1
+            continue
+        match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", statement[index:])
+        if match:
+            if depth == 0:
+                words.append(match.group(0).upper())
+            index += len(match.group(0))
+            continue
+        index += 1
+    return words
+
+
+def _statement_command(statement: str) -> str:
+    words = _top_level_words(statement)
+    if not words:
+        return ""
+    if words[0] != "WITH":
+        return words[0]
+    for word in words[1:]:
+        if word in {"SELECT", "INSERT", "UPDATE", "DELETE"}:
+            return word
+    return "WITH"
 
 
 class MigrationError(RuntimeError):
@@ -251,7 +326,7 @@ def validate_pending_migration(
     body = statements[1:-1]
 
     for statement in body:
-        if FORBIDDEN_AUTO_SQL.search(statement):
+        if _statement_command(statement) in {"DELETE", "DROP", "TRUNCATE", "VACUUM", "REINDEX"}:
             raise MigrationError(
                 f"{path.name}: destructive SQL "
                 "requires manual deployment"
@@ -337,6 +412,32 @@ def _load_metadata_markers(
     }
 
 
+def baseline_contract_missing(conn: Any, path: Path) -> list[str]:
+    """Return concrete missing objects; never adopt a marker by itself."""
+    contract = BASELINE_CONTRACTS.get(path.name, {})
+    missing: list[str] = []
+    for table in contract.get("tables", ()):
+        row = conn.execute("SELECT to_regclass(%s) IS NOT NULL", (f"app.{table}",)).fetchone()
+        if not row or not row[0]:
+            missing.append(f"table:app.{table}")
+    for table, column in contract.get("columns", ()):
+        row = conn.execute(
+            """SELECT 1 FROM information_schema.columns
+               WHERE table_schema='app' AND table_name=%s AND column_name=%s""",
+            (table, column),
+        ).fetchone()
+        if row is None:
+            missing.append(f"column:app.{table}.{column}")
+    for index in contract.get("indexes", ()):
+        row = conn.execute(
+            "SELECT 1 FROM pg_indexes WHERE schemaname='app' AND indexname=%s",
+            (index,),
+        ).fetchone()
+        if row is None:
+            missing.append(f"index:app.{index}")
+    return missing
+
+
 def migration_status(
     root: Path,
     db_url: str,
@@ -350,6 +451,7 @@ def migration_status(
 
     files = migration_files(root)
 
+    baseline_missing: dict[str, list[str]] = {}
     with psycopg.connect(
         db_url,
         connect_timeout=10,
@@ -357,6 +459,10 @@ def migration_status(
     ) as conn:
         tracked = _load_tracking(conn)
         markers = _load_metadata_markers(conn)
+        for path in files:
+            marker = BASELINE_MARKERS.get(path.name)
+            if marker and marker in markers:
+                baseline_missing[path.name] = baseline_contract_missing(conn, path)
 
     applied: list[str] = []
     baseline_untracked: list[str] = []
@@ -381,9 +487,11 @@ def migration_status(
         )
 
         if marker and marker in markers:
-            baseline_untracked.append(
-                path.name
-            )
+            missing = baseline_missing.get(path.name, [])
+            if missing:
+                blocked.append({"name": path.name, "reason": "baseline schema contract missing: " + ", ".join(missing)})
+            else:
+                baseline_untracked.append(path.name)
             continue
 
         text = path.read_text(
@@ -455,6 +563,13 @@ def _record_existing_baselines(
 
         if applied_at is None:
             continue
+
+        missing = baseline_contract_missing(conn, path)
+        if missing:
+            raise MigrationError(
+                f"{path.name}: baseline marker exists but schema contract is missing: "
+                + ", ".join(missing)
+            )
 
         conn.execute(
             """
@@ -594,6 +709,15 @@ def apply_migrations(
         )
 
     return result
+
+
+def schema_owned_metadata_keys(root: Path) -> set[str]:
+    """Metadata keys written by checked-in schema/baseline migrations only."""
+    keys = set(BASELINE_MARKERS.values())
+    for path in migration_files(root):
+        text = path.read_text(encoding="utf-8-sig")
+        keys.update(re.findall(r"['\"](schema_[A-Za-z0-9_]+)['\"]", text))
+    return keys
 
 
 def main() -> int:

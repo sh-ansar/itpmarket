@@ -67,11 +67,19 @@ def structured_result(log_text: str) -> dict[str, Any] | None:
 class TaskManager:
     """Runs background commands with resource locks and persistent task history."""
 
-    def __init__(self, root: Path, logs_dir: Path, state_path: Path, max_parallel: int = 3):
+    def __init__(
+        self,
+        root: Path,
+        logs_dir: Path,
+        state_path: Path,
+        max_parallel: int = 3,
+        max_queue: int = 1000,
+    ):
         self.root = root
         self.logs_dir = logs_dir
         self.state_path = state_path
         self.max_parallel = max(1, int(max_parallel))
+        self.max_queue = max(1, int(max_queue))
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -84,6 +92,7 @@ class TaskManager:
         self._enrich_cache: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
         self._normalize_state()
         self._recover_running_tasks()
+        self._dispatch_queued()
 
     @contextmanager
     def _state_guard(self):
@@ -174,11 +183,6 @@ class TaskManager:
         return self._process_identity_alive(
             task.get("pid"), task.get("process_create_time")
         )
-        try:
-            process = psutil.Process(int(pid))
-            return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
-        except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
-            return False
 
     def _normalize_state(self) -> None:
         with self._state_guard():
@@ -202,9 +206,10 @@ class TaskManager:
                     task["finished_at"] = now_iso()
                     task["message"] = "Процесс отсутствует после перезапуска приложения."
                     changed = True
-            state["tasks"] = sorted(
-                state.get("tasks", []), key=lambda item: item.get("started_at") or "", reverse=True
-            )[:150]
+            trimmed = self._trim_tasks(state.get("tasks", []))
+            if trimmed != state.get("tasks", []):
+                state["tasks"] = trimmed
+                changed = True
             if changed:
                 self._save(state)
 
@@ -242,6 +247,7 @@ class TaskManager:
                 "Процесс завершился после перезапуска приложения; код выхода недоступен."
             )
             self._save(state)
+        self._dispatch_queued()
 
     @staticmethod
     def _read_tail(path: Path, lines: int = 250) -> str:
@@ -399,66 +405,194 @@ class TaskManager:
             {"id": task_id, "status": "missing", "running": False},
         )
 
-    def start(
+    @staticmethod
+    def _task_order_key(task: dict[str, Any]) -> str:
+        return str(
+            task.get("queued_at")
+            or task.get("started_at")
+            or task.get("finished_at")
+            or ""
+        )
+
+    @classmethod
+    def _trim_tasks(
+        cls,
+        tasks: list[dict[str, Any]],
+        history_limit: int = 150,
+    ) -> list[dict[str, Any]]:
+        active = [
+            task
+            for task in tasks
+            if task.get("status") in {"queued", "running"}
+        ]
+
+        finished = [
+            task
+            for task in tasks
+            if task.get("status") not in {"queued", "running"}
+        ]
+
+        active.sort(
+            key=cls._task_order_key,
+            reverse=True,
+        )
+
+        finished.sort(
+            key=cls._task_order_key,
+            reverse=True,
+        )
+
+        return [
+            *active,
+            *finished[:max(1, int(history_limit))],
+        ]
+
+    def _active_tasks(
         self,
+        state: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            task
+            for task in state.get("tasks", [])
+            if (
+                task.get("status") == "running"
+                and self._task_process_alive(task)
+            )
+        ]
+
+    def _new_task_record(
+        self,
+        *,
         name: str,
         label: str,
         command: list[str],
-        resources: list[str] | tuple[str, ...] | None = None,
-        metadata: dict[str, Any] | None = None,
+        resources: list[str],
+        metadata: dict[str, Any],
     ) -> dict[str, Any]:
-        resources_value = sorted({str(item) for item in (resources or []) if str(item).strip()})
-        with self._state_guard():
-            active = self.running()
-            if len(active) >= self.max_parallel:
-                raise RuntimeError(f"Одновременно можно выполнять не более {self.max_parallel} операций.")
-            used = {resource for task in active for resource in task.get("resources", [])}
-            conflict = sorted(set(resources_value) & used)
-            if conflict:
-                owner = next(
-                    (task for task in active if set(task.get("resources", [])) & set(conflict)), None
-                )
-                raise RuntimeError(
-                    f"Сейчас выполняется «{(owner or {}).get('label') or 'другая операция'}». "
-                    "Для этого продавца уже есть активная операция; общий профиль и каталог "
-                    "продавца используются последовательно."
+        stamp = datetime.now().strftime(
+            "%Y%m%d_%H%M%S"
+        )
+
+        task_id = (
+            f"{name}_{stamp}_{uuid.uuid4().hex[:7]}"
+        )
+
+        tenant_part = (
+            f"_t{int(metadata.get('tenant_id') or 0)}"
+        )
+
+        seller_part = (
+            f"_s{int(metadata.get('tenant_seller_id') or 0)}"
+        )
+
+        log_path = self.logs_dir / (
+            f"{stamp}_{name}"
+            f"{tenant_part}"
+            f"{seller_part}_"
+            f"{task_id[-7:]}.log"
+        )
+
+        return {
+            "id": task_id,
+            "name": name,
+            "label": label,
+            "status": "queued",
+            "running": False,
+            "pid": None,
+            "process_create_time": None,
+            "manager_pid": None,
+            "manager_create_time": None,
+            "command": list(command),
+            "resources": list(resources),
+            "metadata": dict(metadata),
+            "log_file": str(log_path),
+            "queued_at": now_iso(),
+            "started_at": None,
+            "finished_at": None,
+            "exit_code": None,
+            "message": (
+                "Операция ожидает запуска в очереди."
+            ),
+        }
+
+    def _launch_task_locked(
+        self,
+        task: dict[str, Any],
+    ) -> subprocess.Popen[bytes]:
+        task_id = str(task["id"])
+
+        metadata = (
+            task.get("metadata")
+            if isinstance(task.get("metadata"), dict)
+            else {}
+        )
+
+        log_path = Path(
+            str(task["log_file"])
+        )
+
+        log_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        log_handle = log_path.open(
+            "ab",
+            buffering=0,
+        )
+
+        try:
+            if log_path.stat().st_size == 0:
+                log_context = {
+                    "timestamp": now_iso(),
+                    "job_id": task_id,
+                    "tenant_id": metadata.get(
+                        "tenant_id"
+                    ),
+                    "tenant_seller_id": metadata.get(
+                        "tenant_seller_id"
+                    ),
+                    "seller_id": metadata.get(
+                        "seller_id"
+                    ),
+                    "marketplace": metadata.get(
+                        "platform"
+                    ),
+                    "operation": task.get(
+                        "name"
+                    ),
+                }
+
+                log_handle.write(
+                    (
+                        "[JOB_CONTEXT] "
+                        + json.dumps(
+                            log_context,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    ).encode("utf-8")
                 )
 
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            task_id = f"{name}_{stamp}_{uuid.uuid4().hex[:7]}"
-            metadata_value = dict(metadata or {})
-            tenant_part = f"_t{int(metadata_value.get('tenant_id') or 0)}"
-            seller_part = f"_s{int(metadata_value.get('tenant_seller_id') or 0)}"
-            log_path = self.logs_dir / (
-                f"{stamp}_{name}{tenant_part}{seller_part}_{task_id[-7:]}.log"
-            )
-            log_handle = log_path.open("ab", buffering=0)
-            log_context = {
-                "timestamp": now_iso(),
-                "job_id": task_id,
-                "tenant_id": metadata_value.get("tenant_id"),
-                "tenant_seller_id": metadata_value.get("tenant_seller_id"),
-                "seller_id": metadata_value.get("seller_id"),
-                "marketplace": metadata_value.get("platform"),
-                "operation": name,
-            }
-            log_handle.write(
-                ("[JOB_CONTEXT] " + json.dumps(
-                    log_context, ensure_ascii=False, separators=(",", ":")
-                ) + "\n").encode("utf-8")
-            )
             kwargs: dict[str, Any] = {}
             creationflags = 0
+
             if os.name == "nt":
-                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+                creationflags = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                )
             else:
                 kwargs["start_new_session"] = True
+
             child_env = os.environ.copy()
+
             child_env["PYTHONUTF8"] = "1"
             child_env["PYTHONIOENCODING"] = "utf-8"
             child_env["PYTHONUNBUFFERED"] = "1"
+
             process = subprocess.Popen(
-                command,
+                list(task.get("command") or []),
                 cwd=self.root,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
@@ -466,41 +600,393 @@ class TaskManager:
                 env=child_env,
                 **kwargs,
             )
+
+        except Exception:
+            log_handle.close()
+            raise
+
+        try:
+            process_create_time = psutil.Process(
+                process.pid
+            ).create_time()
+
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+        ):
+            process_create_time = None
+
+        try:
+            manager_create_time = psutil.Process(
+                os.getpid()
+            ).create_time()
+
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+        ):
+            manager_create_time = None
+
+        started_at = now_iso()
+
+        task["status"] = "running"
+        task["running"] = True
+
+        task["pid"] = process.pid
+        task["process_create_time"] = (
+            process_create_time
+        )
+
+        task["manager_pid"] = os.getpid()
+        task["manager_create_time"] = (
+            manager_create_time
+        )
+
+        task["started_at"] = started_at
+        task["finished_at"] = None
+        task["exit_code"] = None
+
+        task["message"] = (
+            "Операция запущена"
+        )
+
+        queued_at = str(
+            task.get("queued_at") or ""
+        ).strip()
+
+        if queued_at:
             try:
-                process_create_time = psutil.Process(process.pid).create_time()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                process_create_time = None
-            try:
-                manager_create_time = psutil.Process(os.getpid()).create_time()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                manager_create_time = None
-            task = {
-                "id": task_id,
-                "name": name,
-                "label": label,
-                "status": "running",
-                "running": True,
-                "pid": process.pid,
-                "process_create_time": process_create_time,
-                "manager_pid": os.getpid(),
-                "manager_create_time": manager_create_time,
-                "command": command,
-                "resources": resources_value,
-                "metadata": metadata_value,
-                "log_file": str(log_path),
-                "started_at": now_iso(),
-                "finished_at": None,
-                "exit_code": None,
-                "message": "Операция запущена",
-            }
+                queued_time = datetime.fromisoformat(
+                    queued_at
+                )
+
+                started_time = datetime.fromisoformat(
+                    started_at
+                )
+
+                task["queue_wait_seconds"] = round(
+                    max(
+                        0.0,
+                        (
+                            started_time
+                            - queued_time
+                        ).total_seconds(),
+                    ),
+                    3,
+                )
+
+            except ValueError:
+                pass
+
+        self.processes[task_id] = process
+        self.log_handles[task_id] = (
+            log_handle
+        )
+
+        return process
+
+    def _dispatch_queued(self) -> None:
+        launched: list[
+            tuple[
+                str,
+                subprocess.Popen[bytes],
+            ]
+        ] = []
+
+        with self._state_guard():
             state = self._load()
-            state.setdefault("tasks", []).insert(0, task)
-            state["tasks"] = state["tasks"][:150]
+
+            active = self._active_tasks(
+                state
+            )
+
+            capacity = max(
+                0,
+                self.max_parallel - len(active),
+            )
+
+            if capacity <= 0:
+                return
+
+            used_resources = {
+                str(resource)
+                for task in active
+                for resource in task.get(
+                    "resources",
+                    [],
+                )
+            }
+
+            queued = sorted(
+                [
+                    task
+                    for task in state.get(
+                        "tasks",
+                        [],
+                    )
+                    if (
+                        task.get("status")
+                        == "queued"
+                    )
+                ],
+                key=self._task_order_key,
+            )
+
+            changed = False
+
+            for task in queued:
+                if capacity <= 0:
+                    break
+
+                resources = {
+                    str(resource)
+                    for resource in task.get(
+                        "resources",
+                        [],
+                    )
+                }
+
+                # Do not allow a shared browser/profile
+                # to block unrelated marketplace jobs.
+                if resources & used_resources:
+                    continue
+
+                try:
+                    process = (
+                        self._launch_task_locked(
+                            task
+                        )
+                    )
+
+                except Exception as exc:
+                    task["status"] = "failed"
+                    task["running"] = False
+                    task["pid"] = None
+                    task["exit_code"] = -1
+                    task["finished_at"] = now_iso()
+
+                    task["message"] = (
+                        "Не удалось запустить "
+                        "операцию из очереди: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+                    changed = True
+                    continue
+
+                used_resources.update(
+                    resources
+                )
+
+                capacity -= 1
+                changed = True
+
+                launched.append(
+                    (
+                        str(task["id"]),
+                        process,
+                    )
+                )
+
+            if changed:
+                state["tasks"] = (
+                    self._trim_tasks(
+                        state.get(
+                            "tasks",
+                            [],
+                        )
+                    )
+                )
+
+                self._save(state)
+
+        for task_id, process in launched:
+            threading.Thread(
+                target=self._watch,
+                args=(
+                    task_id,
+                    process,
+                ),
+                daemon=True,
+                name=(
+                    "task-watch-"
+                    f"{task_id[-12:]}"
+                ),
+            ).start()
+
+    def start(
+        self,
+        name: str,
+        label: str,
+        command: list[str],
+        resources: list[str] | tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
+        *,
+        queue_if_busy: bool = False,
+    ) -> dict[str, Any]:
+        resources_value = sorted(
+            {
+                str(item)
+                for item in (resources or [])
+                if str(item).strip()
+            }
+        )
+
+        metadata_value = dict(
+            metadata or {}
+        )
+
+        process: subprocess.Popen[bytes] | None = None
+
+        with self._state_guard():
+            state = self._load()
+
+            active = self._active_tasks(
+                state
+            )
+
+            used = {
+                str(resource)
+                for task in active
+                for resource in task.get(
+                    "resources",
+                    [],
+                )
+            }
+
+            conflict = sorted(
+                set(resources_value) & used
+            )
+
+            at_capacity = (
+                len(active) >= self.max_parallel
+            )
+
+            already_queued = any(
+                task.get("status") == "queued"
+                for task in state.get(
+                    "tasks",
+                    [],
+                )
+            )
+            queued_count = sum(
+                1
+                for task in state.get("tasks", [])
+                if task.get("status") == "queued"
+            )
+
+            if (
+                not queue_if_busy
+                and at_capacity
+            ):
+                raise RuntimeError(
+                    "Одновременно можно выполнять не более "
+                    f"{self.max_parallel} операций."
+                )
+
+            if (
+                not queue_if_busy
+                and conflict
+            ):
+                owner = next(
+                    (
+                        task
+                        for task in active
+                        if (
+                            set(
+                                task.get(
+                                    "resources",
+                                    [],
+                                )
+                            )
+                            & set(conflict)
+                        )
+                    ),
+                    None,
+                )
+
+                raise RuntimeError(
+                    "Сейчас выполняется «"
+                    f"{(owner or {}).get('label') or 'другая операция'}». "
+                    "Для этого продавца уже есть активная операция; общий профиль и "
+                    "каталог продавца используются последовательно."
+                )
+
+            if (
+                queue_if_busy
+                and (at_capacity or bool(conflict) or already_queued)
+                and queued_count >= self.max_queue
+            ):
+                raise RuntimeError(
+                    "Очередь операций заполнена. Повторите запуск после завершения "
+                    "части задач."
+                )
+
+            task = self._new_task_record(
+                name=name,
+                label=label,
+                command=command,
+                resources=resources_value,
+                metadata=metadata_value,
+            )
+
+            state.setdefault(
+                "tasks",
+                [],
+            ).insert(
+                0,
+                task,
+            )
+
+            should_queue = (
+                queue_if_busy
+                and (
+                    at_capacity
+                    or bool(conflict)
+                    or already_queued
+                )
+            )
+
+            if not should_queue:
+                process = (
+                    self._launch_task_locked(
+                        task
+                    )
+                )
+
+            state["tasks"] = (
+                self._trim_tasks(
+                    state["tasks"]
+                )
+            )
+
             self._save(state)
-            self.processes[task_id] = process
-            self.log_handles[task_id] = log_handle
-            threading.Thread(target=self._watch, args=(task_id, process), daemon=True).start()
-            return self._enrich(task)
+
+        if process is not None:
+            threading.Thread(
+                target=self._watch,
+                args=(
+                    str(task["id"]),
+                    process,
+                ),
+                daemon=True,
+                name=(
+                    "task-watch-"
+                    f"{str(task['id'])[-12:]}"
+                ),
+            ).start()
+
+            return self._enrich(
+                task
+            )
+
+        # A slot might have become free between
+        # enqueue and returning the response.
+        self._dispatch_queued()
+
+        return self.state(
+            str(task["id"])
+        )
 
     def _watch(self, task_id: str, process: subprocess.Popen[bytes]) -> None:
         code = process.wait()
@@ -533,7 +1019,8 @@ class TaskManager:
             if final_result:
                 reason = str(final_result.get("reason") or "collector_failed")
                 task["result_reason"] = reason
-                task["message"] = RESULT_MESSAGES.get(reason, RESULT_MESSAGES["collector_failed"])
+                if reason in RESULT_MESSAGES:
+                    task["message"] = RESULT_MESSAGES[reason]
             elif task["status"] == "failed":
                 task["message"] = RESULT_MESSAGES["collector_failed"]
             self._save(state)
@@ -543,19 +1030,38 @@ class TaskManager:
                     handle.close()
             finally:
                 self.processes.pop(task_id, None)
+        self._dispatch_queued()
 
     def stop(self, task_id: str) -> dict[str, Any]:
         with self._state_guard():
-            task = self.state(task_id)
-            if not task.get("running") or not task.get("pid"):
-                return task
-            pid = int(task["pid"])
             state = self._load()
-            stored = next((item for item in state.get("tasks", []) if item.get("id") == task_id), None)
-            if stored:
+            stored = next(
+                (item for item in state.get("tasks", []) if item.get("id") == task_id),
+                None,
+            )
+            if not stored:
+                return {"id": task_id, "status": "missing", "running": False}
+            if stored.get("status") == "queued":
+                stored["status"] = "stopped"
+                stored["running"] = False
+                stored["finished_at"] = now_iso()
+                stored["message"] = "Stopped before execution."
+                self._save(state)
+                queued_task = self._enrich(stored)
+                pid = None
+            elif stored.get("status") != "running" or not stored.get("pid"):
+                return self._enrich(stored)
+            else:
+                queued_task = None
+                pid = int(stored["pid"])
+            if queued_task is None:
                 stored["stop_requested_at"] = now_iso()
                 stored["message"] = "Выполняется безопасная остановка"
                 self._save(state)
+
+        if queued_task is not None:
+            self._dispatch_queued()
+            return queued_task
 
         try:
             process = psutil.Process(pid)
@@ -599,17 +1105,24 @@ class TaskManager:
                 stored["finished_at"] = now_iso()
                 stored["message"] = "Операция остановлена. Уже сохранённые позиции не потеряны."
                 self._save(state)
-                return self._enrich(stored)
-        return {"id": task_id, "status": "stopped", "running": False}
+                result = self._enrich(stored)
+            else:
+                result = {"id": task_id, "status": "stopped", "running": False}
+        self._dispatch_queued()
+        return result
 
     def stop_all(self) -> list[dict[str, Any]]:
-        return [self.stop(str(task["id"])) for task in list(self.running())]
+        return [
+            self.stop(str(task["id"]))
+            for task in self.raw_states()
+            if task.get("status") in {"queued", "running"}
+        ]
 
 
     def delete(self, task_id: str, delete_log: bool = True) -> dict[str, Any]:
         with self._state_guard():
             current = self.state(task_id)
-            if current.get("running"):
+            if current.get("status") in {"queued", "running"}:
                 raise RuntimeError("Сначала остановите выполняемую операцию.")
             state = self._load()
             task = next((item for item in state.get("tasks", []) if item.get("id") == task_id), None)
@@ -629,7 +1142,7 @@ class TaskManager:
             state = self._load()
             active, removed = [], []
             for task in state.get("tasks", []):
-                if task.get("status") == "running" and self._task_process_alive(task):
+                if task.get("status") in {"queued", "running"}:
                     active.append(task)
                 else:
                     removed.append(task)

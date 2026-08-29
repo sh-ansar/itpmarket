@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import html
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 
 def _esc(value: Any) -> str:
@@ -21,7 +20,7 @@ def _pct(value: float) -> str:
 def generate_dashboard(db_path: Path, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect_database(db_path)
-    conn.row_factory = sqlite3.Row
+    configure_connection(conn, busy_timeout=30000)
 
     counts = {
         "products": conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],

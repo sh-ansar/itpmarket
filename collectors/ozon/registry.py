@@ -5,11 +5,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 
 SCHEMA = r"""
@@ -245,7 +244,7 @@ class Registry:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = connect_database(path)
-        self.conn.row_factory = sqlite3.Row
+        configure_connection(self.conn, foreign_keys=True, busy_timeout=30000)
         self.conn.executescript(SCHEMA)
         self.backfill_source_memberships()
         self.reset_stale_running_tasks()

@@ -22,7 +22,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from config import ROOT, get_secret_key
 from schema import ensure_database
-from storage.postgres_compat import PostgresConnection, connect_database
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database
 
 
 LOGGER = logging.getLogger(__name__)
@@ -191,11 +191,9 @@ class EmailService:
         )
 
     def _connect(self):
-        conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = __import__("sqlite3").Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(
+            connect_database(self.db_path, timeout=30), foreign_keys=True, busy_timeout=30000
+        )
 
     @staticmethod
     def _category_for_template(template_key: str) -> str:

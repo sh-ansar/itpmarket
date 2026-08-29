@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import math
-import sqlite3
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from storage.postgres_compat import PostgresConnection, connect_database
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database
 
 
 def now_iso() -> str:
@@ -41,12 +40,9 @@ class NotificationService:
         """Attach the optional transactional-email channel after app startup."""
         self.email_service = email_service
 
-    def _connect(self) -> sqlite3.Connection | PostgresConnection:
+    def _connect(self) -> PostgresConnection | Any:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     def ensure_schema(self) -> None:
         conn = self._connect()
@@ -240,7 +236,9 @@ class NotificationService:
             with self._cache_lock:
                 if self._task_states.get(task_id) == status:
                     continue
-            if status == "running":
+            if status == "queued":
+                title, message, level = "Операция поставлена в очередь", label, "info"
+            elif status == "running":
                 title, message, level = "Синхронизация запущена", label, "info"
             elif status == "completed":
                 title, message, level = "Синхронизация завершена", label, "success"

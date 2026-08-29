@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from schema import ensure_database
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 try:
     from .kaspi_market_v9_1 import Database, enriched_comparison_rows
 except ImportError:
@@ -88,8 +87,7 @@ def main(args: argparse.Namespace) -> int:
     else:
         scope = "all"
 
-    conn = connect_database(db_path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    conn = configure_connection(connect_database(db_path, timeout=30), busy_timeout=30000)
     try:
         tenant_id = int(args.tenant_id or 0)
         if not tenant_id and int(args.user_id or 0):

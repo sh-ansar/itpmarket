@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import hashlib
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from invoice_pdf_service import (
 )
 from storage.postgres_compat import (
     PostgresConnection,
+    configure_connection,
     connect_database,
 )
 from subscription_service import SubscriptionError
@@ -145,19 +145,10 @@ class BillingService:
 
     def _connect(
         self,
-    ) -> sqlite3.Connection:
-        conn = connect_database(
-            self.db_path,
-            timeout=30,
+    ) -> Any:
+        return configure_connection(
+            connect_database(self.db_path, timeout=30), foreign_keys=True, busy_timeout=30000
         )
-        conn.row_factory = sqlite3.Row
-        conn.execute(
-            "PRAGMA foreign_keys=ON"
-        )
-        conn.execute(
-            "PRAGMA busy_timeout=30000"
-        )
-        return conn
 
     def ensure_invoice_schema(self) -> None:
         conn = self._connect()
@@ -854,7 +845,7 @@ class BillingService:
 
     def _next_invoice_number(
         self,
-        conn: sqlite3.Connection,
+        conn: Any,
         moment: datetime,
     ) -> str:
         year = int(

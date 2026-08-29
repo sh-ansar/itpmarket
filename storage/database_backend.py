@@ -19,8 +19,14 @@ class DatabaseSettings:
 
     @classmethod
     def from_environment(cls) -> "DatabaseSettings":
-        raw_backend = str(os.environ.get("ITP_STORAGE_BACKEND") or "sqlite").casefold()
-        production = str(os.environ.get("ITP_ENV") or "").casefold() == "production"
+        raw_backend = str(os.environ.get("ITP_STORAGE_BACKEND") or "").casefold()
+        environment = str(os.environ.get("ITP_ENV") or "").casefold()
+        production = environment == "production"
+        if not raw_backend and environment in {"production", "staging", "preproduction"}:
+            raise RuntimeError(
+                "Для production-like runtime явно укажите ITP_STORAGE_BACKEND=postgresql."
+            )
+        raw_backend = raw_backend or "sqlite"
         if raw_backend not in {item.value for item in DatabaseBackend}:
             raise RuntimeError("ITP_STORAGE_BACKEND должен быть sqlite или postgresql.")
         backend = DatabaseBackend(raw_backend)

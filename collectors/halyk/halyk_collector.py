@@ -8,7 +8,6 @@ SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 import argparse
 import json
 import re
-import sqlite3
 import subprocess
 import sys
 import time
@@ -25,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 from schema import ensure_database
 from catalog_configuration_service import CatalogConfigurationService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 BASE_URL = "https://halykmarket.kz"
 SHOP_ID = "693ff081028570920fd8a6b971eb5e"
@@ -266,9 +265,7 @@ def search_params(args: argparse.Namespace, product_id: str) -> dict[str, Any]:
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = connect_database(db_path, timeout=60)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=60000")
-    return conn
+    return configure_connection(conn, busy_timeout=60000)
 
 
 def mark_run(conn: sqlite3.Connection, run_id: str, action: str, args: argparse.Namespace, status: str) -> None:

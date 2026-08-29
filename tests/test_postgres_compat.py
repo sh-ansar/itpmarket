@@ -45,6 +45,9 @@ class PostgresCompatibilityTests(unittest.TestCase):
         self.assertIn("TO_CHAR(CURRENT_TIMESTAMP", select)
         self.assertIn("LOWER(email)=LOWER(%s)", select)
 
+        begin, _ = connection.translate("BEGIN IMMEDIATE")
+        self.assertEqual("BEGIN", begin)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from storage.postgres_compat import PostgresConnection, connect_database, integrity_error_types
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database, integrity_error_types
 
 from marketplace_registry import MARKETPLACE_CODES
 
@@ -92,12 +91,9 @@ class SubscriptionService:
         self.ensure_payment_schema()
         self.ensure_seed_data()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> Any:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     def ensure_payment_schema(self) -> None:
         conn = self._connect()
@@ -139,7 +135,7 @@ class SubscriptionService:
             conn.close()
 
     @staticmethod
-    def _plan_row(conn: sqlite3.Connection, plan_id: int) -> dict[str, Any]:
+    def _plan_row(conn: Any, plan_id: int) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM subscription_plans WHERE id=?", (int(plan_id),)).fetchone()
         if not row:
             raise SubscriptionError("Пакет не найден.")
@@ -452,7 +448,7 @@ class SubscriptionService:
 
     def _active_subscription(
         self,
-        conn: sqlite3.Connection,
+        conn: Any,
         tenant_id: int,
     ) -> dict[str, Any] | None:
         now = datetime.now().astimezone()

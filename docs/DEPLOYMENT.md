@@ -209,6 +209,14 @@ are rejected by the automatic deployment path.
 
 An already applied migration file must never be edited. A new migration must be
 created instead.
+# Operation queue after restart
+
+`data/tasks_state.json` is operational state and must not be deleted during a
+deployment. On startup, live running child processes are recovered by identity,
+and persisted queued tasks are dispatched when capacity is available. The
+default queue bound is 1000 waiting operations; reaching it returns an explicit
+capacity error, while reaching `max_parallel_tasks` alone does not reject work.
+
 # Ozon browser prerequisite
 
 Register `\Spyon\Spyon Ozon Browsers` from the interactive RDP account with

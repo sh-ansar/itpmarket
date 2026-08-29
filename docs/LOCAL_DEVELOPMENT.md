@@ -143,6 +143,14 @@ cancellation, and safe reissue of an unpaid invoice.
 
 The password reset regression test verifies the complete flow from requesting
 an email link through changing the password and consuming the one-use token.
+
+## Queue verification
+
+Run `python -m unittest tests.test_task_queue -v` after changes to operation
+scheduling. The production API and scheduler pass `queue_if_busy=True`; direct
+callers can still use `queue_if_busy=False` when a fail-fast `RuntimeError` is
+explicitly required by an internal test or tool. The durable JSON state keeps
+all active (`queued` and `running`) tasks and trims only terminal history.
 # Ozon interactive browser runtime
 
 On Windows production deployments, start `scripts\register_ozon_browser_task.ps1`

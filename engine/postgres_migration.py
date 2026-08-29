@@ -283,6 +283,29 @@ def inventory(path: Path, target_schema: str) -> list[TablePlan]:
         conn.close()
 
 
+def dependency_order(path: Path, plans: list[TablePlan]) -> list[TablePlan]:
+    """Order parent tables before children for a constrained PostgreSQL target."""
+    by_name = {plan.table: plan for plan in plans}
+    dependencies = {
+        plan.table: {
+            str(item["table"])
+            for item in sqlite_table_metadata(path, plan.table)["foreign_keys"]
+            if str(item["table"]) in by_name and str(item["table"]) != plan.table
+        }
+        for plan in plans
+    }
+    ordered: list[TablePlan] = []
+    unresolved = set(by_name)
+    while unresolved:
+        ready = sorted(name for name in unresolved if not (dependencies[name] & unresolved))
+        if not ready:
+            ready = [sorted(unresolved)[0]]
+        for name in ready:
+            ordered.append(by_name[name])
+            unresolved.remove(name)
+    return ordered
+
+
 def row_digest(columns: list[str], row: sqlite3.Row) -> str:
     payload = [row[column] for column in columns]
     encoded = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
@@ -317,7 +340,7 @@ def migrate_append_only(
         from psycopg import sql
     except ImportError as exc:
         raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
-    plans = inventory(source_path, target_schema)
+    plans = dependency_order(source_path, inventory(source_path, target_schema))
     copied = 0
     skipped = 0
     with psycopg.connect(database_url) as target:
@@ -396,6 +419,40 @@ def _canonical_digest(values: list[Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def verify_metadata_values(
+    source_values: dict[str, Any],
+    target_values: dict[str, Any],
+    owned_metadata: set[str],
+) -> dict[str, Any]:
+    """Verify legacy metadata while preserving canonical PostgreSQL markers."""
+    missing = sorted(set(source_values) - set(target_values))
+    changed = sorted(
+        key
+        for key in source_values.keys() & target_values.keys()
+        if source_values[key] != target_values[key]
+        and key not in owned_metadata
+    )
+    allowed = sorted(
+        key
+        for key in set(target_values) - set(source_values)
+        if key in owned_metadata
+    )
+    unexpected = sorted(
+        key
+        for key in set(target_values) - set(source_values)
+        if key not in owned_metadata
+    )
+    return {
+        "missing": missing,
+        "changed": changed,
+        "allowed_schema_rows": allowed,
+        "unexpected_target_rows": unexpected,
+        "verified_rows": len(source_values) - len(missing) - len(changed),
+        "count_ok": not missing and not changed,
+        "digest_ok": not missing and not changed,
+    }
+
+
 def verify_migration(
     source_path: Path, target_schema: str, database_url: str,
 ) -> dict[str, Any]:
@@ -404,10 +461,31 @@ def verify_migration(
         from psycopg import sql
     except ImportError as exc:
         raise RuntimeError("Установите зависимости из requirements-postgres.txt.") from exc
+    from engine.postgres_migrations import schema_owned_metadata_keys
     results = []
+    owned_metadata = schema_owned_metadata_keys(Path(__file__).resolve().parents[1])
     with psycopg.connect(database_url) as target:
         with target.cursor() as cursor:
             for plan in inventory(source_path, target_schema):
+                if target_schema == "app" and plan.table == "metadata":
+                    source_values = {
+                        str(values[0]): values[1]
+                        for _, _, values in source_rows(source_path, plan)
+                    }
+                    cursor.execute("SELECT key,value FROM app.metadata")
+                    target_values = {str(row[0]): row[1] for row in cursor.fetchall()}
+                    metadata_result = verify_metadata_values(
+                        source_values,
+                        target_values,
+                        owned_metadata,
+                    )
+                    results.append({
+                        "table": plan.table,
+                        "source_rows": len(source_values),
+                        "target_rows": len(target_values),
+                        **metadata_result,
+                    })
+                    continue
                 source_digests = sorted(
                     _canonical_digest(values)
                     for _, _, values in source_rows(source_path, plan)
@@ -424,15 +502,20 @@ def verify_migration(
                 digest_ok = source_digests == target_digests
                 results.append({
                     "table": plan.table, "source_rows": source_count,
-                    "target_rows": target_count, "count_ok": source_count == target_count,
-                    "digest_ok": digest_ok,
+                    "target_rows": target_count, "verified_rows": source_count if digest_ok else 0,
+                    "count_ok": source_count == target_count, "digest_ok": digest_ok,
+                    "missing": [], "changed": [] if digest_ok else ["digest_mismatch"],
+                    "allowed_schema_rows": [], "unexpected_target_rows": [],
                 })
         target.rollback()
     return {
-        "ok": all(item["count_ok"] and item["digest_ok"] for item in results),
+        "ok": all(item["count_ok"] and item["digest_ok"] and not item["unexpected_target_rows"] for item in results),
         "schema": target_schema, "tables": results,
         "source_rows": sum(item["source_rows"] for item in results),
         "target_rows": sum(item["target_rows"] for item in results),
+        "legacy_rows_verified": sum(item["verified_rows"] for item in results),
+        "schema_owned_target_rows": sum(len(item["allowed_schema_rows"]) for item in results),
+        "unexpected_target_rows": sum(len(item["unexpected_target_rows"]) for item in results),
     }
 
 

@@ -68,7 +68,7 @@ class SchedulerService:
                 )
                 continue
             task = self.task_manager.state(task_id)
-            if task.get("running"):
+            if task.get("status") in {"queued", "running"}:
                 threading.Thread(
                     target=self._watch,
                     args=(run_id, schedule_id, task_id),
@@ -186,6 +186,7 @@ class SchedulerService:
                             else [platform] if platform != "system" else []
                         ),
                     },
+                    queue_if_busy=True,
                 )
                 self.saas.attach_task_to_run(run_id, str(task["id"]))
                 threading.Thread(
@@ -205,7 +206,7 @@ class SchedulerService:
     def _watch(self, run_id: int, schedule_id: int, task_id: str) -> None:
         while not self.stop_event.wait(5):
             task = self.task_manager.state(task_id)
-            if task.get("running"):
+            if task.get("status") in {"queued", "running"}:
                 continue
             self.saas.finish_schedule_run(
                 run_id,

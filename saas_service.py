@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 import zlib
 import re
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from storage.postgres_compat import PostgresConnection, connect_database, database_error_types
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database, database_error_types
 
 from public_product_service import PUBLIC_CAPABILITIES, CONSENT_VERSION
 from marketplace_registry import MARKETPLACE_BY_CODE, marketplace_catalog, marketplace_for_action
@@ -341,10 +340,7 @@ class SaaSService:
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     def _ensure_identity_uniqueness_guards(self) -> None:
         """Reject new duplicate company BINs/emails without rewriting legacy rows.

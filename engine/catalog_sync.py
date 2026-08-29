@@ -6,7 +6,6 @@ import json
 import math
 import random
 import re
-import sqlite3
 import sys
 import time
 from datetime import datetime
@@ -20,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from schema import ensure_database
 from catalog_configuration_service import CatalogConfigurationService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 try:
     from . import kaspi_search_compare_v8_2 as core
 except ImportError:
@@ -640,10 +639,7 @@ async def crawl_root_fallback(
 async def run(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     ensure_database(db_path)
-    conn = connect_database(db_path, timeout=60)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=60000")
+    conn = configure_connection(connect_database(db_path, timeout=60), journal_mode="WAL", busy_timeout=60000)
     run_id = conn.execute(
         "INSERT INTO catalog_sync_runs(status,started_at) VALUES('running',?)", (now_iso(),)
     ).lastrowid

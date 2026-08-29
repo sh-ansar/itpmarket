@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from engine.postgres_initialize import provisioned_initialize
 from engine.postgres_migrations import (
     AUTO_MARKER,
     BASELINE_MARKERS,
@@ -105,7 +107,6 @@ class PostgresMigrationRunnerTests(
                         "COMMIT;\n"
                     ),
                 )
-
     def test_current_migrations_are_known_baseline_or_auto(
         self,
     ) -> None:
@@ -131,6 +132,27 @@ class PostgresMigrationRunnerTests(
                     path,
                     text,
                 )
+
+    def test_provisioned_initialize_refreshes_a_ready_schema(self) -> None:
+        ready = {
+            "ready": True,
+            "empty": False,
+            "expected_tables": 111,
+            "present_tables": 111,
+            "missing": {},
+        }
+        with patch(
+            "engine.postgres_initialize.initialization_state",
+            side_effect=[ready, ready],
+        ), patch(
+            "engine.postgres_initialize.provision_schema",
+            return_value={"ok": True, "schemas": {"app": 1}},
+        ) as provision:
+            result = provisioned_initialize(ROOT, "postgresql://example.test/db")
+
+        self.assertTrue(result["ready"])
+        self.assertFalse(result["initialized"])
+        provision.assert_called_once_with("postgresql://example.test/db")
 
 
 if __name__ == "__main__":

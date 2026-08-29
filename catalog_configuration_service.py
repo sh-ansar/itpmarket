@@ -3,14 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
 from marketplace_registry import MARKETPLACE_CODES
 from subscription_service import SubscriptionLimitError, SubscriptionService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 from storage.postgres_compat import PostgresConnection
 
 
@@ -117,12 +116,10 @@ class CatalogConfigurationService:
         self.db_path = Path(db_path)
         self.ozon_db_path = Path(ozon_db_path) if ozon_db_path else None
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+    def _connect(self) -> Any:
+        return configure_connection(
+            connect_database(self.db_path, timeout=30), foreign_keys=True, busy_timeout=30000
+        )
 
     def _position_entitlement(self, tenant_id: int, marketplace_code: str) -> dict[str, Any]:
         """Load the comparatively static plan limit before taking a catalog write lock.
@@ -203,7 +200,7 @@ class CatalogConfigurationService:
             conn.close()
 
     @staticmethod
-    def _begin_tenant_write(conn: sqlite3.Connection, tenant_id: int) -> None:
+    def _begin_tenant_write(conn: Any, tenant_id: int) -> None:
         """Serialize catalog capacity decisions for one tenant."""
         if isinstance(conn, PostgresConnection):
             conn.execute("SELECT id FROM tenants WHERE id=? FOR UPDATE", (int(tenant_id),))
@@ -212,7 +209,7 @@ class CatalogConfigurationService:
 
     @staticmethod
     def _validated_seller_id(
-        conn: sqlite3.Connection,
+        conn: Any,
         tenant_id: int,
         marketplace_code: str,
         tenant_seller_id: int | None,
@@ -241,7 +238,7 @@ class CatalogConfigurationService:
 
     @staticmethod
     def _active_position_count(
-        conn: sqlite3.Connection, tenant_id: int, marketplace_code: str
+        conn: Any, tenant_id: int, marketplace_code: str
     ) -> int:
         seller_count = int(conn.execute(
             """SELECT COUNT(*) FROM tenant_seller_catalog_products
@@ -258,7 +255,7 @@ class CatalogConfigurationService:
 
     @staticmethod
     def _seller_product_active(
-        conn: sqlite3.Connection,
+        conn: Any,
         tenant_id: int,
         marketplace_code: str,
         tenant_seller_id: int | None,
@@ -289,7 +286,7 @@ class CatalogConfigurationService:
         *,
         catalog_id: int | None = None,
         tenant_seller_id: int | None = None,
-        _conn: sqlite3.Connection | None = None,
+        _conn: Any | None = None,
     ) -> None:
         platform = str(marketplace_code)
         if platform not in MARKETPLACE_CODES:
@@ -587,7 +584,7 @@ class CatalogConfigurationService:
         codes = [str(value).strip() for value in (product_codes or []) if str(value).strip()]
         source_path = Path(source_db_path) if source_db_path else self.db_path
         conn = connect_database(source_path, timeout=30)
-        conn.row_factory = sqlite3.Row
+        configure_connection(conn, foreign_keys=True, busy_timeout=30000)
         try:
             if codes_were_supplied and not codes:
                 rows = []
@@ -692,7 +689,7 @@ class CatalogConfigurationService:
         source_product_code: str,
         raw_attributes: Any,
         *,
-        _conn: sqlite3.Connection | None = None,
+        _conn: Any | None = None,
     ) -> int:
         items = _attribute_items(raw_attributes)
         if not items:

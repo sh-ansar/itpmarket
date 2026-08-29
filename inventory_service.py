@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -10,7 +9,7 @@ from typing import Any
 
 from marketplace_registry import parse_product_code
 from storage.database_backend import DatabaseBackend, DatabaseSettings
-from storage.postgres_compat import connect_database, database_error_types
+from storage.postgres_compat import configure_connection, connect_database, database_error_types
 
 
 def now_iso() -> str:
@@ -34,10 +33,7 @@ class InventoryService:
 
     def _connect(self):
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     @staticmethod
     def _begin_write(conn) -> None:

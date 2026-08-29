@@ -278,7 +278,6 @@ def persist(args: argparse.Namespace, products: list[dict[str, Any]], seller_nam
         int(args.tenant_id), MARKETPLACE_CODE, products,
         tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
     )
-    import sqlite3
 
     conn = connect_database(db_path, timeout=30)
     try:
@@ -330,7 +329,6 @@ def run(args: argparse.Namespace) -> int:
         return 0
     except Exception as exc:
         if args.action != "probe" and int(args.tenant_id or 0) > 0:
-            import sqlite3
             conn = connect_database(args.db, timeout=30)
             try:
                 stamp = now_iso()

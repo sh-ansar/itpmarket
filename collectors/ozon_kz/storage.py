@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 
 SCHEMA = """
@@ -76,10 +75,7 @@ def connect(path: Path) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect_database(path, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
 
 def ensure_schema(path: Path) -> None:

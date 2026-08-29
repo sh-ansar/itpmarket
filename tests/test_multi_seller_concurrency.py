@@ -787,6 +787,9 @@ class TaskAndRuntimeIsolationTests(unittest.TestCase):
             def finish_schedule_run(self, *args):
                 self.finished.append(args)
 
+            def attach_task_to_run(self, *_args):
+                return None
+
         with tempfile.TemporaryDirectory(prefix="scheduler_manual_") as folder:
             root = Path(folder)
             release = root / "release"
@@ -837,15 +840,21 @@ class TaskAndRuntimeIsolationTests(unittest.TestCase):
                 },
             )
             scheduler.run_due_once()
-            self.assertEqual(1, len(fake.finished))
-            self.assertEqual("failed", fake.finished[0][2])
-            self.assertIn("продав", fake.finished[0][3].casefold())
+            scheduled = next(
+                task for task in manager.raw_states()
+                if task.get("id") != manual.get("id")
+            )
+            self.assertEqual("queued", scheduled["status"])
             process = manager.processes[str(manual["id"])]
             release.touch()
             process.wait(timeout=10)
             deadline = time.monotonic() + 5
             while manager.state(str(manual["id"])).get("status") == "running" and time.monotonic() < deadline:
                 threading.Event().wait(0.01)
+            deadline = time.monotonic() + 5
+            while manager.state(str(scheduled["id"])).get("status") in {"queued", "running"} and time.monotonic() < deadline:
+                threading.Event().wait(0.01)
+            self.assertEqual("completed", manager.state(str(scheduled["id"]))["status"])
 
     def test_ozon_run_ids_are_collision_resistant(self) -> None:
         values = {run_id_for("sync") for _ in range(1000)}

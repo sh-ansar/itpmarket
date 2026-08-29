@@ -4,12 +4,11 @@ import hashlib
 import json
 import os
 import secrets
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 
 from marketplace_registry import MARKETPLACE_CODES
 from schema import ensure_database
@@ -47,11 +46,9 @@ class CredentialVault:
         self.db_path = Path(db_path)
         ensure_database(self.db_path)
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> Any:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return configure_connection(conn, foreign_keys=True)
 
     def put(
         self,

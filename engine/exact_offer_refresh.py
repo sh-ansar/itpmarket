@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import random
-import sqlite3
 import sys
 import time
 import uuid
@@ -18,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 from schema import ensure_database
 from catalog_configuration_service import CatalogConfigurationService
-from storage.postgres_compat import connect_database
+from storage.postgres_compat import configure_connection, connect_database
 try:
     from . import kaspi_search_compare_v8_2 as core
     from .kaspi_market_v9_1 import Database, capture_with_retries
@@ -59,9 +58,7 @@ def get_jobs(
     only_errors: bool,
     stale_hours: float,
 ) -> list[dict[str, Any]]:
-    conn = connect_database(db_path, timeout=60)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=60000")
+    conn = configure_connection(connect_database(db_path, timeout=60), busy_timeout=60000)
     where = ["COALESCE(m.active,1)=1", "c.product_url IS NOT NULL", "TRIM(c.product_url)<>''"]
     params: list[Any] = []
     tenant_join = ""

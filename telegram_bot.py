@@ -4,7 +4,6 @@ import hashlib
 import html
 import json
 import logging
-import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
@@ -16,7 +15,7 @@ from urllib.request import Request, urlopen
 
 from auth_service import AuthService
 from notification_service import now_iso
-from storage.postgres_compat import PostgresConnection, connect_database
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database
 
 
 LOGGER = logging.getLogger("spyon.telegram")
@@ -167,12 +166,9 @@ class TelegramLinkService:
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
 
-    def _connect(self) -> sqlite3.Connection | PostgresConnection:
+    def _connect(self) -> PostgresConnection | Any:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     @staticmethod
     def _public_link(row: Any) -> dict[str, Any] | None:
@@ -245,7 +241,7 @@ class TelegramLinkService:
 
     def _event(
         self,
-        conn: sqlite3.Connection | PostgresConnection,
+        conn: PostgresConnection | Any,
         user_id: int,
         tenant_id: int | None,
         event_type: str,
@@ -267,7 +263,7 @@ class TelegramLinkService:
         self,
         user_id: int,
         *,
-        connection: sqlite3.Connection | PostgresConnection | None = None,
+        connection: PostgresConnection | Any | None = None,
     ) -> dict[str, Any] | None:
         conn = connection or self._connect()
         try:

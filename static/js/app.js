@@ -178,12 +178,12 @@
     }catch(error){console.error(error)}
   }
   function closeNotifications(){const drawer=$('#notificationDrawer');if(drawer)drawer.hidden=true;$('#notificationButton')?.setAttribute('aria-expanded','false');}
-  const taskStatus = v=>t(`task_${v}`,({running:'Выполняется',completed:'Окончено',failed:'Ошибка',stopped:'Остановлено',interrupted:'Прервано'}[v]||v));
+  const taskStatus = v=>t(`task_${v}`,({queued:'В очереди',running:'Выполняется',completed:'Окончено',failed:'Ошибка',stopped:'Остановлено',interrupted:'Прервано'}[v]||v));
   const marketplaceLabel = v => ({kaspi:'Kaspi',ozon:'Ozon.ru',ozon_kz:'Ozon.kz',halyk_market:'Halyk Market',forte_market:'Forte Market',wildberries:'Wildberries',system:'Spyon'}[v]||v||'Spyon');
   const visibleMarketplaceCodes = () => ['kaspi','ozon','ozon_kz','halyk_market','forte_market','wildberries'].filter(code=>Boolean(user.marketplaces?.[code]));
   const platformCounts = o => visibleMarketplaceCodes().map(code=>`${marketplaceLabel(code)} ${number(({kaspi:o.kaspi_count||o.kaspi_products,ozon:o.ozon_count||o.ozon_products,ozon_kz:o.ozon_kz_count||o.ozon_kz_products,halyk_market:o.halyk_count||o.halyk_products,forte_market:o.forte_count||o.forte_products,wildberries:o.wildberries_count||o.wildberries_products})[code])}`).join(' · ') || '—';
   const platformReady = o => visibleMarketplaceCodes().map(code=>`${marketplaceLabel(code)} ${number(({kaspi:o.kaspi_market_analyzed_count,ozon:o.ozon_data_ready_count,ozon_kz:o.ozon_kz_data_ready_count,halyk_market:o.halyk_market_analyzed_count,forte_market:o.forte_market_analyzed_count,wildberries:o.wildberries_data_ready_count})[code])}/${number(({kaspi:o.kaspi_count||o.kaspi_products,ozon:o.ozon_count||o.ozon_products,ozon_kz:o.ozon_kz_count||o.ozon_kz_products,halyk_market:o.halyk_count||o.halyk_products,forte_market:o.forte_count||o.forte_products,wildberries:o.wildberries_count||o.wildberries_products})[code])}`).join(' · ') || '—';
-  const taskStatusTone = v=>({running:'info',completed:'success',failed:'danger',stopped:'warning',interrupted:'warning'}[v]||'neutral');
+  const taskStatusTone = v=>({queued:'info',running:'info',completed:'success',failed:'danger',stopped:'warning',interrupted:'warning'}[v]||'neutral');
   const durationText = seconds => { const total=Math.max(0, Math.round(Number(seconds||0))); if(total<60) return `${total} сек`; const mins=Math.floor(total/60); const secs=total%60; if(mins<60) return secs?`${mins} мин ${secs} сек`:`${mins} мин`; const hours=Math.floor(mins/60); const rest=mins%60; return rest?`${hours} ч ${rest} мин`:`${hours} ч`; };
   const operationLaunchers = [
     {platform:'operationPlatform', seller:'operationSeller', action:'operationAction', scope:'operationScope', launch:'launchOperation'},
@@ -239,6 +239,7 @@
     const message=cleanLogLine(task?.message || '');
     if(message) return message;
     return {
+      queued:t('task_queued_message','Операция ожидает запуска в очереди'),
       completed:t('task_completed_message','Операция завершена'),
       failed:t('task_failed_message','Операция завершилась с ошибкой'),
       interrupted:t('task_interrupted_message','Операция прервана'),
@@ -679,19 +680,20 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const names=new Set(RELATED_ACTIONS[item.id]||[item.id]);
       const related=tasks.filter(task=>names.has(task.name)&&String(taskPlatform(task))===String(item.platform)).sort((a,b)=>String(b.started_at||'').localeCompare(String(a.started_at||'')));
       const running=related.filter(task=>task.running);
-      const active=running[0]||related[0];
+      const activeTasks=related.filter(task=>task.running||task.status==='queued');
+      const active=activeTasks[0]||related[0];
       const lastStatus=active?taskStatus(active.status):t('schedule_never_run','Не запускалось');
       const lastTime=active?dateText(active.updated_at||active.started_at):t('schedule_never_run','Не запускалось');
       const tone=active?taskStatusTone(active.status):'neutral';
       const toneClass = tone==='success'?'success':tone==='danger'?'danger':tone==='warning'?'warning':'info';
-      const runningIds = running.map(t=>t.id||'').filter(Boolean).join(',');
-      const startBtn = !running.length?`<button class="primary start-op" data-action="${esc(item.id)}">${esc(t('start','Запустить'))}</button>`:'';
-      const stopBtn = running.length?`<button class="danger stop-op" data-task-ids="${esc(runningIds)}">${esc(t('stop','Остановить'))}</button>`:'';
+      const runningIds = activeTasks.map(t=>t.id||'').filter(Boolean).join(',');
+      const startBtn = !activeTasks.length?`<button class="primary start-op" data-action="${esc(item.id)}">${esc(t('start','Запустить'))}</button>`:'';
+      const stopBtn = activeTasks.length?`<button class="danger stop-op" data-task-ids="${esc(runningIds)}">${esc(t('stop','Остановить'))}</button>`:'';
       const percent=active?.progress?.percent==null?null:Math.max(0,Math.min(100,Number(active.progress.percent)||0));
       const progressText=active?taskSecondaryText(active):'';
-      const progressHtml=running.length?`<div class="operation-card-progress"><div class="operation-progress-track ${percent==null?'indeterminate':''}"><i style="${percent==null?'':`width:${percent}%`}"></i></div><div class="operation-progress-meta"><span>${esc(progressText||t('task_running','Выполняется'))}</span>${percent==null?'':`<b>${Math.round(percent)}%</b>`}</div></div>`:'';
+      const progressHtml=activeTasks.length?`<div class="operation-card-progress"><div class="operation-progress-track ${percent==null?'indeterminate':''}"><i style="${percent==null?'':`width:${percent}%`}"></i></div><div class="operation-progress-meta"><span>${esc(progressText||t('task_running','Выполняется'))}</span>${percent==null?'':`<b>${Math.round(percent)}%</b>`}</div></div>`:'';
       return `
-        <section class="operation-launch-card ${esc(toneClass)} ${running.length?'is-running':''}" ${active?.id?`data-open-task="${esc(active.id)}"`:''}>
+        <section class="operation-launch-card ${esc(toneClass)} ${activeTasks.length?'is-running':''}" ${active?.id?`data-open-task="${esc(active.id)}"`:''}>
           <div class="operation-card-body">
             <div class="operation-info"><b>${esc(actionLabel(item.id,item.label))}</b><small class="operation-meta">${esc(lastStatus)} · ${esc(lastTime)}</small></div>
             <div class="operation-actions">${startBtn}${stopBtn}</div>
@@ -712,7 +714,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   function renderTasks(){const tasks=state.tasks;const running=tasks.filter(task=>task.running).length,completed=tasks.filter(task=>task.status==='completed').length,failed=tasks.filter(task=>['failed','interrupted'].includes(task.status)).length;if($('#opsRunning'))$('#opsRunning').textContent=running;if($('#opsSummary'))$('#opsSummary').textContent=`${number(completed)} ${t('completed','завершено')} · ${number(failed)} ${t('failed','с ошибкой')}`;renderOperationActionGrid(tasks);}
 
   async function openLog(id){state.currentTask=id;showModal('logModal');await refreshLog();}
-  async function refreshLog(){if(!state.currentTask)return;try{const d=await api(`/api/tasks/${encodeURIComponent(state.currentTask)}/log?lines=800`);$('#logTitle').textContent=d.task.label;$('#logSummary').innerHTML=logSummaryHtml(d.task);$('#logContent').textContent=friendlyLog(d.log);$('#stopTask').hidden=!d.task.running;}catch(e){toast(e.message,true)}}
+  async function refreshLog(){if(!state.currentTask)return;try{const d=await api(`/api/tasks/${encodeURIComponent(state.currentTask)}/log?lines=800`);$('#logTitle').textContent=d.task.label;$('#logSummary').innerHTML=logSummaryHtml(d.task);$('#logContent').textContent=friendlyLog(d.log);$('#stopTask').hidden=!(d.task.running||d.task.status==='queued');}catch(e){toast(e.message,true)}}
   async function stopTask(id,{silent=false}={}){try{await api(`/api/tasks/${encodeURIComponent(id)}/stop`,{method:'POST'});if(!silent)toast(t('stopped_ok','Остановлено'));const idx=state.tasks.findIndex(task=>task.id===id);if(idx>=0){state.tasks[idx].running=false;state.tasks[idx].status='stopped';state.tasks[idx].message='Операция остановлена';renderTasks();}else{await loadTasks();}if(state.currentTask===id)refreshLog();return true;}catch(e){if(!silent)toast(e.message,true);return false;}}
   async function stopTasks(ids){if(!ids.length)return toast(t('stopped_none','Связанные выполняемые операции не найдены'),true);const results=await Promise.all(ids.map(id=>stopTask(id,{silent:true})));if(results.some(Boolean))toast(t('stopped_ok','Остановлено'));if(results.some(value=>!value))toast('Не все операции удалось остановить',true);await loadTasks();}
   async function deleteTask(id){if(!confirm('Удалить операцию и её журнал?'))return;try{await api(`/api/tasks/${encodeURIComponent(id)}`,{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}}

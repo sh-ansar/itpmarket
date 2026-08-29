@@ -27,7 +27,6 @@ import json
 import math
 import random
 import re
-import sqlite3
 import statistics
 import sys
 import time
@@ -36,6 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
+
+from storage.postgres_compat import table_exists
 
 try:
     from . import kaspi_search_compare_v8_2 as core
@@ -1880,12 +1881,7 @@ async def refresh_prices_command(args: argparse.Namespace) -> None:
 
 
 def _table_exists(db: Database, table: str) -> bool:
-    return bool(
-        db.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table,),
-        ).fetchone()
-    )
+    return table_exists(db.conn, table)
 
 
 def status_snapshot(db: Database, assumed_workers: int = 2) -> dict[str, Any]:

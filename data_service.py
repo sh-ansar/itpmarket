@@ -2,7 +2,6 @@
 
 import json
 import math
-import sqlite3
 import threading
 import time
 from collections import Counter, defaultdict
@@ -13,7 +12,7 @@ import statistics
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from storage.database_backend import DatabaseBackend, DatabaseSettings
-from storage.postgres_compat import connect_database, database_error_types
+from storage.postgres_compat import configure_connection, connect_database, database_error_types, table_exists
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
 from collectors.wildberries.wildberries_collector import image_url_for_article
@@ -113,19 +112,14 @@ class DataService:
             db = Database(self.db_path)
             db.conn.close()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> Any:
         conn = connect_database(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        return configure_connection(conn, foreign_keys=True, busy_timeout=30000)
 
     @staticmethod
-    def _connect_path(path: Path) -> sqlite3.Connection:
+    def _connect_path(path: Path) -> Any:
         conn = connect_database(path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        return configure_connection(conn, busy_timeout=30000)
 
     def invalidate(self) -> None:
         with self.lock:
@@ -725,7 +719,7 @@ class DataService:
         return "CLIENT_CATALOG" if "/seller/" in str(url or "").casefold() else "MARKET_CATEGORY"
 
     def _ensure_ozon_source_schema(
-        self, conn: sqlite3.Connection, expected_name: str, seller_ids: set[str]
+        self, conn: Any, expected_name: str, seller_ids: set[str]
     ) -> None:
         conn.executescript(
             """
@@ -878,7 +872,7 @@ class DataService:
         path = self.ozon_db_path
         if not path or not path.exists():
             return []
-        conn: sqlite3.Connection | None = None
+        conn: Any | None = None
         try:
             conn = self._connect_path(path)
             expected_name, seller_ids = self._ozon_owner_config()
@@ -1034,12 +1028,10 @@ class DataService:
             return []
         conn = self._connect_path(self.ozon_kz_db_path)
         try:
-            tables = {
-                str(row[0]) for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            if not {"ozon_kz_products", "ozon_kz_offers"} <= tables:
+            if not all(
+                table_exists(conn, table)
+                for table in ("ozon_kz_products", "ozon_kz_offers")
+            ):
                 return []
             offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for row in conn.execute(
@@ -1156,16 +1148,11 @@ class DataService:
     def _halyk_rows(self) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
-            tables = {
-                str(row[0]) for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            if "halyk_products" not in tables:
+            if not table_exists(conn, "halyk_products"):
                 return []
             states: dict[str, dict[str, Any]] = {}
             offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            if "halyk_offers" in tables:
+            if table_exists(conn, "halyk_offers"):
                 for row in conn.execute(
                     """
                     SELECT * FROM halyk_offers
@@ -1288,18 +1275,13 @@ class DataService:
     def _forte_rows(self) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
-            tables = {
-                str(row[0]) for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            if "forte_products" not in tables:
+            if not table_exists(conn, "forte_products"):
                 return []
             # Tenant-specific state is overlaid after the shared row cache is
             # built. Caching it here would leak notes between organizations.
             states: dict[str, dict[str, Any]] = {}
             offers_by_product: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            if "forte_offers" in tables:
+            if table_exists(conn, "forte_offers"):
                 for row in conn.execute(
                     """
                     SELECT * FROM forte_offers
