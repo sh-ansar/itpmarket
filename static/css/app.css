@@ -3804,14 +3804,26 @@ html[data-theme="dark"] .settings-section-nav button.active {
 }
 
 .notification-preferences-grid label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 28px;
   margin: 0;
   color: var(--muted, #64748b);
   font-size: 12px;
   line-height: 1.4;
+  cursor: pointer;
 }
 
-.notification-preferences-grid input {
-  margin-right: 6px;
+.notification-preferences-grid input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 @media (max-width: 760px) {
