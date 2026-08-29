@@ -38,7 +38,7 @@ class RegistrationLegalModalUiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertNotIn(
-            "???????? ???????? ??????????",
+            "\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d",
             source,
         )
         self.assertNotIn(

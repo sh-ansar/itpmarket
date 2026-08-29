@@ -19,7 +19,7 @@
     }
   };
   Object.assign(extra.ru, {
-    public_login:'?????',
+    public_login:'Войти',
     register_step_plan:'ПАКЕТ', register_plan_title:'Выберите пакет',
     register_plan_hint:'Пробный пакет активируется сразу. Для платного пакета после регистрации сформируется счёт: доступ откроется после подтверждения оплаты.',
     register_intro:'Создайте рабочее пространство и выберите пакет.', register_point_review:'Подтвердите email, чтобы завершить активацию учётной записи',
@@ -30,7 +30,7 @@
     register_guide_next:'Далее', register_guide_submit:'К отправке'
   });
   Object.assign(extra.kk, {
-    public_login:'????',
+    public_login:'Кіру',
     register_step_plan:'ПАКЕТ', register_plan_title:'Пакетті таңдаңыз',
     register_plan_hint:'Сынақ пакеті бірден іске қосылады. Ақылы пакетке тіркелгеннен кейін шот жасалады: қолжетімділік төлем расталған соң ашылады.',
     register_intro:'Жұмыс кеңістігін жасап, пакетті таңдаңыз.', register_point_review:'Тіркелгіні белсендіруді аяқтау үшін email-ды растаңыз',

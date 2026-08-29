@@ -26,8 +26,8 @@ class PublicI18nFaviconUiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         expected = {
-            "ru": "?????",
-            "kk": "????",
+            "ru": "\u0412\u043e\u0439\u0442\u0438",
+            "kk": "\u041a\u0456\u0440\u0443",
             "en": "Login",
         }
 
