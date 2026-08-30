@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS ozon_kz_connector_metadata (
     last_error TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-INSERT OR IGNORE INTO ozon_kz_connector_metadata(id) VALUES(1);
+INSERT OR IGNORE INTO ozon_kz_connector_metadata(id, updated_at)
+VALUES(1, datetime('now'));
 
 CREATE TABLE IF NOT EXISTS ozon_kz_products (
     product_id TEXT PRIMARY KEY,

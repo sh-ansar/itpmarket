@@ -112,6 +112,15 @@ ON tenant_integrations(approval_status, submitted_at, tenant_id, integration_cod
 """
 
 
+# This is deliberately PostgreSQL-only: the shared KZ schema remains valid
+# SQLite. It reconciles databases created before the canonical updated_at
+# default was introduced.
+OZON_KZ_POSTGRES_RUNTIME_SCHEMA = r"""
+ALTER TABLE ozon_kz_connector_metadata
+ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP::text;
+"""
+
+
 def _postgres_statement(statement: str) -> str | None:
     value = statement.strip()
     if not value or re.match(r"^PRAGMA\b", value, re.I):
@@ -149,7 +158,11 @@ def provision_schema(database_url: str) -> dict[str, object]:
         "app": (BASE_SCHEMA, APP_RUNTIME_SCHEMA),
         "ozon_ru": (OZON_RU_SCHEMA,),
         # KZ includes the generic Ozon registry contract plus KZ-specific data.
-        "ozon_kz": (OZON_RU_SCHEMA, OZON_KZ_SCHEMA),
+        "ozon_kz": (
+            OZON_RU_SCHEMA,
+            OZON_KZ_SCHEMA,
+            OZON_KZ_POSTGRES_RUNTIME_SCHEMA,
+        ),
     }
     result: dict[str, int] = {}
     with psycopg.connect(database_url) as connection:

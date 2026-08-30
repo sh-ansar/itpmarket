@@ -22,6 +22,32 @@ ROOT = Path(__file__).resolve().parents[1]
 class PostgresMigrationRunnerTests(
     unittest.TestCase
 ):
+    def test_ozon_kz_metadata_seed_and_runtime_default_are_postgres_safe(
+        self,
+    ) -> None:
+        from collectors.ozon_kz.storage import SCHEMA as ozon_kz_schema
+        from engine.postgres_schema import (
+            OZON_KZ_POSTGRES_RUNTIME_SCHEMA,
+            _statements,
+        )
+
+        self.assertIn(
+            "INSERT OR IGNORE INTO ozon_kz_connector_metadata(id, updated_at)",
+            ozon_kz_schema,
+        )
+        statements = list(_statements(ozon_kz_schema))
+        seed = next(
+            statement for statement in statements
+            if statement.startswith("INSERT INTO ozon_kz_connector_metadata")
+        )
+        self.assertIn("updated_at", seed)
+        self.assertIn("CURRENT_TIMESTAMP", seed)
+        self.assertTrue(seed.endswith("ON CONFLICT DO NOTHING"))
+        self.assertIn(
+            "ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP::text",
+            OZON_KZ_POSTGRES_RUNTIME_SCHEMA,
+        )
+
     def test_sql_splitter_preserves_do_blocks(
         self,
     ) -> None:
