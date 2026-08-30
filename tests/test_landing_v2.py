@@ -53,7 +53,12 @@ class LandingV2Tests(unittest.TestCase):
         self.assertIn("radar-signal span:first-child", source)
         self.assertIn("product-preview", source)
         self.assertIn("spyon-mark-story", source)
-        self.assertIn("story-spy", source)
+        self.assertIn('class="mark-spy"', source)
+        self.assertIn('class="mark-on"', source)
+        self.assertIn('mark-letter mark-s', source)
+        self.assertIn('mark-letter mark-y', source)
+        self.assertIn('mark-letter mark-o', source)
+        self.assertIn('mark-letter mark-n', source)
         self.assertIn("story-final-mark", source)
         self.assertNotIn("cloneNode", source)
         self.assertIn("product-scope-tabs", source)
@@ -72,6 +77,8 @@ class LandingV2Tests(unittest.TestCase):
         self.assertIn("story-s-enter 1.05s", styles)
         self.assertIn("story-logo-reveal .65s", styles)
         self.assertIn(".spyon-mark-story .story-spy,.spyon-mark-story .story-on,.spyon-mark-story .story-eye{display:none!important}", styles)
+        self.assertIn("mark-s-travel 1.1s", styles)
+        self.assertIn("mark-final-eye .43s", styles)
 
     def test_versioned_legal_page_uses_shared_public_shell(self) -> None:
         source = (ROOT / "templates" / "legal_versioned.html").read_text(encoding="utf-8")
