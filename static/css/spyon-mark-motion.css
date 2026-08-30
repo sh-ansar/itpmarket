@@ -1,0 +1,1024 @@
+﻿/* =========================================================
+   SPYON BRAND MORPH V7
+
+   Spy  [eye]  On
+   ↓
+   p + y + n fade
+   ↓
+   S and O become symmetrical
+   ↓
+   S -> [eye] <- O
+   ↓
+   S/O go BEHIND eye and disappear
+   ↓
+   eye blink
+   ↓
+   final brand logo
+   ↓
+   hold
+   ↓
+   exact reverse
+   ========================================================= */
+
+
+/* ---------- no clipping ---------- */
+
+.channels,
+.channels .v2-wrap,
+.channels .spyon-mark-story {
+    overflow: visible !important;
+}
+
+
+/* =========================================================
+   STAGE
+   ========================================================= */
+
+.channels .spyon-mark-story {
+    position: relative !important;
+    display: block !important;
+
+    flex: 0 0 174px !important;
+
+    width: 174px !important;
+    min-width: 174px !important;
+    height: 56px !important;
+
+    margin: 0 12px 0 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    opacity: 1 !important;
+    visibility: visible !important;
+
+    pointer-events: none !important;
+
+    animation: none !important;
+}
+
+
+/* =========================================================
+   REMOVE WORD WRAPPER GEOMETRY
+   ========================================================= */
+
+/*
+Spy / On wrappers больше ничего не двигают.
+
+Это важно.
+
+Каждая буква позиционируется относительно
+общего контейнера, поэтому все стоят
+на одной линии.
+*/
+
+.channels .spyon-mark-story .mark-spy,
+.channels .spyon-mark-story .mark-on {
+    display: contents !important;
+
+    animation: none !important;
+
+    transform: none !important;
+
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+
+/* =========================================================
+   LETTER BASE
+   ========================================================= */
+
+.channels .spyon-mark-story .mark-letter {
+    position: absolute !important;
+
+    top: 50% !important;
+
+    display: block !important;
+
+    width: auto !important;
+    height: 32px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+
+    overflow: visible !important;
+
+    font-family:
+        "Avenir Next",
+        "Segoe UI",
+        Arial,
+        sans-serif !important;
+
+    font-size: 31px !important;
+    font-weight: 800 !important;
+    line-height: 32px !important;
+
+    letter-spacing: -.075em !important;
+
+    background:
+        linear-gradient(
+            118deg,
+            #082e4d 0%,
+            #0a5985 28%,
+            #62badc 52%,
+            #0d6694 72%,
+            #082e4d 100%
+        ) !important;
+
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+
+    transform-origin: center center !important;
+
+    z-index: 3 !important;
+
+    will-change:
+        transform,
+        opacity,
+        filter !important;
+}
+
+
+/* =========================================================
+   INITIAL LETTER POSITIONS
+   ========================================================= */
+
+/*
+           EYE
+       61------113
+
+Spy:
+S = 4
+p = 24
+y = 41
+
+On:
+O = 119
+n = 144
+*/
+
+.channels .spyon-mark-story .mark-s {
+    left: 4px !important;
+
+    animation:
+        spyon-v7-s
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+.channels .spyon-mark-story .mark-p {
+    left: 24px !important;
+
+    animation:
+        spyon-v7-p
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+.channels .spyon-mark-story .mark-y {
+    left: 41px !important;
+
+    animation:
+        spyon-v7-y
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+.channels .spyon-mark-story .mark-o {
+    left: 119px !important;
+
+    animation:
+        spyon-v7-o
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+.channels .spyon-mark-story .mark-n {
+    left: 144px !important;
+
+    animation:
+        spyon-v7-n
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+
+/* =========================================================
+   EYE
+   ========================================================= */
+
+.channels .spyon-mark-story .story-eye {
+    position: absolute !important;
+
+    display: block !important;
+
+    left: 61px !important;
+    top: 50% !important;
+
+    width: 52px !important;
+    height: 29px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    visibility: visible !important;
+
+    transform-origin: center center !important;
+
+    /*
+    ГЛАЗ ВЫШЕ БУКВ.
+
+    Поэтому S и O реально визуально
+    залетают ЗА глаз.
+    */
+    z-index: 6 !important;
+
+    will-change:
+        transform,
+        opacity,
+        filter !important;
+
+    animation:
+        spyon-v7-eye
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+
+/* =========================================================
+   FINAL LOGO
+   ========================================================= */
+
+.channels .spyon-mark-story .story-final-mark {
+    position: absolute !important;
+
+    display: block !important;
+
+    left: 52px !important;
+    top: 50% !important;
+
+    width: 70px !important;
+    height: 47px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    object-fit: contain !important;
+
+    visibility: visible !important;
+
+    z-index: 8 !important;
+
+    transform-origin: center center !important;
+
+    will-change:
+        opacity,
+        transform,
+        filter !important;
+
+    animation:
+        spyon-v7-logo
+        11s
+        cubic-bezier(.22,1,.36,1)
+        infinite !important;
+}
+
+
+/* =========================================================
+   TIMELINE
+
+   0–12%
+   Spy [eye] On
+   всё стоит
+
+   12–24%
+   p + y + n исчезают
+
+   одновременно:
+   S и O мягко становятся симметричными
+
+   24–38%
+   S/O одинаковое расстояние летят в eye
+
+   38–42%
+   исчезают ЗА глазом
+
+   40–44%
+   eye blink
+
+   44–48%
+   logo appears
+
+   48–66%
+   LOGO HOLD ~2 sec
+
+   затем exact reverse
+   ========================================================= */
+
+
+/* =========================================================
+   P
+   ========================================================= */
+
+@keyframes spyon-v7-p {
+
+    0%, 12% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    24%, 86% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(4px)
+            scale(.93);
+
+        filter: blur(.6px);
+    }
+
+    96%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+}
+
+
+/* =========================================================
+   Y
+   ========================================================= */
+
+@keyframes spyon-v7-y {
+
+    0%, 12% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    24%, 86% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(4px)
+            scale(.93);
+
+        filter: blur(.6px);
+    }
+
+    96%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+}
+
+
+/* =========================================================
+   N
+   ========================================================= */
+
+@keyframes spyon-v7-n {
+
+    0%, 12% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    24%, 86% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(-4px)
+            scale(.93);
+
+        filter: blur(.6px);
+    }
+
+    96%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+}
+
+
+/* =========================================================
+   S
+
+   initial:
+   left 4
+
+   staging:
+   effective left 18
+
+   final:
+   effective left 70
+
+   staging -> final = +52 px
+   ========================================================= */
+
+@keyframes spyon-v7-s {
+
+    /* normal Spy */
+    0%, 12% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    Пока p/y/n растворяются,
+    S спокойно занимает staging position.
+    */
+    24% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(14px)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    Летим одинаковые 52px к глазу.
+    S уже ЗА eye из-за z-index.
+    */
+    38% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(66px)
+            scale(.98);
+
+        filter: blur(0);
+    }
+
+    /* полностью поглощён глазом */
+    42%, 72% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(66px)
+            scale(.91);
+
+        filter: blur(.8px);
+    }
+
+    /* reverse: появляется за eye */
+    76% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(66px)
+            scale(.98);
+
+        filter: blur(0);
+    }
+
+    /* одинаковые 52px назад */
+    86% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(14px)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /* возвращаем полноценный Spy */
+    96%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+}
+
+
+/* =========================================================
+   O
+
+   initial:
+   left 119
+
+   staging:
+   effective left 136
+
+   final:
+   effective left 84
+
+   staging -> final = -52 px
+
+   То есть S и O летят РОВНО
+   одинаковое расстояние.
+   ========================================================= */
+
+@keyframes spyon-v7-o {
+
+    0%, 12% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    Пока n исчезает,
+    O слегка отходит наружу.
+
+    После этого S/O строго симметричны.
+    */
+    24% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(17px)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    Те же 52px,
+    только в противоположную сторону.
+    */
+    38% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(-35px)
+            scale(.98);
+
+        filter: blur(0);
+    }
+
+    42%, 72% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(-35px)
+            scale(.91);
+
+        filter: blur(.8px);
+    }
+
+    76% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(-35px)
+            scale(.98);
+
+        filter: blur(0);
+    }
+
+    86% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(17px)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    96%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+
+        filter: blur(0);
+    }
+}
+
+
+/* =========================================================
+   EYE
+
+   S/O проходят за ним.
+
+   Только ПОСЛЕ их попадания
+   глаз моргает.
+   ========================================================= */
+
+@keyframes spyon-v7-eye {
+
+    0%, 38% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1)
+            scaleY(1);
+
+        filter: none;
+    }
+
+    /*
+    BLINK
+    */
+    40% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1.02)
+            scaleY(.12);
+
+        filter:
+            drop-shadow(
+                0 0 8px
+                rgba(72,201,238,.40)
+            );
+    }
+
+    42% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1.025)
+            scaleY(1);
+
+        filter:
+            drop-shadow(
+                0 0 6px
+                rgba(72,201,238,.30)
+            );
+    }
+
+    /*
+    После моргания сам eye
+    растворяется под final logo.
+    */
+    48%, 68% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            scale(.95);
+
+        filter: none;
+    }
+
+    /*
+    REVERSE
+    */
+    72% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1.025)
+            scaleY(1);
+
+        filter:
+            drop-shadow(
+                0 0 6px
+                rgba(72,201,238,.25)
+            );
+    }
+
+    74% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1.02)
+            scaleY(.12);
+
+        filter:
+            drop-shadow(
+                0 0 7px
+                rgba(72,201,238,.30)
+            );
+    }
+
+    76%, 100% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scaleX(1)
+            scaleY(1);
+
+        filter: none;
+    }
+}
+
+
+/* =========================================================
+   FINAL LOGO
+   ========================================================= */
+
+@keyframes spyon-v7-logo {
+
+    0%, 42% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            scale(.90);
+
+        filter: blur(1px);
+    }
+
+    /* smooth appearance */
+    48% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1.025);
+
+        filter: blur(0);
+    }
+
+    51% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    HOLD LOGO
+
+    около двух секунд.
+    */
+    51%, 66% {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            scale(1);
+
+        filter: blur(0);
+    }
+
+    /*
+    начало reverse
+    */
+    72% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            scale(.92);
+
+        filter: blur(.8px);
+    }
+
+    100% {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            scale(.92);
+
+        filter: blur(.8px);
+    }
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media(max-width:600px) {
+
+    .channels .spyon-mark-story {
+        transform: scale(.88);
+        transform-origin: left center;
+        margin-right: -3px !important;
+    }
+}
+
+
+/* =========================================================
+   REDUCED MOTION
+   ========================================================= */
+
+@media(prefers-reduced-motion:reduce) {
+
+    .channels .spyon-mark-story .mark-letter,
+    .channels .spyon-mark-story .story-eye,
+    .channels .spyon-mark-story .story-final-mark {
+        animation: none !important;
+    }
+
+    .channels .spyon-mark-story .mark-letter {
+        opacity: 1 !important;
+    }
+
+    .channels .spyon-mark-story .story-eye {
+        opacity: 1 !important;
+
+        transform:
+            translateY(-50%) !important;
+    }
+
+    .channels .spyon-mark-story .story-final-mark {
+        opacity: 0 !important;
+    }
+}
+
+
+/* =========================================================
+   SPYON TYPOGRAPHY / SPACING POLISH
+   ========================================================= */
+
+/* Больше воздуха для глифов — ничего не обрезаем */
+.channels .spyon-mark-story .mark-letter {
+    height: auto !important;
+    min-height: 38px !important;
+
+    padding: 2px 1px 3px !important;
+
+    line-height: 1.08 !important;
+
+    overflow: visible !important;
+
+    font-family:
+        "Avenir Next",
+        "Avenir",
+        "Segoe UI",
+        Arial,
+        sans-serif !important;
+
+    font-size: 30px !important;
+    font-weight: 750 !important;
+
+    letter-spacing: -0.035em !important;
+
+    /*
+      Чуть более мягкий фирменный градиент.
+      Без резких полос внутри букв.
+    */
+    background:
+        linear-gradient(
+            120deg,
+            #092f4d 0%,
+            #0b5278 31%,
+            #55b0d3 53%,
+            #16779e 70%,
+            #092f4d 100%
+        ) !important;
+
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+}
+
+
+/* =========================================================
+   НОРМАЛЬНЫЙ ВИЗУАЛЬНЫЙ КЕРНИНГ
+   ========================================================= */
+
+/*
+Spy делаем визуально как одно слово:
+S -> p -> y
+
+Расстояния теперь ближе к реальному wordmark.
+*/
+
+.channels .spyon-mark-story .mark-s {
+    left: 3px !important;
+}
+
+.channels .spyon-mark-story .mark-p {
+    left: 22px !important;
+}
+
+.channels .spyon-mark-story .mark-y {
+    left: 39px !important;
+}
+
+
+/*
+On:
+между O и n сейчас было визуально слишком много воздуха.
+*/
+
+.channels .spyon-mark-story .mark-o {
+    left: 121px !important;
+}
+
+.channels .spyon-mark-story .mark-n {
+    left: 143px !important;
+}
+
+
+/* =========================================================
+   ВЫРАВНИВАЕМ ВСЁ ПО ОДНОЙ БАЗОВОЙ ЛИНИИ
+   ========================================================= */
+
+.channels .spyon-mark-story .mark-s,
+.channels .spyon-mark-story .mark-p,
+.channels .spyon-mark-story .mark-y,
+.channels .spyon-mark-story .mark-o,
+.channels .spyon-mark-story .mark-n {
+    top: 50% !important;
+
+    transform-origin: 50% 50% !important;
+}
+
+
+/* Глаз чуть точнее центрируем между Spy и On */
+.channels .spyon-mark-story .story-eye {
+    left: 63px !important;
+    top: 50% !important;
+}
+
+
+/* Финальный логотип остаётся по тому же центру */
+.channels .spyon-mark-story .story-final-mark {
+    left: 53px !important;
+    top: 50% !important;
+}

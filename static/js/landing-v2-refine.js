@@ -1,7 +1,16 @@
 (() => {
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
-  const money = value => new Intl.NumberFormat('ru-RU').format(value) + ' ₸';
+  let lang = window.ITP_PUBLIC_LOCALE || localStorage.getItem('itp_lang') || 'ru';
+  let scope = 'all';
+  let sort = 'updated';
+  let activePipeline = 0;
+  let pipelineTimer = null;
+  let pipelinePaused = false;
+  let openProductIndex = null;
+  let restoreBodyOverflow = '';
+  const localeCode = () => ({ ru: 'ru-RU', kk: 'kk-KZ', en: 'en-US' }[lang] || 'ru-RU');
+  const money = value => `${new Intl.NumberFormat(localeCode()).format(value)} ₸`;
 
   const cleanRadar = () => {
     const label = $('[data-radar-label]');
@@ -14,12 +23,12 @@
     node.addEventListener('mouseenter', () => queueMicrotask(cleanRadar));
     node.addEventListener('focus', () => queueMicrotask(cleanRadar));
   });
-
   const iconFiles = ['catalog.svg', 'chart.svg', 'operations.svg', 'users.svg'];
   document.querySelectorAll('.feature-grid i').forEach((node, index) => {
     node.innerHTML = `<img src="/static/icons/${iconFiles[index]}" alt="">`;
   });
 
+  // Brand animation structure is intentionally left intact; its motion is owned by spyon-mark-motion.css.
   const channelHost = $('.channels .v2-wrap');
   if (channelHost && !$('.spyon-mark-story', channelHost)) {
     const mark = document.createElement('div');
@@ -31,85 +40,61 @@
 
   const words = {
     ru: {
-      kicker: 'ТОВАРЫ В РАБОТЕ', title: 'Товары, риски и потенциал — в одном обзоре',
-      text: 'Интерактивный фрагмент раздела товаров. Данные демонстрационные и не связаны с компаниями.',
-      all: 'Все', risks: 'Риски', potential: 'Потенциал', review: 'Требуют проверки', watched: 'Наблюдение',
-      refresh: 'Обновить', report: 'Скачать отчёт', sort: 'Сортировать по', updatedSort: 'Обновлению', priceSort: 'Цене', titleSort: 'Названию',
-      product: 'Товар', platform: 'Площадка', current: 'Текущая цена', range: 'Рынок: мин / средняя / макс', status: 'Статус', statusHint: '(позиция цены)', potentialHead: 'Потенциал', updated: 'Обновлено', demo: 'Демо-позиция',
-      statusLabels: { risk: 'Выше рынка', potential: 'Есть потенциал', review: 'Нужно проверить', watched: 'Под наблюдением' },
-      products: ['Беспроводная зарядная станция 3‑в‑1', 'Портативный проектор Full HD', 'Умная лампа Wi‑Fi E27', 'Механическая клавиатура 75%', 'Робот-пылесос с лидаром']
-    },
+      kicker: 'ТОВАРЫ В РАБОТЕ', title: 'Товары, риски и потенциал — в одном обзоре', text: 'Интерактивный фрагмент раздела товаров. Данные демонстрационные и не связаны с компаниями.',
+      all: 'Все', risks: 'Риски', potential: 'Потенциал', review: 'Требуют проверки', watched: 'Наблюдение', refresh: 'Обновить', report: 'Скачать отчёт', sort: 'Сортировать по', updatedSort: 'Обновлению', priceSort: 'Цене', titleSort: 'Названию', product: 'Товар', productCode: 'Код товара', platform: 'Площадка', current: 'Текущая цена', range: 'Рынок: мин / средняя / макс', status: 'Статус', statusHint: '(позиция цены)', potentialHead: 'Потенциал', updated: 'Обновлено', demo: 'Демо-позиция', min: 'МИН', avg: 'СР', max: 'МАКС', month: '/ месяц', close: 'Закрыть', marketRange: 'Рыночный диапазон', average: 'Средняя', pricePosition: 'Позиция по цене', positionHint: '1 — лучшая ценовая позиция', rankContext: { risk: 'Слабая ценовая позиция: цена выше рынка.', potential: 'Сильная ценовая позиция: цена у нижней границы рынка.', review: 'Позиция по цене появится после проверки.', watched: 'Рабочая ценовая позиция.' }, signal: 'Причина сигнала', recommendation: 'Рекомендация', details: 'Детали', history: 'История', dataUpdated: 'Данные обновлены', marketChecked: 'Проверен рыночный диапазон', signalCreated: 'Сформирован сигнал', flow: 'ПОТОК ДАННЫХ', pipeline: ['Каталог', 'Цены', 'Сигналы', 'Решения'], pipelineMetrics: ['2 236 позиций', '2 198 актуальных', '7 требуют внимания', '12 к проверке'], statusLabels: { risk: 'Выше рынка', potential: 'Есть потенциал', review: 'Нужно проверить', watched: 'Под наблюдением' }, products: ['Беспроводная зарядная станция 3‑в‑1', 'Портативный проектор Full HD', 'Умная лампа Wi‑Fi E27', 'Механическая клавиатура 75%', 'Робот-пылесос с лидаром'], signals: { risk: 'Текущая цена выше верхней границы наблюдаемого диапазона.', potential: 'Цена находится в нижней части диапазона и имеет подтверждённый потенциал.', review: 'Для позиции недостаточно подтверждённых данных — требуется проверка.', watched: 'Позиция отслеживается: текущая цена находится в рабочем диапазоне.' }, recommendations: { risk: 'Проверить ценовую позицию', potential: 'Сопоставить позицию с рыночным диапазоном', review: 'Проверить актуальность данных', watched: 'Продолжить наблюдение за позицией' } },
     en: {
-      kicker: 'PRODUCTS IN ACTION', title: 'Products, risks and potential — in one view',
-      text: 'An interactive slice of the Products view. All entries are sample data and are not tied to companies.',
-      all: 'All', risks: 'Risks', potential: 'Potential', review: 'Review needed', watched: 'Watching',
-      refresh: 'Refresh', report: 'Download report', sort: 'Sort by', updatedSort: 'Updated', priceSort: 'Price', titleSort: 'Name',
-      product: 'Product', platform: 'Channel', current: 'Current price', range: 'Market: min / average / max', status: 'Status', statusHint: '(price position)', potentialHead: 'Potential', updated: 'Updated', demo: 'Sample position',
-      statusLabels: { risk: 'Above market', potential: 'Potential found', review: 'Needs review', watched: 'Watching' },
-      products: ['3-in-1 wireless charging station', 'Portable Full HD projector', 'Smart Wi-Fi bulb E27', '75% mechanical keyboard', 'LiDAR robot vacuum']
-    },
+      kicker: 'PRODUCTS IN ACTION', title: 'Products, risks and potential — in one view', text: 'An interactive slice of the Products view. All entries are sample data and are not tied to companies.',
+      all: 'All', risks: 'Risks', potential: 'Potential', review: 'Review needed', watched: 'Watching', refresh: 'Refresh', report: 'Download report', sort: 'Sort by', updatedSort: 'Updated', priceSort: 'Price', titleSort: 'Name', product: 'Product', productCode: 'Product code', platform: 'Channel', current: 'Current price', range: 'Market: min / average / max', status: 'Status', statusHint: '(price position)', potentialHead: 'Potential', updated: 'Updated', demo: 'Sample position', min: 'MIN', avg: 'AVG', max: 'MAX', month: '/ month', close: 'Close', marketRange: 'Market range', average: 'Average', pricePosition: 'Price position', positionHint: '1 = best price position', rankContext: { risk: 'Weak price position: the price is above market.', potential: 'Strong price position: the price is near the market floor.', review: 'Price position will appear after review.', watched: 'Working price position.' }, signal: 'Signal reason', recommendation: 'Recommendation', details: 'Details', history: 'History', dataUpdated: 'Data updated', marketChecked: 'Market range checked', signalCreated: 'Signal created', flow: 'DATA FLOW', pipeline: ['Catalogue', 'Prices', 'Signals', 'Decisions'], pipelineMetrics: ['2,236 positions', '2,198 current', '7 need attention', '12 to review'], statusLabels: { risk: 'Above market', potential: 'Potential found', review: 'Needs review', watched: 'Watching' }, products: ['3-in-1 wireless charging station', 'Portable Full HD projector', 'Smart Wi-Fi bulb E27', '75% mechanical keyboard', 'LiDAR robot vacuum'], signals: { risk: 'The current price is above the upper bound of the observed range.', potential: 'The price sits in the lower range and has confirmed potential.', review: 'There is not enough confirmed data for this position; review is required.', watched: 'The position is being watched and the current price is within range.' }, recommendations: { risk: 'Review the price position', potential: 'Compare the position with the market range', review: 'Check data freshness', watched: 'Continue watching the position' } },
     kk: {
-      kicker: 'ТАУАРЛАР ЖҰМЫСТА', title: 'Тауарлар, тәуекелдер және әлеует — бір шолуда',
-      text: 'Тауарлар бөлімінің интерактивті көрінісі. Барлық дерек демонстрациялық және компанияларға тиесілі емес.',
-      all: 'Барлығы', risks: 'Тәуекелдер', potential: 'Әлеует', review: 'Тексеру қажет', watched: 'Бақылауда',
-      refresh: 'Жаңарту', report: 'Есепті жүктеу', sort: 'Сұрыптау', updatedSort: 'Жаңартылуы', priceSort: 'Бағасы', titleSort: 'Атауы',
-      product: 'Тауар', platform: 'Арна', current: 'Ағымдағы баға', range: 'Нарық: мин / орташа / макс', status: 'Мәртебе', statusHint: '(баға позициясы)', potentialHead: 'Әлеует', updated: 'Жаңартылды', demo: 'Демо-позиция',
-      statusLabels: { risk: 'Нарықтан жоғары', potential: 'Әлеует бар', review: 'Тексеру қажет', watched: 'Бақылауда' },
-      products: ['3‑в‑1 сымсыз қуаттау станциясы', 'Full HD портативті проектор', 'Wi‑Fi E27 смарт шамы', '75% механикалық пернетақта', 'Лидарлы робот шаңсорғыш']
-    }
+      kicker: 'ТАУАРЛАР ЖҰМЫСТА', title: 'Тауарлар, тәуекелдер және әлеует — бір шолуда', text: 'Тауарлар бөлімінің интерактивті көрінісі. Барлық дерек демонстрациялық және компанияларға тиесілі емес.',
+      all: 'Барлығы', risks: 'Тәуекелдер', potential: 'Әлеует', review: 'Тексеру қажет', watched: 'Бақылауда', refresh: 'Жаңарту', report: 'Есепті жүктеу', sort: 'Сұрыптау', updatedSort: 'Жаңартылуы', priceSort: 'Бағасы', titleSort: 'Атауы', product: 'Тауар', productCode: 'Тауар коды', platform: 'Арна', current: 'Ағымдағы баға', range: 'Нарық: мин / орташа / макс', status: 'Мәртебе', statusHint: '(баға позициясы)', potentialHead: 'Әлеует', updated: 'Жаңартылды', demo: 'Демо-позиция', min: 'МИН', avg: 'ОРТ', max: 'МАКС', month: '/ ай', close: 'Жабу', marketRange: 'Нарықтық диапазон', average: 'Орташа', pricePosition: 'Баға позициясы', positionHint: '1 — ең жақсы баға позициясы', rankContext: { risk: 'Әлсіз баға позициясы: баға нарықтан жоғары.', potential: 'Күшті баға позициясы: баға нарықтың төменгі шегіне жақын.', review: 'Баға позициясы тексеруден кейін көрсетіледі.', watched: 'Жұмыс баға позициясы.' }, signal: 'Сигнал себебі', recommendation: 'Ұсыныс', details: 'Деректер', history: 'Тарих', dataUpdated: 'Деректер жаңартылды', marketChecked: 'Нарықтық диапазон тексерілді', signalCreated: 'Сигнал жасалды', flow: 'ДЕРЕК АҒЫНЫ', pipeline: ['Каталог', 'Бағалар', 'Сигналдар', 'Шешімдер'], pipelineMetrics: ['2 236 позиция', '2 198 өзекті', '7 назар қажет', '12 тексеруге'], statusLabels: { risk: 'Нарықтан жоғары', potential: 'Әлеует бар', review: 'Тексеру қажет', watched: 'Бақылауда' }, products: ['3‑в‑1 сымсыз қуаттау станциясы', 'Full HD портативті проектор', 'Wi‑Fi E27 смарт шамы', '75% механикалық пернетақта', 'Лидарлы робот шаңсорғыш'], signals: { risk: 'Ағымдағы баға бақыланатын диапазонның жоғарғы шегінен жоғары.', potential: 'Баға диапазонның төменгі бөлігінде және расталған әлеуеті бар.', review: 'Позиция бойынша расталған дерек жеткіліксіз — тексеру қажет.', watched: 'Позиция бақылауда: ағымдағы баға жұмыс диапазонында.' }, recommendations: { risk: 'Баға позициясын тексеру', potential: 'Позицияны нарық диапазонымен салыстыру', review: 'Деректердің өзектілігін тексеру', watched: 'Позицияны бақылауды жалғастыру' } }
   };
-
   const catalog = [
-    { code: 'SPY-18421', channel: 'Kaspi', kind: 'risk', price: 24990, min: 21990, avg: 22650, max: 23990, rank: '1 / 8', potential: null, updated: '29.08, 13:02', image: 'charge' },
-    { code: 'SPY-19381', channel: 'Ozon.ru', kind: 'risk', price: 32990, min: 28490, avg: 30120, max: 31500, rank: '1 / 6', potential: null, updated: '29.08, 12:36', image: 'projector' },
-    { code: 'SPY-20744', channel: 'Wildberries', kind: 'potential', price: 12490, min: 12490, avg: 13990, max: 15190, rank: '5 / 7', potential: 180000, updated: '29.08, 12:55', image: 'lamp' },
+    { code: 'SPY-18421', channel: 'Kaspi', kind: 'risk', price: 24990, min: 21990, avg: 22650, max: 23990, rank: '8 / 8', potential: null, updated: '29.08, 13:02', image: 'charge' },
+    { code: 'SPY-19381', channel: 'Ozon.ru', kind: 'risk', price: 32990, min: 28490, avg: 30120, max: 31500, rank: '6 / 6', potential: null, updated: '29.08, 12:36', image: 'projector' },
+    { code: 'SPY-20744', channel: 'Wildberries', kind: 'potential', price: 12490, min: 12490, avg: 13990, max: 15190, rank: '1 / 7', potential: 180000, updated: '29.08, 12:55', image: 'lamp' },
     { code: 'SPY-21409', channel: 'Halyk Market', kind: 'review', price: 18900, min: 17690, avg: 18650, max: 20490, rank: '—', potential: null, updated: '29.08, 12:18', image: 'keyboard' },
     { code: 'SPY-22602', channel: 'Forte Market', kind: 'watched', price: 89990, min: 86500, avg: 88300, max: 92500, rank: '3 / 5', potential: null, updated: '29.08, 11:48', image: 'vacuum' }
   ];
-
-  let lang = window.ITP_PUBLIC_LOCALE || localStorage.getItem('itp_lang') || 'ru';
-  let scope = 'all';
-  let sort = 'updated';
+  const t = () => words[lang] || words.ru;
   const section = document.createElement('section');
   section.className = 'product-preview';
   $('#how')?.insertAdjacentElement('afterend', section);
+  const filtered = () => catalog.filter(item => scope === 'all' || item.kind === scope).sort((a, b) => sort === 'price' ? a.price - b.price : sort === 'title' ? a.code.localeCompare(b.code) : b.updated.localeCompare(a.updated));
+  const rangeMarker = item => Math.min(108, Math.max(-8, ((item.price - item.min) / (item.max - item.min)) * 100));
 
-  const filtered = () => catalog.filter(item => scope === 'all' || item.kind === scope).sort((a, b) => {
-    if (sort === 'price') return a.price - b.price;
-    if (sort === 'title') return a.code.localeCompare(b.code);
-    return b.updated.localeCompare(a.updated);
-  });
-
-  const download = () => {
-    const t = words[lang] || words.ru;
-    const rows = filtered().map(item => [item.code, t.products[catalog.indexOf(item)], item.channel, item.price, t.statusLabels[item.kind]]);
-    const csv = [[t.product, t.platform, t.current, t.status].join(';'), ...rows.map(row => row.slice(1).join(';'))].join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = 'spyon-demo-catalog.csv'; link.click();
-    URL.revokeObjectURL(url);
+  const renderPipeline = () => {
+    const host = $('.integration-map'); if (!host) return;
+    const copy = t();
+    host.classList.add('pipeline-live');
+    host.innerHTML = `<p class="pipeline-label">${copy.flow}</p><div class="pipeline-stages">${copy.pipeline.map((label, index) => `<button class="pipeline-stage ${activePipeline === index ? 'is-active' : ''}" type="button" data-pipeline-index="${index}"><b>${label}</b><small>${copy.pipelineMetrics[index]}</small></button>${index < 3 ? '<i class="pipeline-connector" aria-hidden="true"></i>' : ''}`).join('')}</div>`;
+    host.querySelectorAll('[data-pipeline-index]').forEach(button => button.addEventListener('click', () => { activePipeline = Number(button.dataset.pipelineIndex); renderPipeline(); schedulePipeline(); }));
   };
-
-  const render = () => {
-    const t = words[lang] || words.ru;
-    const visible = filtered();
-    section.innerHTML = `<div class="v2-wrap">
-      <div class="product-preview-head"><div><p class="kicker">${t.kicker}</p><h2>${t.title}</h2><p>${t.text}</p></div></div>
-      <div class="product-demo-command">
-        <div class="product-scope-tabs" role="tablist" aria-label="${t.status}">
-          ${[['all', t.all], ['risk', t.risks], ['potential', t.potential], ['review', t.review], ['watched', t.watched]].map(([value, label]) => `<button type="button" role="tab" aria-selected="${scope === value}" class="${scope === value ? 'active' : ''}" data-scope="${value}">${label}</button>`).join('')}
-        </div>
-        <div class="product-command-actions"><button type="button" class="demo-refresh"><span aria-hidden="true">↻</span>${t.refresh}</button><button type="button" class="demo-report"><span aria-hidden="true">↓</span>${t.report}</button><label>${t.sort}<select class="demo-sort"><option value="updated" ${sort === 'updated' ? 'selected' : ''}>${t.updatedSort}</option><option value="price" ${sort === 'price' ? 'selected' : ''}>${t.priceSort}</option><option value="title" ${sort === 'title' ? 'selected' : ''}>${t.titleSort}</option></select></label></div>
-      </div>
-      <div class="product-table-wrap product-demo-table"><table><thead><tr><th><input type="checkbox" aria-label="${t.demo}"></th><th>${t.product}</th><th>${t.platform}</th><th>${t.current}</th><th>${t.range}</th><th>${t.status}<small>${t.statusHint}</small></th><th>${t.potentialHead}<button type="button" class="potential-info" aria-label="${t.potentialHead}">i</button></th><th>${t.updated}</th><th></th></tr></thead><tbody>
-        ${visible.map(item => { const index = catalog.indexOf(item); return `<tr data-kind="${item.kind}"><td><input type="checkbox" aria-label="${item.code}"></td><td><div class="demo-product-cell"><span class="demo-thumb ${item.image}" aria-hidden="true"><img src="/static/icons/products.svg" alt=""></span><div><b>${t.products[index]}</b><small>${item.code} · ${t.demo}</small></div></div></td><td><div class="demo-platform"><b>${item.channel}</b><small>${t.demo}</small></div></td><td><b class="demo-price">${money(item.price)}</b></td><td><div class="demo-range"><span><small>МИН</small><b>${money(item.min)}</b></span><span><small>СР</small><b>${money(item.avg)}</b></span><span><small>МАКС</small><b>${money(item.max)}</b></span></div></td><td><div class="demo-status"><span class="${item.kind}">${t.statusLabels[item.kind]}</span><small>${item.rank}</small></div></td><td>${item.potential ? `<div class="demo-potential"><b>+${money(item.potential)}</b><small>/ месяц</small></div>` : '<span class="demo-empty">—</span>'}</td><td><span class="demo-updated">${item.updated}</span></td><td><button type="button" class="demo-open" aria-label="${t.product}">›</button></td></tr>`; }).join('')}
-      </tbody></table></div>
-    </div>`;
-    section.querySelectorAll('[data-scope]').forEach(button => button.addEventListener('click', () => { scope = button.dataset.scope; render(); }));
-    $('.demo-sort', section).addEventListener('change', event => { sort = event.target.value; render(); });
-    $('.demo-report', section).addEventListener('click', download);
-    $('.demo-refresh', section).addEventListener('click', event => { event.currentTarget.classList.add('is-refreshing'); setTimeout(() => event.currentTarget.classList.remove('is-refreshing'), 600); });
+  const schedulePipeline = () => {
+    clearTimeout(pipelineTimer);
+    if (pipelinePaused || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    pipelineTimer = setTimeout(() => { activePipeline = (activePipeline + 1) % 4; renderPipeline(); schedulePipeline(); }, activePipeline === 3 ? 700 : 1200);
   };
-  render();
-  document.addEventListener('itp:public-locale', event => { lang = event.detail.lang; render(); });
+  const pipelineHost = $('.integration-map');
+  if (pipelineHost) {
+    ['mouseenter', 'focusin'].forEach(event => pipelineHost.addEventListener(event, () => { pipelinePaused = true; clearTimeout(pipelineTimer); }));
+    ['mouseleave', 'focusout'].forEach(event => pipelineHost.addEventListener(event, () => { if (!pipelineHost.contains(document.activeElement)) { pipelinePaused = false; schedulePipeline(); } }));
+  }
+
+  const modalMarkup = item => {
+    const copy = t(); const index = catalog.indexOf(item); const marker = rangeMarker(item); const potential = item.potential ? `+${money(item.potential)} ${copy.month}` : '—';
+    return `<div class="product-modal" role="dialog" aria-modal="true" aria-labelledby="productModalTitle" tabindex="-1"><div class="product-modal-dialog"><button class="modal-close" type="button" aria-label="${copy.close}">×</button><header class="modal-product-head"><span class="demo-thumb ${item.image}" aria-hidden="true"><img src="/static/icons/products.svg" alt=""></span><div><h2 id="productModalTitle">${copy.products[index]}</h2><p>${item.code} · ${copy.demo}</p><span class="modal-platform">${item.channel}</span><span class="modal-status ${item.kind}">${copy.statusLabels[item.kind]}</span></div></header><section class="modal-kpis"><div><small>${copy.current}</small><b>${money(item.price)}</b></div><div><small>${copy.marketRange}</small><b>${money(item.min)} – ${money(item.max)}</b></div><div><small>${copy.average}</small><b>${money(item.avg)}</b></div><div><small>${copy.pricePosition}</small><b>${item.rank}</b><em>${copy.rankContext[item.kind]}</em><small class="position-hint">${copy.positionHint}</small></div></section><section class="modal-section"><h3>${copy.status}</h3><div class="modal-range"><div class="modal-range-scale"><i style="--marker:${marker}%"></i></div><div class="modal-range-labels"><span><small>${copy.min}</small><b>${money(item.min)}</b></span><span><small>${copy.avg}</small><b>${money(item.avg)}</b></span><span><small>${copy.max}</small><b>${money(item.max)}</b></span></div><p><b>${money(item.price)}</b> · ${copy.statusLabels[item.kind]}</p></div></section><section class="modal-section modal-signal"><h3>${copy.signal}</h3><p>${copy.signals[item.kind]}</p></section><section class="modal-section modal-recommendation"><h3>${copy.recommendation}</h3><p>${copy.recommendations[item.kind]}</p></section><section class="modal-details"><div><small>${copy.platform}</small><b>${item.channel}</b></div><div><small>${copy.updated}</small><b>${item.updated}</b></div><div><small>${copy.productCode}</small><b>${item.code}</b></div><div><small>${copy.potentialHead}</small><b>${potential}</b></div></section><section class="modal-section modal-history"><h3>${copy.history}</h3><ol><li><time>12:10</time><span>${copy.dataUpdated}</span></li><li><time>12:24</time><span>${copy.marketChecked}</span></li><li><time>12:36</time><span>${copy.signalCreated}</span></li></ol></section></div></div>`;
+  };
+  const closeProductModal = () => { const modal = $('.product-modal'); if (!modal) return; modal.remove(); document.body.style.overflow = restoreBodyOverflow; openProductIndex = null; };
+  const openProductModal = index => { const item = catalog[index]; if (!item) return; closeProductModal(); openProductIndex = index; restoreBodyOverflow = document.body.style.overflow; document.body.insertAdjacentHTML('beforeend', modalMarkup(item)); document.body.style.overflow = 'hidden'; const modal = $('.product-modal'); $('.modal-close', modal)?.focus(); modal.addEventListener('click', event => { if (event.target === modal) closeProductModal(); }); $('.modal-close', modal)?.addEventListener('click', closeProductModal); };
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && openProductIndex !== null) closeProductModal(); });
+
+  const rowMarkup = item => { const copy = t(); const index = catalog.indexOf(item); const potential = item.potential ? `<div class="demo-potential"><b>+${money(item.potential)}</b><small>${copy.month}</small></div>` : '<span class="demo-empty">—</span>'; return `<tr><td><input type="checkbox" aria-label="${item.code}"></td><td><div class="demo-product-cell"><span class="demo-thumb ${item.image}" aria-hidden="true"><img src="/static/icons/products.svg" alt=""></span><div><b>${copy.products[index]}</b><small>${item.code} · ${copy.demo}</small></div></div></td><td><div class="demo-platform"><b>${item.channel}</b><small>${copy.demo}</small></div></td><td><b class="demo-price">${money(item.price)}</b></td><td><div class="demo-range"><span><small>${copy.min}</small><b>${money(item.min)}</b></span><span><small>${copy.avg}</small><b>${money(item.avg)}</b></span><span><small>${copy.max}</small><b>${money(item.max)}</b></span></div></td><td><div class="demo-status"><span class="${item.kind}">${copy.statusLabels[item.kind]}</span><small>${item.rank}</small></div></td><td>${potential}</td><td><span class="demo-updated">${item.updated}</span></td><td><button type="button" class="demo-open" data-product-index="${index}" aria-label="${copy.product}">›</button></td></tr>`; };
+  const cardMarkup = item => { const copy = t(); const index = catalog.indexOf(item); return `<article class="product-demo-card"><header><span class="demo-thumb ${item.image}" aria-hidden="true"><img src="/static/icons/products.svg" alt=""></span><div><b>${copy.products[index]}</b><small>${item.code} · ${item.channel}</small></div><button type="button" class="demo-open" data-product-index="${index}" aria-label="${copy.product}">›</button></header><div class="product-card-values"><span><small>${copy.current}</small><b>${money(item.price)}</b></span><span><small>${copy.range}</small><b>${money(item.min)} – ${money(item.max)}</b></span><span><small>${copy.status}</small><b class="${item.kind}">${copy.statusLabels[item.kind]}</b></span><span><small>${copy.potentialHead}</small><b>${item.potential ? `+${money(item.potential)}` : '—'}</b></span><span><small>${copy.updated}</small><b>${item.updated}</b></span></div></article>`; };
+  const download = () => { const copy = t(); const rows = filtered().map(item => [copy.products[catalog.indexOf(item)], item.channel, item.price, copy.statusLabels[item.kind]]); const blob = new Blob([`\uFEFF${[[copy.product, copy.platform, copy.current, copy.status].join(';'), ...rows.map(row => row.join(';'))].join('\n')}`], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'spyon-demo-catalog.csv'; link.click(); URL.revokeObjectURL(url); };
+  const render = () => { const copy = t(); const visible = filtered(); section.innerHTML = `<div class="v2-wrap product-preview-wrap"><div class="product-preview-head"><div><p class="kicker">${copy.kicker}</p><h2>${copy.title}</h2><p>${copy.text}</p></div></div><div class="product-demo-command"><div class="product-scope-tabs" role="tablist" aria-label="${copy.status}">${[['all', copy.all], ['risk', copy.risks], ['potential', copy.potential], ['review', copy.review], ['watched', copy.watched]].map(([value, label]) => `<button type="button" role="tab" aria-selected="${scope === value}" class="${scope === value ? 'active' : ''}" data-scope="${value}">${label}</button>`).join('')}</div><div class="product-command-actions"><button type="button" class="demo-refresh"><span aria-hidden="true">↻</span>${copy.refresh}</button><button type="button" class="demo-report"><span aria-hidden="true">↓</span>${copy.report}</button><label>${copy.sort}<select class="demo-sort"><option value="updated">${copy.updatedSort}</option><option value="price">${copy.priceSort}</option><option value="title">${copy.titleSort}</option></select></label></div></div><div class="product-table-wrap product-demo-table"><table><colgroup><col class="col-check"><col class="col-product"><col class="col-platform"><col class="col-price"><col class="col-range"><col class="col-status"><col class="col-potential"><col class="col-updated"><col class="col-action"></colgroup><thead><tr><th><input type="checkbox" aria-label="${copy.demo}"></th><th>${copy.product}</th><th>${copy.platform}</th><th>${copy.current}</th><th>${copy.range}</th><th>${copy.status}<small>${copy.statusHint}</small></th><th>${copy.potentialHead}</th><th>${copy.updated}</th><th></th></tr></thead><tbody>${visible.map(rowMarkup).join('')}</tbody></table></div><div class="product-demo-cards">${visible.map(cardMarkup).join('')}</div></div>`; $('.demo-sort', section).value = sort; };
+  section.addEventListener('click', event => { const scopeButton = event.target.closest('[data-scope]'); if (scopeButton) { scope = scopeButton.dataset.scope; render(); return; } const openButton = event.target.closest('[data-product-index]'); if (openButton) { openProductModal(Number(openButton.dataset.productIndex)); return; } if (event.target.closest('.demo-report')) download(); const refresh = event.target.closest('.demo-refresh'); if (refresh) { refresh.classList.add('is-refreshing'); setTimeout(() => refresh.classList.remove('is-refreshing'), 600); } });
+  section.addEventListener('change', event => { if (event.target.matches('.demo-sort')) { sort = event.target.value; render(); } });
+  renderPipeline(); schedulePipeline(); render();
+  document.addEventListener('itp:public-locale', event => { lang = event.detail.lang; renderPipeline(); render(); if (openProductIndex !== null) openProductModal(openProductIndex); });
 })();
