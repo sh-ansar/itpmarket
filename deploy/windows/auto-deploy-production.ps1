@@ -108,10 +108,11 @@ if ($dirty) {
     exit 11
 }
 
-& $gitExe @gitBase `
+$fetchOutput = & $gitExe @gitBase `
     fetch `
     origin `
-    production
+    production `
+    2>&1
 
 if ($LASTEXITCODE -ne 0) {
     throw 'git fetch failed.'
