@@ -470,12 +470,13 @@
   async function refreshTenantDrawer(tenantId) {
     const richOpen = window.PlatformCompanyAdmin?.openTenant;
 
-    if (typeof richOpen === 'function') {
-      await richOpen(tenantId);
-      return;
+    if (typeof richOpen !== 'function') {
+      throw new Error(
+        'Карточка компании не загрузилась. Обновите страницу.'
+      );
     }
 
-    await openTenant(tenantId);
+    await richOpen(Number(tenantId));
   }
 
   document.addEventListener('click', async event => {

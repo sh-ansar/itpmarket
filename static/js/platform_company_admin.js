@@ -86,6 +86,10 @@
       String(seller.approval_status||'')==='approved'
     );
 
+    const pending=(
+      String(seller.approval_status||'')==='pending'
+    );
+
     const sourceUrl=String(
       seller.source_url||
       ''
@@ -94,7 +98,11 @@
     return `<article class="company-connection ${active?'connected':''}">
       <div>
         <strong>${esc(marketplaceName)}</strong>
-        <span>${esc(seller.status||'—')}</span>
+        <span>${esc(
+          pending
+            ? 'Ожидает подтверждения'
+            : seller.status||'—'
+        )}</span>
       </div>
 
       <small>
@@ -117,6 +125,29 @@
              rel="noreferrer">
              Открыть магазин
            </a>`
+        :''
+      }
+
+      ${pending&&id
+        ?`<div class="platform-row-actions">
+            <button type="button"
+                    class="approve"
+                    data-marketplace-review="approved"
+                    data-tenant-id="${Number(currentTenantId)}"
+                    data-marketplace-code="${esc(code)}"
+                    data-seller-id="${id}">
+              Подтвердить источник
+            </button>
+
+            <button type="button"
+                    class="decline"
+                    data-marketplace-review="rejected"
+                    data-tenant-id="${Number(currentTenantId)}"
+                    data-marketplace-code="${esc(code)}"
+                    data-seller-id="${id}">
+              Отклонить
+            </button>
+          </div>`
         :''
       }
 
@@ -320,11 +351,37 @@
     button.disabled = true;
     try {
       if (marketplaceReview) {
+        event.preventDefault();
+        event.stopPropagation();
+
         const note=marketplaceReview.dataset.marketplaceReview==='rejected'
           ? (window.prompt('Причина отклонения (будет видна компании):','Уточните ссылку или продавца.')||'').trim()
           : '';
-        await api(`/api/platform/tenants/${currentTenantId}/marketplaces/${encodeURIComponent(marketplaceReview.dataset.marketplaceCode)}/${marketplaceReview.dataset.marketplaceReview}`,{method:'POST',body:{review_note:note}});
-        toast(marketplaceReview.dataset.marketplaceReview==='approved'?'Площадка подтверждена.':'Площадка отклонена; компания сможет отправить данные заново.');
+        const sellerId=Number(
+          marketplaceReview.dataset.sellerId||0
+        );
+
+        const reviewBody={
+          review_note:note
+        };
+
+        if(sellerId){
+          reviewBody.tenant_seller_id=sellerId;
+        }
+
+        await api(
+          `/api/platform/tenants/${currentTenantId}/marketplaces/${encodeURIComponent(marketplaceReview.dataset.marketplaceCode)}/${marketplaceReview.dataset.marketplaceReview}`,
+          {
+            method:'POST',
+            body:reviewBody
+          }
+        );
+
+        toast(
+          marketplaceReview.dataset.marketplaceReview==='approved'
+            ?'Источник подтверждён.'
+            :'Источник отклонён.'
+        );
       } else if (grants) {
         const marketplaces = {};
         body.querySelectorAll('[data-marketplace-grant]').forEach(input => { marketplaces[input.dataset.marketplaceGrant] = input.checked; });
