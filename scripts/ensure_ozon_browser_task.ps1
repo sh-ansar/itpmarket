@@ -119,9 +119,14 @@ if (-not $userId) {
     throw 'No non-SYSTEM interactive user is available for Spyon Ozon Browsers.'
 }
 
-& $registerScript -TaskName $TaskName -UserId $userId
-if ($LASTEXITCODE -ne 0) {
-    throw 'Ozon browser task registration returned a non-zero exit code.'
+try {
+    & $registerScript -TaskName $TaskName -UserId $userId
+}
+catch {
+    throw (
+        'Ozon browser task registration failed: ' +
+        $_.Exception.Message
+    )
 }
 
 $task = Get-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -ErrorAction Stop
