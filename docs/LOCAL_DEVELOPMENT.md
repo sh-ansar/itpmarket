@@ -125,11 +125,16 @@ Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru ис�
 
 Ozon URL проходит два разных этапа: `parsed` означает только корректный синтаксис, а `verified` появляется лишь после совпадающих evidence из interactive browser (final seller URL, canonical link, seller identity и name). До этого Ozon source нельзя approve. Для Ozon.kz не используйте URL `ozon.ru` и наоборот; при challenge/нет interactive runtime фиксируйте `BLOCKED`, не подменяйте проверку HTTP 200 или product cards.
 
-For marketplace corrections, use the platform company's source drawer. A
-replacement creates a pending candidate; approval verifies it first and only
-then retires the old seller record. Use the seller-specific purge preview before
-any cleanup. The actual purge needs the current superadmin password and affects
-only the selected tenant, marketplace and seller identifier.
+For marketplace corrections, use the platform company's source drawer. The
+initial company connection remains pending review, but replacing an already
+active source validates the new URL first (with live Ozon verification where
+required), then atomically switches to the approved seller and retires the old
+one. Source removal uses the seller-scoped preview, requires the current
+superadmin password, disables that source's schedules and affects only the
+selected tenant, marketplace and seller identifier.
+Import history, schedule-run history and audit records are deliberately kept;
+credentials are not transferred during replacement and are removed only with a
+seller removal.
 
 ## Частые проблемы
 

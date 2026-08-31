@@ -168,7 +168,7 @@
                     data-tenant-id="${Number(currentTenantId)}"
                     data-marketplace-code="${esc(code)}"
                     data-seller-id="${id}">
-              Очистить данные
+              Удалить источник
             </button>
           </div>`
         :''
@@ -259,7 +259,13 @@
           ${(data.marketplace_access || []).map(connection).join('')}
         </div>
 
-        ${(data.sellers||[]).length
+        ${(() => {
+          const visibleSellers = (data.sellers || []).filter(seller => ![
+            'replaced', 'removed'
+          ].includes(String(seller.status || '')) && ![
+            'replaced', 'removed'
+          ].includes(String(seller.approval_status || '')));
+          return visibleSellers.length
           ?`<div class="platform-section-title" style="margin-top:18px">
               <div>
                 <h3>Источники продавцов</h3>
@@ -270,12 +276,12 @@
             </div>
 
             <div class="company-connections">
-              ${(data.sellers||[])
+              ${visibleSellers
                 .map(sellerManagementCard)
                 .join('')}
             </div>`
           :''
-        }
+        })()}
 
         <div class="platform-row-actions" style="margin-top:16px">
           <button type="button"
@@ -346,11 +352,34 @@
     const saveUser = event.target.closest('[data-user-save]');
     const recovery = event.target.closest('[data-user-recovery]');
     const marketplaceReview = event.target.closest('[data-marketplace-review]');
-    if (!grants && !saveUser && !recovery && !marketplaceReview) return;
-    const button = grants || saveUser || recovery || marketplaceReview;
+    const replacement = event.target.closest('[data-replace-source]');
+    const removal = event.target.closest('[data-purge-seller]');
+    if (!grants && !saveUser && !recovery && !marketplaceReview && !replacement && !removal) return;
+    const button = grants || saveUser || recovery || marketplaceReview || replacement || removal;
     button.disabled = true;
     try {
-      if (marketplaceReview) {
+      if (replacement) {
+        event.preventDefault();
+        event.stopPropagation();
+        const sourceUrl = String(window.prompt('Новый URL продавца:') || '').trim();
+        if (!sourceUrl) { button.disabled = false; return; }
+        await api(
+          `/api/platform/tenants/${currentTenantId}/marketplaces/${encodeURIComponent(replacement.dataset.marketplaceCode)}/${Number(replacement.dataset.sellerId)}/replace`,
+          {method:'POST', body:{source_url:sourceUrl}}
+        );
+        toast('Источник заменён. Старые позиции удалены.');
+      } else if (removal) {
+        event.preventDefault();
+        event.stopPropagation();
+        const endpoint = `/api/platform/tenants/${currentTenantId}/marketplaces/${encodeURIComponent(removal.dataset.marketplaceCode)}/${Number(removal.dataset.sellerId)}`;
+        const preview = await api(`${endpoint}/purge-preview`, {method:'POST', body:{}});
+        const total = Number(preview.preview?.total || 0);
+        if (!window.confirm(`Источник будет отключён, а его позиции и история сбора будут удалены. Записей к удалению: ${total}. Продолжить?`)) { button.disabled = false; return; }
+        const currentPassword = String(window.prompt('Подтвердите операцию текущим паролем:') || '');
+        if (!currentPassword) { button.disabled = false; return; }
+        await api(`${endpoint}/purge`, {method:'POST', body:{current_password:currentPassword}});
+        toast('Источник удалён. Старые позиции очищены.');
+      } else if (marketplaceReview) {
         event.preventDefault();
         event.stopPropagation();
 

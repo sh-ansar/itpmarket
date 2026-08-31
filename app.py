@@ -5490,9 +5490,11 @@ def api_platform_marketplace_seller_purge(
     if not password or not AUTH.verify_password(int(user["id"]), password):
         return json_error("Current password was not confirmed.", 403)
     try:
-        return json_ok(result=SAAS.purge_marketplace_seller_data(
+        result = SAAS.remove_marketplace_seller(
             tenant_id, marketplace_code, tenant_seller_id, int(user["id"]),
-        ))
+        )
+        DATA.invalidate()
+        return json_ok(result=result)
     except ValueError as exc:
         return json_error(str(exc), 404)
 
@@ -5504,11 +5506,12 @@ def api_platform_marketplace_seller_replace(
 ) -> Any:
     payload = json_payload()
     try:
-        staged = SAAS.stage_marketplace_source_replacement(
+        result = SAAS.replace_marketplace_source(
             tenant_id, marketplace_code, tenant_seller_id,
             str(payload.get("source_url") or ""), int((current_user() or {})["id"]),
         )
-        return json_ok(candidate=staged)
+        DATA.invalidate()
+        return json_ok(result=result)
     except ValueError as exc:
         return json_error(str(exc), 409)
 

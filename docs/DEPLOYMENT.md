@@ -228,5 +228,10 @@ SYSTEM or in a background session.
 
 Marketplace source replacements and seller data cleanup are application-level
 admin workflows. Deployment must not delete marketplace data manually: a
-replacement is verified and approved before the old seller is retired, and a
-purge remains seller-scoped with preview, audit record and password confirmation.
+superadmin replacement validates the new source first and atomically activates
+it before retiring the old seller. Source removal remains seller-scoped, uses a
+preview, audit record and password confirmation, and disables only the removed
+seller's schedules.
+Import history, schedule-run history and audit records are never part of this
+cleanup; credentials are not transferred during replacement and are removed
+only with a seller removal.

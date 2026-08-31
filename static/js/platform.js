@@ -288,23 +288,6 @@
     } catch(error) { toast(error.message,true); }
   }
 
-  function sellerAdminCard(tenantId, seller) {
-    const id=Number(seller.id||0);
-    const code=String(seller.marketplace_code||'');
-    const pending=String(seller.approval_status||'')==='pending';
-    const active=String(seller.status||'')==='active'&&String(seller.approval_status||'')==='approved';
-    return `<article class="drawer-section"><strong>${esc(marketplaceNames[code]||code)} · ${esc(seller.display_name||seller.external_seller_id||'—')}</strong><small>${esc(seller.external_seller_id||'—')} · ${esc(seller.discovery_status||'parsed')} · ${esc(seller.status||'—')}</small><a href="${esc(seller.source_url||'#')}" target="_blank" rel="noreferrer">${esc(seller.source_url||'—')}</a><div class="company-actions">${pending?`<button type="button" data-marketplace-review="approved" data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Подтвердить источник</button><button type="button" class="decline" data-marketplace-review="rejected" data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Отклонить</button>`:''}${active?`<button type="button" data-replace-source data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Заменить источник</button><button type="button" class="decline" data-purge-seller data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Preview очистки</button>`:''}</div></article>`;
-  }
-
-  async function openTenant(tenantId) {
-    try {
-      const data=await api(`/api/platform/tenants/${Number(tenantId)}/detail`);
-      const tenant=data.tenant||{};
-      const sellers=(data.sellers||[]).map(seller=>sellerAdminCard(Number(tenantId),seller)).join('')||'<p class="muted">Источники не подключены.</p>';
-      openDrawer(tenant.name||'Компания', `<section class="drawer-section"><p><strong>БИН:</strong> ${esc(tenant.registration_number||'—')}<br><strong>Email:</strong> ${esc(tenant.contact_email||'—')}</p><button type="button" data-billing-history data-tenant-id="${Number(tenantId)}">Открыть историю платежей</button></section><section class="drawer-section"><h3>Marketplace sources</h3><p class="muted">Замена сначала создаёт pending-кандидат. Текущий источник остаётся активен, пока кандидат не проверен и не подтверждён.</p>${sellers}</section>`);
-    } catch(error) { toast(error.message,true); }
-  }
-
   function openBillingDecision(button) {
     const modal=$('#billingDecisionModal');
     const form=$('#billingDecisionForm');
@@ -467,23 +450,8 @@
     }
   }
 
-  async function refreshTenantDrawer(tenantId) {
-    const richOpen = window.PlatformCompanyAdmin?.openTenant;
-
-    if (typeof richOpen !== 'function') {
-      throw new Error(
-        'Карточка компании не загрузилась. Обновите страницу.'
-      );
-    }
-
-    await richOpen(Number(tenantId));
-  }
-
   document.addEventListener('click', async event => {
     const billingHistoryButton=event.target.closest('[data-billing-history]');
-    const marketplaceReview=event.target.closest('[data-marketplace-review]');
-    const replacement=event.target.closest('[data-replace-source]');
-    const purgeSeller=event.target.closest('[data-purge-seller]');
     const admin = event.target.closest('[data-admin]');
     const status = event.target.closest('[data-company-status]');
     const review = event.target.closest('[data-review]');
@@ -491,29 +459,6 @@
     const billingAction=event.target.closest('[data-billing-action]');
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
     if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
-    if(marketplaceReview){
-      event.preventDefault();
-      try{await api(`/api/platform/tenants/${marketplaceReview.dataset.tenantId}/marketplaces/${marketplaceReview.dataset.marketplaceCode}/${marketplaceReview.dataset.marketplaceReview}`,{method:'POST',body:{tenant_seller_id:Number(marketplaceReview.dataset.sellerId)}});toast('Источник обработан');await refreshTenantDrawer(marketplaceReview.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
-    }
-    if(replacement){
-      event.preventDefault();
-      const sourceUrl=String(window.prompt('Новый URL продавца:')||'').trim();
-      if(!sourceUrl)return;
-      try{await api(`/api/platform/tenants/${replacement.dataset.tenantId}/marketplaces/${replacement.dataset.marketplaceCode}/${replacement.dataset.sellerId}/replace`,{method:'POST',body:{source_url:sourceUrl}});toast('Кандидат источника отправлен на проверку');await refreshTenantDrawer(replacement.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
-    }
-    if(purgeSeller){
-      event.preventDefault();
-      const {tenantId,marketplaceCode,sellerId}=purgeSeller.dataset;
-      try{
-        const preview=await api(`/api/platform/tenants/${tenantId}/marketplaces/${marketplaceCode}/${sellerId}/purge-preview`,{method:'POST',body:{}});
-        const counts=Object.entries(preview.preview?.counts||{}).map(([key,value])=>`${key}: ${value}`).join('\n');
-        if(!window.confirm(`Будут очищены только данные выбранного seller.\n${counts}\n\nПродолжить?`))return;
-        const currentPassword=String(window.prompt('Подтвердите текущим паролем:')||'');
-        if(!currentPassword)return;
-        await api(`/api/platform/tenants/${tenantId}/marketplaces/${marketplaceCode}/${sellerId}/purge`,{method:'POST',body:{current_password:currentPassword}});
-        toast('Данные выбранного seller очищены');await refreshTenantDrawer(tenantId);await load();
-      }catch(error){toast(error.message,true);}return;
-    }
     if (admin) {
       event.preventDefault();
       $('#tenantAdminForm').elements.tenant_id.value = admin.dataset.admin;

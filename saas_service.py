@@ -1032,7 +1032,43 @@ class SaaSService:
             "approval_status": "pending",
         }
 
-    def stage_marketplace_source_replacement(
+    @staticmethod
+    def _seller_scoped_working_data_tables() -> tuple[str, ...]:
+        """Materialized source data that must not survive a source replacement."""
+        return (
+            "tenant_seller_offer_snapshots",
+            "tenant_seller_offer_scans",
+            "tenant_seller_price_snapshots",
+            "tenant_seller_catalog_products",
+            "tenant_product_listings",
+            "tenant_catalog_products",
+            "tenant_catalogs",
+        )
+
+    def _delete_seller_working_data(
+        self, conn: Any, tenant_id: int, marketplace_code: str, tenant_seller_id: int,
+    ) -> dict[str, int]:
+        """Delete only one seller's materialized catalog and market data."""
+        deleted: dict[str, int] = {}
+        for table in self._seller_scoped_working_data_tables():
+            where = "tenant_id=? AND marketplace_code=? AND tenant_seller_id=?"
+            params = (int(tenant_id), str(marketplace_code), int(tenant_seller_id))
+            cursor = conn.execute(f"DELETE FROM {table} WHERE {where}", params)
+            deleted[table] = int(cursor.rowcount or 0)
+        return deleted
+
+    @staticmethod
+    def _delete_seller_credentials(
+        conn: Any, tenant_id: int, tenant_seller_id: int,
+    ) -> int:
+        """Remove revoked source secrets; histories intentionally remain intact."""
+        cursor = conn.execute(
+            "DELETE FROM seller_encrypted_credentials WHERE tenant_id=? AND tenant_seller_id=?",
+            (int(tenant_id), int(tenant_seller_id)),
+        )
+        return int(cursor.rowcount or 0)
+
+    def replace_marketplace_source(
         self,
         tenant_id: int,
         marketplace_code: str,
@@ -1040,14 +1076,10 @@ class SaaSService:
         source_url: str,
         actor_user_id: int,
     ) -> dict[str, Any]:
-        """Stage a replacement source without touching the current seller.
-
-        A replacement is deliberately a pending seller.  The old active seller
-        remains usable until the ordinary review path has verified and approved
-        the candidate; only then is it marked replaced (its collected data is
-        retained for a separately confirmed, seller-scoped purge).
-        """
+        """Validate first, then atomically replace an active marketplace seller."""
         code = str(marketplace_code or "").strip().casefold()
+        if code not in MARKETPLACE_BY_CODE:
+            raise ValueError("Неизвестная площадка.")
         conn = self._connect()
         try:
             existing = conn.execute(
@@ -1056,45 +1088,136 @@ class SaaSService:
                    WHERE id=? AND tenant_id=? AND marketplace_code=?""",
                 (int(replaced_tenant_seller_id), int(tenant_id), code),
             ).fetchone()
-            if not existing:
-                raise ValueError("Seller does not belong to this tenant and marketplace.")
-            if not (str(existing["status"]) == "active" and str(existing["approval_status"]) == "approved"):
-                raise ValueError("Only an approved active seller can be replaced.")
         finally:
             conn.close()
-
+        if not existing or not (
+            str(existing["status"]) == "active"
+            and str(existing["approval_status"]) == "approved"
+        ):
+            raise ValueError("Only an approved active seller can be replaced.")
         detected = self.detect_marketplace_url(int(tenant_id), source_url, code)
+        discovery = {
+            "evidence": "platform_admin_direct_replace",
+            "verification_state": "verified", "verified": True,
+            "source_input": detected.get("source_input") or source_url,
+        }
+        if code in {"ozon", "ozon_kz"}:
+            try:
+                evidence = verify_ozon_storefront(code, str(detected.get("seller_url") or source_url))
+            except OzonSourceVerificationError as exc:
+                raise ValueError("Ozon source is parsed but not verified: " + str(exc)) from exc
+            detected.update({
+                "seller_identifier": evidence["canonical_seller_id"],
+                "seller_name": evidence["seller_name"],
+                "seller_url": evidence["canonical_seller_url"],
+            })
+            discovery.update({
+                "evidence": "interactive_browser",
+                "canonical_seller_id": evidence["canonical_seller_id"],
+                "canonical_seller_url": evidence["canonical_seller_url"],
+                "seller_name": evidence["seller_name"],
+                "catalogue_empty": evidence["catalogue_empty"] == "true",
+            })
         if str(detected.get("seller_identifier") or "").casefold() == str(existing["external_seller_id"] or "").casefold():
-            raise ValueError("The replacement source resolves to the current seller.")
-        staged = self.connect_marketplace(int(tenant_id), source_url, int(actor_user_id), code)
-        candidate_id = int(staged.get("tenant_seller_id") or 0)
-        if not candidate_id:
-            raise ValueError("The replacement source was not staged.")
+            raise ValueError("Новый источник совпадает с текущим продавцом.")
 
+        stamp = now_iso()
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT discovery_json FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?",
-                (candidate_id, int(tenant_id)),
+            if isinstance(conn, PostgresConnection):
+                current = conn.execute(
+                    """SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?
+                       AND marketplace_code=? FOR UPDATE""",
+                    (int(replaced_tenant_seller_id), int(tenant_id), code),
+                ).fetchone()
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    """SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?
+                       AND marketplace_code=?""",
+                    (int(replaced_tenant_seller_id), int(tenant_id), code),
+                ).fetchone()
+            if not current or not (str(current["status"]) == "active" and str(current["approval_status"]) == "approved"):
+                raise ValueError("The source being replaced is no longer active.")
+
+            already_active = conn.execute(
+                """SELECT id FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND marketplace_code=? AND external_seller_id=?
+                     AND id<>? AND status='active' AND approval_status='approved'""",
+                (int(tenant_id), code, str(detected["seller_identifier"]), int(replaced_tenant_seller_id)),
             ).fetchone()
-            discovery = _json_or_default(row["discovery_json"] if row else "{}", {})
-            discovery["replacement_of_tenant_seller_id"] = int(replaced_tenant_seller_id)
+            if already_active:
+                raise ValueError("Новый источник уже подключён как активный продавец.")
+
+            discovery_json = json.dumps(discovery, ensure_ascii=False, separators=(",", ":"))
             conn.execute(
-                """UPDATE tenant_marketplace_sellers
-                   SET discovery_json=?,updated_at=?
-                   WHERE id=? AND tenant_id=? AND marketplace_code=?
-                     AND approval_status='pending'""",
-                (json.dumps(discovery, ensure_ascii=False, separators=(",", ":")), now_iso(), candidate_id, int(tenant_id), code),
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,source_url,
+                       status,discovery_status,approval_status,discovery_json,
+                       submitted_by,submitted_at,reviewed_by,reviewed_at,review_note,
+                       product_count,last_status,last_error,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,'active','verified','approved',?,?,?,?,?,'',0,'source_replaced','',?,?)
+                   ON CONFLICT(tenant_id,marketplace_code,external_seller_id) DO UPDATE SET
+                       display_name=excluded.display_name,source_url=excluded.source_url,
+                       status='active',discovery_status='verified',approval_status='approved',
+                       discovery_json=excluded.discovery_json,submitted_by=excluded.submitted_by,
+                       submitted_at=excluded.submitted_at,reviewed_by=excluded.reviewed_by,
+                       reviewed_at=excluded.reviewed_at,review_note='',product_count=0,
+                       last_sync_at=NULL,last_status='source_replaced',last_error='',updated_at=excluded.updated_at""",
+                (int(tenant_id), code, str(detected["seller_identifier"]), str(detected["seller_name"]),
+                 str(detected["seller_url"]), discovery_json, int(actor_user_id), stamp,
+                 int(actor_user_id), stamp, stamp, stamp),
+            )
+            candidate = conn.execute(
+                """SELECT * FROM tenant_marketplace_sellers WHERE tenant_id=? AND marketplace_code=?
+                   AND external_seller_id=?""",
+                (int(tenant_id), code, str(detected["seller_identifier"])),
+            ).fetchone()
+            if not candidate:
+                raise ValueError("Не удалось активировать новый источник.")
+            candidate_id = int(candidate["id"])
+            # A pre-existing pending candidate is promoted in place.  Its own
+            # records and credentials are neither deleted nor copied from OLD.
+            deleted = self._delete_seller_working_data(
+                conn, int(tenant_id), code, int(replaced_tenant_seller_id),
+            )
+            schedules = conn.execute(
+                """UPDATE operation_schedules SET tenant_seller_id=?,updated_at=?
+                   WHERE tenant_id=? AND tenant_seller_id=?""",
+                (candidate_id, stamp, int(tenant_id), int(replaced_tenant_seller_id)),
+            )
+            conn.execute(
+                """UPDATE tenant_marketplace_sellers SET status='replaced',approval_status='replaced',
+                   product_count=0,last_sync_at=NULL,last_status='replaced',
+                   last_error='',reviewed_by=?,reviewed_at=?,updated_at=?
+                   WHERE id=? AND tenant_id=? AND marketplace_code=?""",
+                (int(actor_user_id), stamp, stamp, int(replaced_tenant_seller_id), int(tenant_id), code),
+            )
+            conn.execute(
+                """UPDATE tenant_integrations SET seller_name=?,seller_identifier=?,seller_url=?,
+                   discovery_status='verified',approval_status='approved',discovery_json=?,status='active',
+                   product_count=0,last_sync_at=NULL,last_status='source_replaced',last_error='',
+                   reviewed_by=?,reviewed_at=?,review_note='',updated_at=?
+                   WHERE tenant_id=? AND integration_code=?""",
+                (str(detected["seller_name"]), str(detected["seller_identifier"]), str(detected["seller_url"]),
+                 discovery_json, int(actor_user_id), stamp, stamp, int(tenant_id), code),
             )
             self._audit(
-                conn, int(actor_user_id), "tenant_marketplace_replacement_staged",
-                int(tenant_id), "tenant_marketplace_seller", str(candidate_id),
-                {"marketplace_code": code, "replacement_of_tenant_seller_id": int(replaced_tenant_seller_id)},
+                conn, int(actor_user_id), "tenant_marketplace_source_replaced", int(tenant_id),
+                "tenant_marketplace_seller", str(candidate_id),
+                {"marketplace_code": code, "replaced_tenant_seller_id": int(replaced_tenant_seller_id),
+                 "new_tenant_seller_id": candidate_id, "deleted": deleted,
+                 "schedules_reassigned": int(schedules.rowcount or 0)},
             )
             conn.commit()
+            return {"seller": dict(candidate), "replaced_tenant_seller_id": int(replaced_tenant_seller_id),
+                    "deleted": deleted, "total": sum(deleted.values()),
+                    "schedules_reassigned": int(schedules.rowcount or 0)}
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
-        return staged | {"replacement_of_tenant_seller_id": int(replaced_tenant_seller_id)}
 
     def review_marketplace_connection(
         self,
@@ -1128,7 +1251,6 @@ class SaaSService:
             if len(pending) > 1:
                 raise ValueError("Укажите tenant_seller_id заявки продавца.")
             seller_row = pending[0]
-            prior_discovery = _json_or_default(seller_row["discovery_json"], {})
             if target == "approved" and code in {"ozon", "ozon_kz"}:
                 try:
                     evidence = verify_ozon_storefront(code, str(seller_row["source_url"] or ""))
@@ -1162,24 +1284,6 @@ class SaaSService:
                     (int(seller_row["id"]), int(tenant_id)),
                 ).fetchone()
             status = "active" if target == "approved" else "rejected"
-            if target == "approved":
-                replaced_id = int(prior_discovery.get("replacement_of_tenant_seller_id") or 0)
-                if replaced_id and replaced_id != int(seller_row["id"]):
-                    replaced = conn.execute(
-                        """SELECT id FROM tenant_marketplace_sellers
-                           WHERE id=? AND tenant_id=? AND marketplace_code=?
-                             AND status='active' AND approval_status='approved'""",
-                        (replaced_id, int(tenant_id), code),
-                    ).fetchone()
-                    if not replaced:
-                        raise ValueError("The source being replaced is no longer active.")
-                    conn.execute(
-                        """UPDATE tenant_marketplace_sellers
-                           SET status='replaced',approval_status='replaced',
-                               reviewed_by=?,reviewed_at=?,updated_at=?
-                           WHERE id=? AND tenant_id=? AND marketplace_code=?""",
-                        (int(actor_user_id), stamp, stamp, replaced_id, int(tenant_id), code),
-                    )
             conn.execute(
                 """UPDATE tenant_marketplace_sellers
                    SET approval_status=?,status=?,reviewed_by=?,reviewed_at=?,
@@ -1282,58 +1386,105 @@ class SaaSService:
             ).fetchone()
             if not seller:
                 raise ValueError("Seller does not belong to this tenant and marketplace.")
-            tables = (
-                "tenant_seller_catalog_products", "tenant_seller_price_snapshots",
-                "tenant_seller_offer_scans", "tenant_seller_offer_snapshots", "tenant_catalogs",
-            )
-            counts = {
-                table: int(conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE tenant_id=? AND marketplace_code=? AND tenant_seller_id=?",
-                    (int(tenant_id), code, int(tenant_seller_id)),
+            counts: dict[str, int] = {}
+            for table in self._seller_scoped_working_data_tables():
+                where = "tenant_id=? AND marketplace_code=? AND tenant_seller_id=?"
+                params = (int(tenant_id), code, int(tenant_seller_id))
+                counts[table] = int(conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {where}", params,
                 ).fetchone()[0])
-                for table in tables
-            }
             return {"seller": dict(seller), "counts": counts, "total": sum(counts.values())}
         finally:
             conn.close()
 
-    def purge_marketplace_seller_data(
+    def remove_marketplace_seller(
         self, tenant_id: int, marketplace_code: str, tenant_seller_id: int, actor_user_id: int,
     ) -> dict[str, Any]:
-        """Remove only disposable seller-scoped collection data in one transaction."""
+        """Immediately disconnect one seller and delete only its scoped data."""
         code = str(marketplace_code or "").strip().casefold()
         conn = self._connect()
         try:
             preview = self.marketplace_seller_purge_preview(tenant_id, code, tenant_seller_id)
             if isinstance(conn, PostgresConnection):
-                conn.execute("SELECT id FROM tenant_marketplace_sellers WHERE id=? FOR UPDATE", (int(tenant_seller_id),))
+                seller = conn.execute(
+                    """SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?
+                       AND marketplace_code=? FOR UPDATE""",
+                    (int(tenant_seller_id), int(tenant_id), code),
+                ).fetchone()
             else:
                 conn.execute("BEGIN IMMEDIATE")
-            deleted: dict[str, int] = {}
-            for table in (
-                "tenant_seller_offer_snapshots", "tenant_seller_offer_scans",
-                "tenant_seller_price_snapshots", "tenant_seller_catalog_products", "tenant_catalogs",
-            ):
-                cursor = conn.execute(
-                    f"DELETE FROM {table} WHERE tenant_id=? AND marketplace_code=? AND tenant_seller_id=?",
-                    (int(tenant_id), code, int(tenant_seller_id)),
-                )
-                deleted[table] = int(cursor.rowcount or 0)
-            conn.execute(
-                """UPDATE tenant_marketplace_sellers SET product_count=0,last_status='purged',
-                   last_error='',updated_at=? WHERE id=? AND tenant_id=? AND marketplace_code=?""",
-                (now_iso(), int(tenant_seller_id), int(tenant_id), code),
+                seller = conn.execute(
+                    """SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?
+                       AND marketplace_code=?""",
+                    (int(tenant_seller_id), int(tenant_id), code),
+                ).fetchone()
+            if not seller:
+                raise ValueError("Seller does not belong to this tenant and marketplace.")
+            deleted = self._delete_seller_working_data(conn, int(tenant_id), code, int(tenant_seller_id))
+            deleted["seller_encrypted_credentials"] = self._delete_seller_credentials(
+                conn, int(tenant_id), int(tenant_seller_id),
             )
-            self._audit(conn, actor_user_id, "tenant_marketplace_seller_data_purged", int(tenant_id),
+            schedules = conn.execute(
+                """UPDATE operation_schedules SET is_enabled=0,next_run_at=NULL,
+                   last_status='disabled_source_removed',last_error='',updated_at=?
+                   WHERE tenant_id=? AND tenant_seller_id=?""",
+                (now_iso(), int(tenant_id), int(tenant_seller_id)),
+            )
+            conn.execute(
+                """UPDATE tenant_marketplace_sellers SET status='removed',approval_status='removed',
+                   credential_ref=NULL,product_count=0,last_sync_at=NULL,last_status='removed',
+                   last_error='',reviewed_by=?,reviewed_at=?,updated_at=?
+                   WHERE id=? AND tenant_id=? AND marketplace_code=?""",
+                (int(actor_user_id), now_iso(), now_iso(), int(tenant_seller_id), int(tenant_id), code),
+            )
+            remaining = conn.execute(
+                """SELECT * FROM tenant_marketplace_sellers WHERE tenant_id=? AND marketplace_code=?
+                   AND status='active' AND approval_status='approved' ORDER BY updated_at DESC,id DESC LIMIT 1""",
+                (int(tenant_id), code),
+            ).fetchone()
+            if remaining:
+                remaining_discovery = str(remaining["discovery_json"] or "{}")
+                conn.execute(
+                    """UPDATE tenant_integrations SET seller_name=?,seller_identifier=?,seller_url=?,
+                       discovery_status=?,approval_status='approved',discovery_json=?,status='active',
+                       product_count=?,last_sync_at=?,last_status=?,last_error=?,updated_at=?
+                       WHERE tenant_id=? AND integration_code=?""",
+                    (str(remaining["display_name"] or ""), str(remaining["external_seller_id"] or ""),
+                     str(remaining["source_url"] or ""), str(remaining["discovery_status"] or "verified"),
+                     remaining_discovery, int(remaining["product_count"] or 0), remaining["last_sync_at"],
+                     remaining["last_status"], str(remaining["last_error"] or ""), now_iso(), int(tenant_id), code),
+                )
+            else:
+                conn.execute(
+                    """UPDATE tenant_integrations SET seller_name='',seller_identifier='',seller_url='',
+                       discovery_status='idle',approval_status='removed',discovery_json='{}',status='disabled',
+                       product_count=0,last_sync_at=NULL,last_status='source_removed',last_error='',updated_at=?
+                       WHERE tenant_id=? AND integration_code=?""",
+                    (now_iso(), int(tenant_id), code),
+                )
+            self._audit(conn, actor_user_id, "tenant_marketplace_seller_removed", int(tenant_id),
                         "tenant_marketplace_seller", str(int(tenant_seller_id)),
-                        {"marketplace_code": code, "preview_counts": preview["counts"], "deleted": deleted})
+                        {"marketplace_code": code, "deleted": deleted,
+                         "schedules_disabled": int(schedules.rowcount or 0)})
             conn.commit()
-            return {"seller": preview["seller"], "deleted": deleted, "total": sum(deleted.values())}
+            removed_seller = conn.execute(
+                "SELECT * FROM tenant_marketplace_sellers WHERE id=? AND tenant_id=?",
+                (int(tenant_seller_id), int(tenant_id)),
+            ).fetchone()
+            return {"seller": dict(removed_seller or seller), "deleted": deleted, "total": sum(deleted.values()),
+                    "schedules_disabled": int(schedules.rowcount or 0)}
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
+
+    # Compatibility for internal callers.  The operation is intentionally no
+    # longer a data-only purge: source removal must leave no active seller.
+    def purge_marketplace_seller_data(
+        self, tenant_id: int, marketplace_code: str, tenant_seller_id: int, actor_user_id: int,
+    ) -> dict[str, Any]:
+        return self.remove_marketplace_seller(tenant_id, marketplace_code, tenant_seller_id, actor_user_id)
 
     def public_integrations(self) -> list[dict[str, Any]]:
         rules = self.marketplace_source_rules()

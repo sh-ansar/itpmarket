@@ -132,11 +132,16 @@ Production schema changes are tracked by checksum and safe additive migrations
 
 ## Marketplace source review and billing history
 
-Marketplace source replacement is staged as a pending seller record. The live
-seller remains active until the replacement passes the normal review (including
-Ozon interactive canonical verification); it is then marked `replaced` rather
-than deleted. Platform administrators can preview and, after current-password
-confirmation, purge only the selected seller's collected marketplace rows.
+The initial marketplace connection still follows the pending review flow. For
+an already active source, a platform superadmin first validates a replacement
+(including live Ozon storefront verification) and then atomically activates it,
+cleans the retired seller's scoped collection data and marks that seller
+`replaced`. Removing a source requires current-password confirmation, disables
+its seller-specific schedules, clears only its scoped data and marks it
+`removed`; the marketplace grant itself remains intact.
+Import-run history, schedule-run history and audit records are retained for
+both operations. Seller credentials are never transferred to a replacement;
+they are deleted only when that seller is removed.
 
 The platform payment drawer exposes bounded invoice and payment-document
 metadata for a company. It never returns document paths or binary content;
