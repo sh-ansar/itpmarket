@@ -107,11 +107,11 @@ try {
         'Checking origin/production.'
     )
 
-    $fetchOutput = & $gitExe @gitBase `
-        fetch `
-        origin `
-        production `
-        2>&1
+    & $gitExe @gitBase `
+    fetch `
+    --quiet `
+    origin `
+    production
 
     if ($LASTEXITCODE -ne 0) {
         throw 'git fetch failed.'

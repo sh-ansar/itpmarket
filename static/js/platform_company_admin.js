@@ -60,6 +60,91 @@
     </article>`;
   }
 
+  function sellerManagementCard(seller) {
+    const id=Number(
+      seller.id||
+      seller.tenant_seller_id||
+      0
+    );
+
+    const code=String(
+      seller.marketplace_code||
+      ''
+    );
+
+    const marketplaceName=({
+      kaspi:'Kaspi',
+      ozon:'Ozon.ru',
+      ozon_kz:'Ozon.kz',
+      halyk_market:'Halyk Market',
+      forte:'Forte Market',
+      wildberries:'Wildberries'
+    })[code]||code;
+
+    const active=(
+      String(seller.status||'')==='active' &&
+      String(seller.approval_status||'')==='approved'
+    );
+
+    const sourceUrl=String(
+      seller.source_url||
+      ''
+    );
+
+    return `<article class="company-connection ${active?'connected':''}">
+      <div>
+        <strong>${esc(marketplaceName)}</strong>
+        <span>${esc(seller.status||'—')}</span>
+      </div>
+
+      <small>
+        ${esc(
+          seller.display_name||
+          seller.external_seller_id||
+          '—'
+        )}
+      </small>
+
+      <small>
+        ID: ${esc(seller.external_seller_id||'—')}
+        · verification: ${esc(seller.discovery_status||'parsed')}
+        · approval: ${esc(seller.approval_status||'—')}
+      </small>
+
+      ${sourceUrl
+        ?`<a href="${esc(sourceUrl)}"
+             target="_blank"
+             rel="noreferrer">
+             Открыть магазин
+           </a>`
+        :''
+      }
+
+      ${active&&id
+        ?`<div class="platform-row-actions">
+            <button type="button"
+                    class="primary"
+                    data-replace-source
+                    data-tenant-id="${Number(currentTenantId)}"
+                    data-marketplace-code="${esc(code)}"
+                    data-seller-id="${id}">
+              Заменить источник
+            </button>
+
+            <button type="button"
+                    class="decline"
+                    data-purge-seller
+                    data-tenant-id="${Number(currentTenantId)}"
+                    data-marketplace-code="${esc(code)}"
+                    data-seller-id="${id}">
+              Очистить данные
+            </button>
+          </div>`
+        :''
+      }
+    </article>`;
+  }
+
   function userEditor(user) {
     const permissions = Object.entries(permissionKeys).map(([code, key]) => `<label><input type="checkbox" data-user-permission="${esc(code)}" ${user.permissions?.[code] ? 'checked' : ''}>${esc(t(key, permissionFallbacks[code]))}</label>`).join('');
     return `<article class="platform-user-editor" data-user-id="${Number(user.id)}">
@@ -131,7 +216,44 @@
         <div class="marketplace-grant-grid">${(data.marketplace_access || []).map(item => marketplaceGrant(item, approved)).join('')}</div>
         <div class="platform-row-actions"><button class="primary" data-save-marketplace-grants ${approved ? '' : 'disabled'}>${esc(t('platform_save_marketplaces', 'Сохранить площадки'))}</button></div>
       </section>
-      <section class="detail-section"><div class="platform-section-title"><div><h3>${esc(t('platform_connections', 'Подключения'))}</h3><p>${esc(t('platform_connections_help', 'Фактические подключения компании.'))}</p></div></div><div class="company-connections">${(data.marketplace_access || []).map(connection).join('')}</div></section>
+      <section class="detail-section">
+        <div class="platform-section-title">
+          <div>
+            <h3>${esc(t('platform_connections', 'Подключения'))}</h3>
+            <p>${esc(t('platform_connections_help', 'Фактические подключения компании.'))}</p>
+          </div>
+        </div>
+
+        <div class="company-connections">
+          ${(data.marketplace_access || []).map(connection).join('')}
+        </div>
+
+        ${(data.sellers||[]).length
+          ?`<div class="platform-section-title" style="margin-top:18px">
+              <div>
+                <h3>Источники продавцов</h3>
+                <p>
+                  Управление фактически подключёнными магазинами.
+                </p>
+              </div>
+            </div>
+
+            <div class="company-connections">
+              ${(data.sellers||[])
+                .map(sellerManagementCard)
+                .join('')}
+            </div>`
+          :''
+        }
+
+        <div class="platform-row-actions" style="margin-top:16px">
+          <button type="button"
+                  data-billing-history
+                  data-tenant-id="${Number(currentTenantId)}">
+            История платежей
+          </button>
+        </div>
+      </section>
       <section class="detail-section"><div class="platform-section-title"><div><h3>${esc(t('platform_users', 'Пользователи'))}</h3><p>${esc(t('platform_users_help', 'Редактируйте роль, активность и функциональные права.'))}</p></div></div><div class="platform-user-list">${(data.users || []).map(userEditor).join('') || '<div>—</div>'}</div></section>`;
     drawer.hidden = false;
     backdrop.hidden = false;

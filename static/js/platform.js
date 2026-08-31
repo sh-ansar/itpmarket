@@ -468,7 +468,6 @@
   }
 
   document.addEventListener('click', async event => {
-    const openTenantButton=event.target.closest('[data-open-tenant]');
     const billingHistoryButton=event.target.closest('[data-billing-history]');
     const marketplaceReview=event.target.closest('[data-marketplace-review]');
     const replacement=event.target.closest('[data-replace-source]');
@@ -479,7 +478,6 @@
     const preview = event.target.closest('[data-source-rule-preview]');
     const billingAction=event.target.closest('[data-billing-action]');
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
-    if(openTenantButton){event.preventDefault();await openTenant(openTenantButton.dataset.openTenant);return;}
     if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
     if(marketplaceReview){
       event.preventDefault();
