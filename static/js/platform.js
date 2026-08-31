@@ -467,6 +467,17 @@
     }
   }
 
+  async function refreshTenantDrawer(tenantId) {
+    const richOpen = window.PlatformCompanyAdmin?.openTenant;
+
+    if (typeof richOpen === 'function') {
+      await richOpen(tenantId);
+      return;
+    }
+
+    await openTenant(tenantId);
+  }
+
   document.addEventListener('click', async event => {
     const billingHistoryButton=event.target.closest('[data-billing-history]');
     const marketplaceReview=event.target.closest('[data-marketplace-review]');
@@ -481,13 +492,13 @@
     if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
     if(marketplaceReview){
       event.preventDefault();
-      try{await api(`/api/platform/tenants/${marketplaceReview.dataset.tenantId}/marketplaces/${marketplaceReview.dataset.marketplaceCode}/${marketplaceReview.dataset.marketplaceReview}`,{method:'POST',body:{tenant_seller_id:Number(marketplaceReview.dataset.sellerId)}});toast('Источник обработан');await openTenant(marketplaceReview.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
+      try{await api(`/api/platform/tenants/${marketplaceReview.dataset.tenantId}/marketplaces/${marketplaceReview.dataset.marketplaceCode}/${marketplaceReview.dataset.marketplaceReview}`,{method:'POST',body:{tenant_seller_id:Number(marketplaceReview.dataset.sellerId)}});toast('Источник обработан');await refreshTenantDrawer(marketplaceReview.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
     }
     if(replacement){
       event.preventDefault();
       const sourceUrl=String(window.prompt('Новый URL продавца:')||'').trim();
       if(!sourceUrl)return;
-      try{await api(`/api/platform/tenants/${replacement.dataset.tenantId}/marketplaces/${replacement.dataset.marketplaceCode}/${replacement.dataset.sellerId}/replace`,{method:'POST',body:{source_url:sourceUrl}});toast('Кандидат источника отправлен на проверку');await openTenant(replacement.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
+      try{await api(`/api/platform/tenants/${replacement.dataset.tenantId}/marketplaces/${replacement.dataset.marketplaceCode}/${replacement.dataset.sellerId}/replace`,{method:'POST',body:{source_url:sourceUrl}});toast('Кандидат источника отправлен на проверку');await refreshTenantDrawer(replacement.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
     }
     if(purgeSeller){
       event.preventDefault();
@@ -499,7 +510,7 @@
         const currentPassword=String(window.prompt('Подтвердите текущим паролем:')||'');
         if(!currentPassword)return;
         await api(`/api/platform/tenants/${tenantId}/marketplaces/${marketplaceCode}/${sellerId}/purge`,{method:'POST',body:{current_password:currentPassword}});
-        toast('Данные выбранного seller очищены');await openTenant(tenantId);await load();
+        toast('Данные выбранного seller очищены');await refreshTenantDrawer(tenantId);await load();
       }catch(error){toast(error.message,true);}return;
     }
     if (admin) {

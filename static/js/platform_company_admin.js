@@ -268,6 +268,11 @@
     catch (error) { toast(error.message, true); body.innerHTML = `<div class="loading">${esc(error.message)}</div>`; }
   }
 
+  window.PlatformCompanyAdmin = {
+    ...(window.PlatformCompanyAdmin || {}),
+    openTenant
+  };
+
   function close() { drawer.hidden = true; backdrop.hidden = true; snapshot = null; }
   document.querySelector('#closeTenantDetail')?.addEventListener('click', close);
   backdrop.addEventListener('click', close);
