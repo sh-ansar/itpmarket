@@ -38,6 +38,7 @@ class NotificationService:
         self._cache_lock = threading.Lock()
         self._task_states: dict[str, str] = {}
         self._expiry_checks: dict[int, float] = {}
+        self._invoice_due_checks: dict[int, float] = {}
         self.ensure_schema()
 
     def set_email_service(self, email_service: Any | None) -> None:
@@ -322,6 +323,11 @@ class NotificationService:
         """Create non-destructive reminders for current issued invoices only."""
         if not tenant_id:
             return
+        tenant_key = int(tenant_id)
+        current_tick = time.monotonic()
+        with self._cache_lock:
+            if current_tick - self._invoice_due_checks.get(tenant_key, 0.0) < 300:
+                return
         conn = self._connect()
         try:
             invoices = conn.execute(
@@ -372,6 +378,8 @@ class NotificationService:
                 f"invoice:{int(invoice['id'])}:due:{phase}:user:{user_id}", now_iso(),
             ) for user_id in users)
         self._insert_many(rows)
+        with self._cache_lock:
+            self._invoice_due_checks[tenant_key] = current_tick
 
     def maintenance_tenant_ids(self) -> list[int]:
         """Return only tenants that can have subscription or invoice reminders."""

@@ -529,12 +529,8 @@ def telegram_link_service() -> TelegramLinkService:
 
 
 def sync_telegram_notification_sources() -> None:
-    """Create bot-bound events even when no browser is polling the web inbox."""
-    service = notification_service()
-    service.sync_tasks(TASKS.raw_states())
-    for tenant_id in telegram_link_service().active_tenant_ids():
-        service.ensure_expiry_reminders(tenant_id)
-        service.ensure_invoice_due_reminders(tenant_id)
+    """Synchronize task events for Telegram delivery without billing lifecycle queries."""
+    notification_service().sync_tasks(TASKS.raw_states())
 
 
 def inventory_service() -> InventoryService:

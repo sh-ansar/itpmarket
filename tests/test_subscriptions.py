@@ -6,6 +6,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from auth_service import AuthService
 from billing_service import BillingService
@@ -674,6 +675,10 @@ class SubscriptionServiceTests(unittest.TestCase):
                     ((now + timedelta(days=offset)).isoformat(timespec="seconds"), int(invoice["id"])),
                 )
                 conn.commit()
+                # Each iteration models a later worker interval; bypass the
+                # five-minute on-demand catch-up cache used by HTTP polling.
+                with notifications._cache_lock:
+                    notifications._invoice_due_checks.clear()
                 NotificationMaintenanceWorker(notifications).run_once()
         finally:
             conn.close()
@@ -692,6 +697,36 @@ class SubscriptionServiceTests(unittest.TestCase):
             conn.close()
         NotificationMaintenanceWorker(notifications).run_once()
         self.assertEqual(4, notifications.list_for_user(int(self.admin["id"]))["unread"])
+
+    def test_invoice_due_reminders_are_throttled_per_tenant(self) -> None:
+        requested = self.service.request_plan(self.tenant_id, "starter", int(self.admin["id"]))
+        reviewed = self.service.review_subscription(int(requested["id"]), "approved", int(self.admin["id"]))
+        invoice = self.billing.create_invoice(
+            int(reviewed["id"]), 1, int(self.admin["id"]),
+            seller_snapshot={"name": "Test supplier", "vat_rate": 0}, due_days=5,
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE subscription_invoices SET due_at=? WHERE id=?",
+                (datetime.now().astimezone().isoformat(timespec="seconds"), int(invoice["id"])),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        notifications = NotificationService(self.db_path)
+        original_connect = notifications._connect
+        with patch.object(notifications, "_connect", wraps=original_connect) as connect:
+            notifications.ensure_invoice_due_reminders(self.tenant_id)
+            notifications.ensure_invoice_due_reminders(self.tenant_id)
+
+        # One evaluation opens a query connection and one insertion connection;
+        # the immediate second call is throttled before touching the database.
+        self.assertEqual(2, connect.call_count)
+        inbox = notifications.list_for_user(int(self.admin["id"]))
+        self.assertEqual(1, inbox["unread"])
+        self.assertEqual("invoice_due_today", inbox["items"][0]["event_type"])
 
     def test_maintenance_continues_after_a_tenant_failure(self) -> None:
         class TenantService:

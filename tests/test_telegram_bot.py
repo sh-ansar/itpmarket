@@ -110,6 +110,22 @@ class TelegramBotTests(unittest.TestCase):
         with patch.dict(os.environ, {"ITP_DISABLE_NOTIFICATION_MAINTENANCE": "1"}):
             self.assertFalse(webapp.notification_maintenance_enabled())
 
+    def test_telegram_sync_only_syncs_tasks(self) -> None:
+        class TaskOnlyNotifications:
+            def __init__(self) -> None:
+                self.synced = None
+
+            def sync_tasks(self, tasks) -> None:
+                self.synced = tasks
+
+        notifications = TaskOnlyNotifications()
+        with patch.object(webapp, "notification_service", return_value=notifications), patch.object(
+            webapp.TASKS, "raw_states", return_value={"task-1": {"status": "completed"}}
+        ):
+            webapp.sync_telegram_notification_sources()
+
+        self.assertEqual({"task-1": {"status": "completed"}}, notifications.synced)
+
     def test_link_token_links_active_user_without_password(self) -> None:
         chat_id = 70001
         created = self.worker.links.create_link_token(self.user)
