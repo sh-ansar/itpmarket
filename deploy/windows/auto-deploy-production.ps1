@@ -201,21 +201,75 @@ Write-DeployLog (
     $target
 )
 
-& powershell.exe `
-    -NoProfile `
-    -NonInteractive `
-    -ExecutionPolicy Bypass `
-    -File $postUpdate `
-    -PreviousSha $previousSuccessful `
-    -TargetSha $target `
-    -RepoRoot $RepoRoot `
-    -LogFile $LogFile `
-    *>> $LogFile
+$postUpdateStdout = Join-Path `
+    $stateDir `
+    'post-update.stdout.log'
 
-if ($LASTEXITCODE -ne 0) {
+$postUpdateStderr = Join-Path `
+    $stateDir `
+    'post-update.stderr.log'
+
+Remove-Item `
+    -LiteralPath $postUpdateStdout `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+Remove-Item `
+    -LiteralPath $postUpdateStderr `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+$postUpdateArguments = @(
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    ('"' + $postUpdate + '"'),
+    '-PreviousSha',
+    ('"' + $previousSuccessful + '"'),
+    '-TargetSha',
+    $target,
+    '-RepoRoot',
+    ('"' + $RepoRoot + '"'),
+    '-LogFile',
+    ('"' + $LogFile + '"')
+)
+
+$postUpdateProcess = Start-Process `
+    -FilePath 'powershell.exe' `
+    -ArgumentList $postUpdateArguments `
+    -RedirectStandardOutput $postUpdateStdout `
+    -RedirectStandardError $postUpdateStderr `
+    -Wait `
+    -PassThru
+
+foreach ($stream in @(
+    $postUpdateStdout,
+    $postUpdateStderr
+)) {
+    if (-not (Test-Path -LiteralPath $stream)) {
+        continue
+    }
+
+    foreach ($line in Get-Content -LiteralPath $stream) {
+        $value = [string]$line
+
+        if ($value.Trim()) {
+            Write-DeployLog (
+                'POST-UPDATE: ' +
+                $value.Trim()
+            )
+        }
+    }
+}
+
+if ($postUpdateProcess.ExitCode -ne 0) {
     Write-DeployLog (
         "DEPLOY FAILED: " +
-        $target
+        $target +
+        " exit=" +
+        $postUpdateProcess.ExitCode
     )
     exit 20
 }
