@@ -208,7 +208,8 @@ Write-DeployLog (
     -PreviousSha $previousSuccessful `
     -TargetSha $target `
     -RepoRoot $RepoRoot `
-    -LogFile $LogFile
+    -LogFile $LogFile `
+    *>> $LogFile
 
 if ($LASTEXITCODE -ne 0) {
     Write-DeployLog (
