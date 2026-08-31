@@ -314,6 +314,61 @@ class NotificationService:
         with self._cache_lock:
             self._expiry_checks[tenant_key] = current_tick
 
+    def ensure_invoice_due_reminders(self, tenant_id: int | None) -> None:
+        """Create non-destructive reminders for current issued invoices only."""
+        if not tenant_id:
+            return
+        conn = self._connect()
+        try:
+            invoices = conn.execute(
+                """SELECT i.id,i.invoice_number,i.total_amount,i.currency,i.due_at
+                   FROM subscription_invoices i
+                   JOIN tenant_subscriptions s ON s.id=i.subscription_id
+                   WHERE i.tenant_id=? AND i.status='issued'
+                     AND s.status IN ('awaiting_payment','payment_review','payment_rejected')
+                     AND i.due_at IS NOT NULL AND i.due_at<>''""",
+                (int(tenant_id),),
+            ).fetchall()
+            users = [int(row[0]) for row in conn.execute(
+                """SELECT DISTINCT u.id
+                   FROM tenant_users tu JOIN app_users u ON u.id=tu.user_id
+                   LEFT JOIN tenant_user_permissions up
+                     ON up.tenant_id=tu.tenant_id AND up.user_id=u.id
+                    AND up.permission_code='manage_company' AND up.is_enabled=1
+                   LEFT JOIN tenant_role_permissions rp
+                     ON rp.tenant_id=tu.tenant_id AND rp.role_code=u.role
+                    AND rp.permission_code='manage_company' AND rp.is_enabled=1
+                   WHERE tu.tenant_id=? AND tu.is_active=1 AND u.is_active=1
+                     AND (u.role='admin' OR up.user_id IS NOT NULL OR rp.role_code IS NOT NULL)""",
+                (int(tenant_id),),
+            ).fetchall()]
+        finally:
+            conn.close()
+        today = datetime.now().astimezone().date()
+        rows: list[tuple[Any, ...]] = []
+        for invoice in invoices:
+            due = _parse_time(invoice["due_at"])
+            if not due:
+                continue
+            days = (due.date() - today).days
+            phase = {3: "3d", 1: "1d", 0: "today"}.get(days)
+            if phase is None and days < 0:
+                phase = "overdue"
+            if phase is None:
+                continue
+            event_type = "invoice_overdue" if phase == "overdue" else f"invoice_due_{phase}"
+            title = "Срок оплаты счёта истёк" if phase == "overdue" else "Напоминание об оплате счёта"
+            message = (
+                f"Счёт {invoice['invoice_number']} на сумму {invoice['total_amount']} "
+                f"{invoice['currency']} необходимо оплатить до {due.strftime('%d.%m.%Y')}."
+            )
+            rows.extend((
+                int(tenant_id), user_id, "billing", event_type,
+                "warning", title, message, "/app#settings",
+                f"invoice:{int(invoice['id'])}:due:{phase}:user:{user_id}", now_iso(),
+            ) for user_id in users)
+        self._insert_many(rows)
+
     def list_for_user(self, user_id: int, limit: int = 50) -> dict[str, Any]:
         conn = self._connect()
         try:

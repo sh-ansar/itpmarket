@@ -57,7 +57,7 @@ $env:DATABASE_URL = 'postgresql://spyon:LOCAL_PASSWORD@127.0.0.1:55433/spyon_dev
 
 Для существующей dev PostgreSQL миграции применяются явно через `engine/postgres_migrations.py apply`. В частности, `20260827_self_service_billing_v1.sql` добавляет self-service поля регистрации, счета и подтверждения оплаты. Миграции аддитивны: они добавляют таблицы/индексы и отсутствующие поля, не объединяют карточки автоматически и не удаляют персональные overrides.
 
-Для локального теста Telegram используйте отдельного dev-бота и задайте `ITP_TELEGRAM_BOT_ENABLED=1`, `ITP_TELEGRAM_BOT_TOKEN`, `ITP_TELEGRAM_BOT_USERNAME` и `SPYON_PUBLIC_URL`. Реальный token не записывайте в `.env.example`, код, логи или тестовые fixtures.
+Для локального теста Telegram используйте отдельного dev-бота и задайте `ITP_TELEGRAM_BOT_ENABLED=1`, `ITP_TELEGRAM_BOT_TOKEN`, `ITP_TELEGRAM_BOT_USERNAME` и `SPYON_PUBLIC_URL`. Реальный token не записывайте в `.env.example`, код, логи или тестовые fixtures. Привязка выполняется только через Settings → Telegram и команду `/link TOKEN`; token хранится в БД только как hash, действует пять минут и используется один раз. `python scripts/diagnose_telegram.py` выполняет read-only проверку `getMe` и схемы без отправки сообщений.
 
 SMTP локально остаётся opt-in: задайте `ITP_EMAIL_ENABLED=1`, host, sender и совместимую TLS-настройку только в локальном окружении. Для authenticated SMTP username и password должны задаваться парой.
 

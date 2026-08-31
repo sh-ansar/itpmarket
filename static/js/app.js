@@ -1702,17 +1702,17 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     state.telegram=data||{};const card=$('#telegramSettings');if(!card)return;
     const link=data?.link||null,available=Boolean(data?.available),username=String(data?.bot_username||'').replace(/^@/,'');
     card.hidden=!available&&!link;
-    const title=$('#telegramStatusTitle'),description=$('#telegramStatusText'),dot=$('#telegramStatusDot'),toggle=$('#toggleTelegramNotifications'),disconnect=$('#disconnectTelegram'),open=$('#openTelegramBot');
+    const title=$('#telegramStatusTitle'),description=$('#telegramStatusText'),dot=$('#telegramStatusDot'),toggle=$('#toggleTelegramNotifications'),disconnect=$('#disconnectTelegram'),connect=$('#connectTelegram'),instructions=$('#telegramLinkInstructions'),open=$('#openTelegramBot');
     if(open){open.hidden=!available;open.href=available?`https://t.me/${encodeURIComponent(username)}`:'#'}
     if(link){
       const enabled=Boolean(link.is_enabled),identity=link.telegram_username?`@${link.telegram_username}`:link.telegram_display_name||'личный чат';
       title.textContent=enabled?'Telegram подключён':'Уведомления приостановлены';description.textContent=`${identity} · привязан ${dateText(link.linked_at)}`;dot.className=enabled?'connected':'paused';
-      toggle.hidden=false;toggle.textContent=enabled?'Приостановить':'Возобновить';toggle.dataset.enabled=String(enabled);disconnect.hidden=false;
+      toggle.hidden=false;toggle.textContent=enabled?'Приостановить':'Возобновить';toggle.dataset.enabled=String(enabled);disconnect.hidden=false;if(connect)connect.hidden=true;if(instructions)instructions.hidden=true;
     }else{
-      title.textContent='Telegram не подключён';description.textContent='Откройте бота и выполните /login';dot.className='';toggle.hidden=true;disconnect.hidden=true;
+      title.textContent='Telegram не подключён';description.textContent='Получайте уведомления Spyon в Telegram.';dot.className='';toggle.hidden=true;disconnect.hidden=true;if(connect)connect.hidden=!available;
     }
   }
-  async function loadTelegramStatus(){try{renderTelegramStatus(await api('/api/telegram/status'))}catch(error){console.error(error)}}
+  async function loadTelegramStatus(){try{renderTelegramStatus(await api('/api/account/telegram'))}catch(error){console.error(error)}}
 
   const SETTINGS_SECTIONS = [
     {
@@ -3279,7 +3279,8 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if($('#readAllNotifications'))$('#readAllNotifications').onclick=async()=>{try{await api('/api/notifications/read-all',{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
     if($('#notificationList'))$('#notificationList').onclick=async event=>{const item=event.target.closest('[data-notification-id]');if(!item)return;try{await api(`/api/notifications/${item.dataset.notificationId}/read`,{method:'POST',body:{}});await loadNotifications({announce:false})}catch(error){toast(error.message,true)}};
     if($('#toggleTelegramNotifications'))$('#toggleTelegramNotifications').onclick=async()=>{const enabled=$('#toggleTelegramNotifications').dataset.enabled==='true';try{await api('/api/telegram/enabled',{method:'POST',body:{enabled:!enabled}});await loadTelegramStatus();toast(enabled?'Telegram-уведомления приостановлены':'Telegram-уведомления включены')}catch(error){toast(error.message,true)}};
-    if($('#disconnectTelegram'))$('#disconnectTelegram').onclick=async()=>{if(!confirm('Отвязать Telegram от аккаунта Spyon?'))return;try{await api('/api/telegram/disconnect',{method:'POST',body:{}});await loadTelegramStatus();toast('Telegram отключён')}catch(error){toast(error.message,true)}};
+    if($('#connectTelegram'))$('#connectTelegram').onclick=async()=>{const button=$('#connectTelegram'),instructions=$('#telegramLinkInstructions');try{button.disabled=true;const result=await api('/api/account/telegram/link-token',{method:'POST',body:{}});const username=String(result.bot_username||'');if(instructions){instructions.textContent=`1. Откройте @${username}. 2. Отправьте: ${result.command}. Код действует 5 минут.`;instructions.hidden=false;}toast('Одноразовый код Telegram создан')}catch(error){toast(error.message,true)}finally{button.disabled=false}};
+    if($('#disconnectTelegram'))$('#disconnectTelegram').onclick=async()=>{if(!confirm('Отвязать Telegram от аккаунта Spyon?'))return;try{await api('/api/account/telegram',{method:'DELETE',body:{}});await loadTelegramStatus();toast('Telegram отключён')}catch(error){toast(error.message,true)}};
     $('#profileMenu').onclick=e=>e.stopPropagation();if($('#openPasswordSettings'))$('#openPasswordSettings').onclick=()=>showModal('passwordModal');$$('.modal-close').forEach(b=>b.onclick=hideModals);$('#closeDrawer').onclick=closeDrawer;$('#backdrop').onclick=closeDrawer;
     $$('[data-lang]').forEach(b=>b.onclick=()=>{applyI18n(b.dataset.lang);persistUiPreference({locale:b.dataset.lang});if(state.page==='dashboard')loadOverview()});
     if($('#languageSelect'))$('#languageSelect').onchange=e=>{applyI18n(e.target.value);persistUiPreference({locale:e.target.value});if(state.page==='dashboard')loadOverview()};

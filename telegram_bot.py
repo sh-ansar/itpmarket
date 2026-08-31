@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import logging
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta
@@ -19,9 +20,9 @@ from storage.postgres_compat import PostgresConnection, configure_connection, co
 
 
 LOGGER = logging.getLogger("spyon.telegram")
-AUTH_MAX_ATTEMPTS = 5
-AUTH_WINDOW_SECONDS = 15 * 60
-SESSION_TTL_SECONDS = 5 * 60
+LINK_MAX_ATTEMPTS = 5
+LINK_WINDOW_SECONDS = 15 * 60
+LINK_TOKEN_TTL_SECONDS = 5 * 60
 DELIVERY_BATCH_SIZE = 30
 
 
@@ -148,7 +149,7 @@ class TelegramBotApi:
             "setMyCommands",
             {
                 "commands": [
-                    {"command": "login", "description": "Войти в Spyon"},
+                    {"command": "link", "description": "Подключить Telegram к Spyon"},
                     {"command": "status", "description": "Статус подключения"},
                     {"command": "notifications", "description": "Последние уведомления"},
                     {"command": "pause", "description": "Приостановить уведомления"},
@@ -165,6 +166,7 @@ class TelegramLinkService:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
+        self._link_attempts: dict[str, list[float]] = {}
 
     def _connect(self) -> PostgresConnection | Any:
         conn = connect_database(self.db_path, timeout=30)
@@ -258,6 +260,113 @@ class TelegramLinkService:
                 json.dumps(details or {}, ensure_ascii=False), now_iso(), tenant_id,
             ),
         )
+
+    def _link_rate_limited(self, key: str) -> bool:
+        """Apply a bounded in-process throttle without recording any token value."""
+        stamp = time.monotonic()
+        attempts = [
+            value for value in self._link_attempts.get(key, [])
+            if stamp - value < LINK_WINDOW_SECONDS
+        ]
+        attempts.append(stamp)
+        self._link_attempts[key] = attempts
+        return len(attempts) > LINK_MAX_ATTEMPTS
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+    def create_link_token(self, user: dict[str, Any]) -> dict[str, str]:
+        """Create a five-minute, one-time token; only its digest is persisted."""
+        user_id = int(user.get("id") or 0)
+        if user_id <= 0 or not bool(user.get("is_active")):
+            raise ValueError("Активная учётная запись не найдена.")
+        if self._link_rate_limited(f"user:{user_id}"):
+            raise ValueError("Слишком много запросов. Повторите операцию позже.")
+        token = secrets.token_urlsafe(24)
+        stamp = datetime.now().astimezone()
+        expires_at = stamp + timedelta(seconds=LINK_TOKEN_TTL_SECONDS)
+        tenant_id = int(user["tenant_id"]) if user.get("tenant_id") is not None else None
+        conn = self._connect()
+        try:
+            conn.execute(
+                """UPDATE telegram_link_tokens SET revoked_at=?
+                   WHERE user_id=? AND used_at IS NULL AND revoked_at IS NULL""",
+                (stamp.isoformat(timespec="seconds"), user_id),
+            )
+            conn.execute(
+                """INSERT INTO telegram_link_tokens(
+                       user_id,tenant_id,token_hash,expires_at,used_at,revoked_at,created_at
+                   ) VALUES(?,?,?,?,NULL,NULL,?)""",
+                (
+                    user_id, tenant_id, self._token_hash(token),
+                    expires_at.isoformat(timespec="seconds"), stamp.isoformat(timespec="seconds"),
+                ),
+            )
+            self._event(conn, user_id, tenant_id, "telegram_link_token_created", str(user_id))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"token": token, "expires_at": expires_at.isoformat(timespec="seconds")}
+
+    def consume_link_token(self, token: str, *, chat_id: int, telegram_user_id: int,
+                           username: str = "", display_name: str = "") -> dict[str, Any] | None:
+        """Consume a token once before linking, so it cannot be reused by another chat."""
+        raw = str(token or "").strip()
+        if not raw or len(raw) > 256 or self._link_rate_limited(f"chat:{int(chat_id)}"):
+            return None
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT id,user_id,tenant_id FROM telegram_link_tokens
+                   WHERE token_hash=? AND used_at IS NULL AND revoked_at IS NULL
+                     AND expires_at>? LIMIT 1""",
+                (self._token_hash(raw), stamp),
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = conn.execute(
+                """UPDATE telegram_link_tokens SET used_at=?
+                   WHERE id=? AND used_at IS NULL AND revoked_at IS NULL""",
+                (stamp, int(row["id"])),
+            )
+            if int(cursor.rowcount) != 1:
+                conn.rollback()
+                return None
+            conn.commit()
+        finally:
+            conn.close()
+
+        user = self._load_active_token_user(int(row["user_id"]), row["tenant_id"])
+        if user is None:
+            return None
+        return self.link_user(
+            user, chat_id=int(chat_id), telegram_user_id=int(telegram_user_id),
+            username=username, display_name=display_name,
+        )
+
+    def _load_active_token_user(self, user_id: int, token_tenant_id: Any) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT u.id,u.is_active,tu.tenant_id
+                   FROM app_users u
+                   LEFT JOIN tenant_users tu ON tu.user_id=u.id AND tu.is_active=1
+                   WHERE u.id=? LIMIT 1""",
+                (int(user_id),),
+            ).fetchone()
+            if row is None or not bool(row["is_active"]):
+                return None
+            current_tenant = row["tenant_id"]
+            if (int(current_tenant) if current_tenant is not None else None) != (
+                int(token_tenant_id) if token_tenant_id is not None else None
+            ):
+                return None
+        finally:
+            conn.close()
+        # AuthService supplies the public account shape used by link_user.
+        return AuthService(self.db_path).get_user(int(user_id))
 
     def status_for_user(
         self,
@@ -593,8 +702,9 @@ class TelegramBotWorker:
         )
         self.bot_username = ""
         self.notification_sync = notification_sync
+        # Retained empty only for safe compatibility with historical /cancel and
+        # /logout branches; no user input is ever placed in this mapping.
         self._sessions: dict[int, dict[str, Any]] = {}
-        self._attempts: dict[str, list[float]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -675,53 +785,6 @@ class TelegramBotWorker:
             int(chat_id), text, parse_mode="HTML" if html_mode else None
         )
 
-    def _delete_sensitive(self, chat_id: int, message_id: int) -> bool:
-        try:
-            return bool(self.api.delete_message(int(chat_id), int(message_id)))
-        except Exception:
-            LOGGER.warning("telegram_sensitive_message_delete_failed chat_id=%s", chat_id)
-            return False
-
-    def _active_session(self, chat_id: int) -> dict[str, Any] | None:
-        session = self._sessions.get(int(chat_id))
-        if not session:
-            return None
-        if time.monotonic() > float(session.get("expires_at") or 0):
-            self._sessions.pop(int(chat_id), None)
-            return None
-        return session
-
-    def _attempt_key_locked(self, key: str) -> bool:
-        current = time.monotonic()
-        values = [
-            stamp for stamp in self._attempts.get(key, [])
-            if current - stamp < AUTH_WINDOW_SECONDS
-        ]
-        self._attempts[key] = values
-        return len(values) >= AUTH_MAX_ATTEMPTS
-
-    def _auth_locked(self, chat_id: int, email: str) -> bool:
-        return self._attempt_key_locked(f"chat:{int(chat_id)}") or self._attempt_key_locked(
-            f"email:{str(email).strip().casefold()}"
-        )
-
-    def _record_auth_failure(self, chat_id: int, email: str) -> None:
-        stamp = time.monotonic()
-        for key in (
-            f"chat:{int(chat_id)}",
-            f"email:{str(email).strip().casefold()}",
-        ):
-            values = [
-                item for item in self._attempts.get(key, [])
-                if stamp - item < AUTH_WINDOW_SECONDS
-            ]
-            values.append(stamp)
-            self._attempts[key] = values
-
-    def _clear_auth_attempts(self, chat_id: int, email: str) -> None:
-        self._attempts.pop(f"chat:{int(chat_id)}", None)
-        self._attempts.pop(f"email:{str(email).strip().casefold()}", None)
-
     def handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message")
         if not isinstance(message, dict):
@@ -742,8 +805,14 @@ class TelegramBotWorker:
         command_token = text.split(maxsplit=1)[0].casefold()
         command = command_token.split("@", 1)[0] if command_token.startswith("/") else ""
         if command:
-            self._handle_command(command, chat_id)
+            argument = text[len(command_token):].strip()
+            self._handle_command(command, chat_id, argument, sender)
             return
+
+        # Password and email messages are never accepted by this bot.  Linking
+        # starts in authenticated Spyon settings and continues with /link TOKEN.
+        self._send(chat_id, "Откройте настройки Spyon и создайте одноразовый код Telegram для команды /link.")
+        return
 
         session = self._active_session(chat_id)
         if not session:
@@ -833,7 +902,39 @@ class TelegramBotWorker:
             ),
         )
 
-    def _handle_command(self, command: str, chat_id: int) -> None:
+    def _handle_command(
+        self,
+        command: str,
+        chat_id: int,
+        argument: str = "",
+        sender: dict[str, Any] | None = None,
+    ) -> None:
+        if command == "/link":
+            token = str(argument or "").split(maxsplit=1)[0]
+            sender_value = sender or {}
+            display_name = " ".join(
+                str(sender_value.get(key) or "").strip()
+                for key in ("first_name", "last_name")
+            ).strip()
+            linked = self.links.consume_link_token(
+                token,
+                chat_id=chat_id,
+                telegram_user_id=int(sender_value.get("id") or chat_id),
+                username=str(sender_value.get("username") or ""),
+                display_name=display_name,
+            )
+            self._send(
+                chat_id,
+                "Telegram подключён к Spyon. Новые уведомления будут приходить сюда."
+                if linked else "Код недействителен или истёк. Создайте новый одноразовый код в настройках Spyon.",
+            )
+            return
+        if command == "/login":
+            self._send(
+                chat_id,
+                "Пароль в Telegram не используется. Откройте настройки Spyon и создайте одноразовый код для /link.",
+            )
+            return
         link = self.links.status_for_chat(chat_id)
         if link:
             linked_user = self.auth.get_user(int(link["user_id"]))
@@ -851,6 +952,18 @@ class TelegramBotWorker:
             ):
                 self.links.unlink_user(int(link["user_id"]))
                 link = None
+        if not link:
+            if command in {"/start", "/help"}:
+                self._send(
+                    chat_id,
+                    "Бот Spyon отправляет уведомления. В настройках Spyon создайте одноразовый код и отправьте /link КОД.",
+                )
+            else:
+                self._send(
+                    chat_id,
+                    "Telegram ещё не привязан. Создайте одноразовый код в настройках Spyon и отправьте /link КОД.",
+                )
+            return
         if command in {"/start", "/help"}:
             if link:
                 self._send(

@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from auth_service import AuthService
@@ -658,6 +659,42 @@ class SubscriptionServiceTests(unittest.TestCase):
                 ]
             ),
         )
+
+    def test_invoice_due_reminders_cover_all_phases_and_are_idempotent(self) -> None:
+        requested = self.service.request_plan(self.tenant_id, "starter", int(self.admin["id"]))
+        reviewed = self.service.review_subscription(int(requested["id"]), "approved", int(self.admin["id"]))
+        invoice = self.billing.create_invoice(
+            int(reviewed["id"]), 1, int(self.admin["id"]),
+            seller_snapshot={"name": "Test supplier", "vat_rate": 0}, due_days=5,
+        )
+        now = datetime.now().astimezone()
+        notifications = NotificationService(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            for offset in (3, 1, 0, -1):
+                conn.execute(
+                    "UPDATE subscription_invoices SET due_at=? WHERE id=?",
+                    ((now + timedelta(days=offset)).isoformat(timespec="seconds"), int(invoice["id"])),
+                )
+                conn.commit()
+                notifications.ensure_invoice_due_reminders(self.tenant_id)
+        finally:
+            conn.close()
+        events = notifications.list_for_user(int(self.admin["id"]))["items"]
+        self.assertEqual(
+            {"invoice_due_3d", "invoice_due_1d", "invoice_due_today", "invoice_overdue"},
+            {item["event_type"] for item in events},
+        )
+        notifications.ensure_invoice_due_reminders(self.tenant_id)
+        self.assertEqual(4, notifications.list_for_user(int(self.admin["id"]))["unread"])
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("UPDATE subscription_invoices SET status='paid' WHERE id=?", (int(invoice["id"]),))
+            conn.commit()
+        finally:
+            conn.close()
+        notifications.ensure_invoice_due_reminders(self.tenant_id)
+        self.assertEqual(4, notifications.list_for_user(int(self.admin["id"]))["unread"])
 
 
 if __name__ == "__main__":

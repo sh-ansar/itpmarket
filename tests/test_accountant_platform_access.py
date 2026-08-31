@@ -14,6 +14,7 @@ from subscription_service import (
 )
 from tenant_security import (
     has_platform_permission,
+    PLATFORM_ROLE_PERMISSIONS,
 )
 
 
@@ -171,6 +172,21 @@ class AccountantPlatformAccessTests(
             200,
             response.status_code,
         )
+
+        self.assertEqual(
+            {
+                "billing.view", "billing.invoice.download", "billing.payment.view",
+                "billing.payment.confirm", "billing.payment.reject", "billing.report.view",
+            },
+            set(PLATFORM_ROLE_PERMISSIONS["accountant"]),
+        )
+        self.assertFalse(has_platform_permission(self.accountant, "billing.invoice.issue"))
+        self.assertFalse(has_platform_permission(self.accountant, "billing.invoice.cancel"))
+
+    def test_accountant_cannot_access_supplier_settings_api(self) -> None:
+        self._login(self.accountant)
+        response = self.client.get("/api/platform/billing/supplier-settings")
+        self.assertEqual(403, response.status_code)
         self.assertIsNone(self.auth.get_user(int(self.accountant["id"]))["tenant_id"])
 
     def test_accountant_cannot_open_other_platform_sections(

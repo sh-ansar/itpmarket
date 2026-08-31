@@ -100,70 +100,53 @@ class TelegramBotTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.folder.cleanup()
 
-    def test_login_deletes_credentials_and_links_only_authenticated_user(self) -> None:
+    def test_link_token_links_active_user_without_password(self) -> None:
         chat_id = 70001
-        self.worker.handle_update(telegram_update(chat_id, 1, "/login"))
-        self.worker.handle_update(
-            telegram_update(chat_id, 2, "owner@example.com")
-        )
-        self.worker.handle_update(
-            telegram_update(chat_id, 3, "StrongPassword123!")
-        )
+        created = self.worker.links.create_link_token(self.user)
+        self.worker.handle_update(telegram_update(chat_id, 1, f"/link {created['token']}"))
 
         link = self.worker.links.status_for_chat(chat_id)
         self.assertIsNotNone(link)
         self.assertEqual(int(self.user["id"]), int(link["user_id"]))
-        self.assertEqual([(chat_id, 2), (chat_id, 3)], self.api.deleted)
         sent_text = " ".join(str(item["text"]) for item in self.api.sent)
-        self.assertNotIn("StrongPassword123!", sent_text)
+        self.assertNotIn(created["token"], sent_text)
 
         conn = sqlite3.connect(self.db_path)
         try:
-            event = conn.execute(
-                "SELECT event_type FROM app_events WHERE event_type='telegram_login'"
+            token = conn.execute(
+                "SELECT token_hash,used_at FROM telegram_link_tokens"
             ).fetchone()
         finally:
             conn.close()
-        self.assertIsNotNone(event)
+        self.assertIsNotNone(token)
+        self.assertNotEqual(created["token"], token[0])
+        self.assertIsNotNone(token[1])
 
-    def test_wrong_password_never_creates_link(self) -> None:
+    def test_invalid_or_used_link_token_never_creates_second_link(self) -> None:
         chat_id = 70002
-        self.worker.handle_update(telegram_update(chat_id, 1, "/login"))
-        self.worker.handle_update(
-            telegram_update(chat_id, 2, "owner@example.com")
-        )
-        self.worker.handle_update(telegram_update(chat_id, 3, "wrong-password"))
+        self.worker.handle_update(telegram_update(chat_id, 1, "/link invalid"))
 
         self.assertIsNone(self.worker.links.status_for_chat(chat_id))
-        self.assertIn("Неверный логин или пароль", str(self.api.sent[-1]["text"]))
-        self.assertIn((chat_id, 3), self.api.deleted)
+        created = self.worker.links.create_link_token(self.user)
+        self.worker.handle_update(telegram_update(chat_id, 2, f"/link {created['token']}"))
+        self.worker.handle_update(telegram_update(70003, 3, f"/link {created['token']}"))
+        self.assertIsNone(self.worker.links.status_for_chat(70003))
 
-    def test_login_is_locked_after_five_failed_passwords(self) -> None:
+    def test_link_attempts_are_rate_limited(self) -> None:
         chat_id = 70007
-        message_id = 1
         for _ in range(5):
-            self.worker.handle_update(
-                telegram_update(chat_id, message_id, "/login")
-            )
-            self.worker.handle_update(
-                telegram_update(chat_id, message_id + 1, "owner@example.com")
-            )
-            self.worker.handle_update(
-                telegram_update(chat_id, message_id + 2, "wrong-password")
-            )
-            message_id += 3
-        self.worker.handle_update(
-            telegram_update(chat_id, message_id, "/login")
-        )
-        self.worker.handle_update(
-            telegram_update(chat_id, message_id + 1, "owner@example.com")
-        )
-        self.worker.handle_update(
-            telegram_update(chat_id, message_id + 2, "StrongPassword123!")
-        )
+            self.worker.handle_update(telegram_update(chat_id, _ + 1, "/link invalid"))
+        created = self.worker.links.create_link_token(self.user)
+        self.worker.handle_update(telegram_update(chat_id, 7, f"/link {created['token']}"))
 
         self.assertIsNone(self.worker.links.status_for_chat(chat_id))
-        self.assertIn("Слишком много попыток", str(self.api.sent[-1]["text"]))
+        self.assertIn("Код", str(self.api.sent[-1]["text"]))
+
+    def test_login_never_requests_password(self) -> None:
+        self.worker.handle_update(telegram_update(70008, 1, "/login"))
+        message = str(self.api.sent[-1]["text"])
+        self.assertIn("Пароль", message)
+        self.assertNotIn("email", message.casefold())
 
     def test_group_chat_cannot_start_authentication(self) -> None:
         self.worker.handle_update(
@@ -305,6 +288,12 @@ class TelegramBotTests(unittest.TestCase):
         self.assertIn("UNIQUE(NOTIFICATION_ID,CHAT_ID)", upper)
         for destructive in ("DROP TABLE", "TRUNCATE", "DELETE FROM"):
             self.assertNotIn(destructive, upper)
+        token_migration = (
+            Path(__file__).resolve().parents[1] / "migrations" / "20260831_telegram_link_tokens_v1.sql"
+        ).read_text(encoding="utf-8").upper()
+        self.assertIn("TELEGRAM_LINK_TOKENS", token_migration)
+        self.assertIn("TOKEN_HASH", token_migration)
+        self.assertNotIn("DROP TABLE", token_migration)
 
 
 class TelegramApiTests(unittest.TestCase):
@@ -367,6 +356,24 @@ class TelegramApiTests(unittest.TestCase):
         self.assertEqual(200, disconnected.status_code)
         self.assertTrue(disconnected.get_json()["disconnected"])
         self.assertIsNone(self.links.status_for_user(int(self.user["id"])))
+
+    def test_account_link_token_is_returned_once_and_only_hash_is_stored(self) -> None:
+        response = self.client.post(
+            "/api/account/telegram/link-token", json={}, headers={"X-CSRF-Token": "telegram-csrf"}
+        )
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertTrue(payload["command"].startswith("/link "))
+        self.assertEqual("spyon_test_bot", payload["bot_username"])
+        conn = sqlite3.connect(self.db_path)
+        try:
+            stored = conn.execute("SELECT token_hash,used_at,revoked_at FROM telegram_link_tokens").fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(stored)
+        self.assertNotEqual(payload["token"], stored[0])
+        self.assertIsNone(stored[1])
+        self.assertIsNone(stored[2])
 
     def test_network_error_never_contains_bot_token(self) -> None:
         client = TelegramBotApi(FAKE_TOKEN)

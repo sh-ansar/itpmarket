@@ -130,7 +130,7 @@ Set-Location C:\Spyon\current
 
 `deploy\windows\start-production.ps1` загружает secret-bearing env, принудительно задаёт loopback/без открытия браузера, проверяет PostgreSQL, Python imports, Playwright, `pip check` и Chrome, затем запускает `app.py`. Для уже подготовленной БД deploy-обвязка должна вызывать его с `-SkipDatabaseInitialization`: этот режим всё равно делает `postgres_initialize.py --check`, но не пытается инициализировать БД.
 
-Telegram включается только через закрытый `.runtime\production.env`:
+Создайте production-бота в BotFather командой `/newbot`. Telegram включается только через закрытый `.runtime\production.env`:
 
 ```text
 ITP_TELEGRAM_BOT_ENABLED=1
@@ -139,7 +139,7 @@ ITP_TELEGRAM_BOT_USERNAME=<username without @>
 SPYON_PUBLIC_URL=https://spyon.kz
 ```
 
-Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После рестарта проверьте `/status` в личном чате, вход тестового пользователя и доставку специально созданного тестового уведомления.
+Worker использует long polling внутри единственного production-процесса. Нельзя одновременно запускать два экземпляра с одним bot token. После импорта production env запустите `python C:\Spyon\current\scripts\diagnose_telegram.py`: он вызывает только `getMe`, проверяет schema/table и не печатает token и не отправляет сообщений. Затем перезапустите `Spyon Production`, проверьте `/health` и `/ready`, откройте `Settings → Telegram`, создайте одноразовый код и отправьте боту `/link TOKEN`; `/status` подтверждает связь. Для controlled test создайте обычное тестовое уведомление после привязки.
 
 Transactional SMTP is required in `.runtime\production.env`: set `ITP_EMAIL_ENABLED=1`, a non-local `ITP_SMTP_HOST`, `ITP_MAIL_FROM`, `ITP_SMTP_SECURITY=starttls` or `smtps`, and a public HTTPS `SPYON_PUBLIC_URL`. Set SMTP username and password together when the provider requires authentication. `scripts\diagnose_runtime.ps1 -Mode Production` validates this contract without showing secret values; the optional real-send test remains opt-in through `ITP_EMAIL_INTEGRATION_TEST=1`.
 

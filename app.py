@@ -374,6 +374,153 @@ def notify_billing_payment_rejected(result: dict[str, Any]) -> None:
         )
 
 
+def _tenant_billing_recipients(tenant_id: int) -> list[dict[str, Any]]:
+    """Billing contact policy: active tenant admins or manage_company users only."""
+    return [
+        user for user in AUTH.list_users(int(tenant_id))
+        if user.get("is_active")
+        and (
+            str(user.get("role") or "") == "admin"
+            or bool((user.get("permissions") or {}).get("manage_company"))
+        )
+    ]
+
+
+def _platform_billing_reviewers() -> list[dict[str, Any]]:
+    return [
+        user for user in AUTH.list_users()
+        if user.get("is_active")
+        and str(user.get("platform_role") or "") in {"accountant", "superadmin"}
+    ]
+
+
+def _notify_billing_users(
+    recipients: list[dict[str, Any]], *, tenant_id: int, event_type: str,
+    entity_id: int, title: str, message: str, action_url: str, level: str = "info",
+    audience: str,
+) -> None:
+    seen: set[int] = set()
+    for recipient in recipients:
+        user_id = int(recipient.get("id") or 0)
+        if user_id <= 0 or user_id in seen:
+            continue
+        seen.add(user_id)
+        notification_service().create(
+            tenant_id=int(tenant_id), user_id=user_id, category="billing",
+            event_type=event_type, title=title, message=message, level=level,
+            action_url=action_url,
+            dedupe_key=f"billing:{event_type}:{int(entity_id)}:{audience}:user:{user_id}",
+        )
+
+
+def notify_tenant_billing_users(**kwargs: Any) -> None:
+    kwargs.pop("audience", None)
+    _notify_billing_users(_tenant_billing_recipients(int(kwargs["tenant_id"])), audience="tenant", **kwargs)
+
+
+def notify_platform_billing_reviewers(**kwargs: Any) -> None:
+    kwargs.pop("audience", None)
+    _notify_billing_users(_platform_billing_reviewers(), audience="reviewer", **kwargs)
+
+
+def _billing_invoice_name(invoice: dict[str, Any]) -> str:
+    buyer = dict(invoice.get("buyer") or {})
+    return str(buyer.get("name") or buyer.get("company_name") or "Компания")
+
+
+def notify_billing_invoice_created(invoice: dict[str, Any]) -> None:
+    tenant_id = int(invoice.get("tenant_id") or 0)
+    invoice_id = int(invoice.get("id") or 0)
+    if not tenant_id or not invoice_id:
+        return
+    number = str(invoice.get("invoice_number") or invoice_id)
+    amount = f"{invoice.get('total_amount') or 0} {invoice.get('currency') or 'KZT'}"
+    due = str(invoice.get("due_at") or "")[:10]
+    company = _billing_invoice_name(invoice)
+    notify_tenant_billing_users(
+        tenant_id=tenant_id, event_type="invoice_created", entity_id=invoice_id,
+        title="Счёт сформирован",
+        message=f"{company}. Счёт {number} на сумму {amount}. Оплатить до {due}.",
+        action_url="/app#settings", audience="tenant",
+    )
+    notify_platform_billing_reviewers(
+        tenant_id=tenant_id, event_type="invoice_created", entity_id=invoice_id,
+        title="Сформирован счёт",
+        message=f"Компания {company} сформировала счёт {number}. Сумма: {amount}. Оплатить до {due}.",
+        action_url="/platform/payments", audience="reviewer",
+    )
+
+
+def notify_billing_payment_proof_uploaded(proof: dict[str, Any]) -> None:
+    tenant_id = int(proof.get("tenant_id") or 0)
+    invoice_id = int(proof.get("invoice_id") or 0)
+    if not tenant_id or not invoice_id:
+        return
+    invoice = billing_service().invoice_by_id(invoice_id) or {}
+    company = _billing_invoice_name(invoice)
+    notify_tenant_billing_users(
+        tenant_id=tenant_id, event_type="payment_proof_uploaded", entity_id=int(proof.get("id") or invoice_id),
+        title="Платёжный документ получен", message="Платёжный документ получен и отправлен на проверку.",
+        action_url="/app#settings", audience="tenant",
+    )
+    notify_platform_billing_reviewers(
+        tenant_id=tenant_id, event_type="payment_proof_uploaded", entity_id=int(proof.get("id") or invoice_id),
+        title="Платёж ожидает проверки", message=f"Компания {company} загрузила платёжный документ. Платёж ожидает проверки.",
+        action_url="/platform/payments", audience="reviewer",
+    )
+
+
+def notify_billing_payment_confirmed(
+    result: dict[str, Any], *, invoice_id: int, actor_user_id: int | None = None,
+) -> None:
+    subscription = dict(result.get("subscription") or {})
+    tenant_id = int(subscription.get("tenant_id") or 0)
+    payment_id = int((result.get("payment") or {}).get("id") or invoice_id)
+    if not tenant_id:
+        return
+    ends = str(subscription.get("ends_at") or "")[:10]
+    starts = str(subscription.get("starts_at") or "")[:10]
+    invoice = billing_service().invoice_by_id(invoice_id) or {}
+    plan = str(subscription.get("plan_name") or invoice.get("plan_name") or "выбранный тариф")
+    message = f"Оплата подтверждена. Доступ активирован. Тариф {plan} действует до {ends}. Тариф активирован до {ends}."
+    if starts:
+        message += f" Начало: {starts}."
+    notify_tenant_billing_users(
+        tenant_id=tenant_id, event_type="payment_confirmed", entity_id=payment_id,
+        title="Оплата подтверждена", message=message, action_url="/app#settings",
+        level="success", audience="tenant",
+    )
+    reviewers = [item for item in _platform_billing_reviewers() if int(item.get("id") or 0) != int(actor_user_id or 0)]
+    _notify_billing_users(
+        reviewers, tenant_id=tenant_id, event_type="platform_payment_confirmed", entity_id=payment_id,
+        title="Оплата подтверждена", message="Платёж подтверждён, доступ компании активирован.",
+        action_url="/platform/payments", level="success", audience="reviewer",
+    )
+
+
+def notify_billing_payment_rejected(
+    result: dict[str, Any], *, invoice_id: int, actor_user_id: int | None = None,
+) -> None:
+    subscription = dict(result.get("subscription") or {})
+    proof = dict(result.get("proof") or {})
+    tenant_id = int(subscription.get("tenant_id") or 0)
+    if not tenant_id:
+        return
+    safe_note = str(proof.get("review_note") or "").replace("\n", " ").replace("\r", " ")[:1000]
+    notify_tenant_billing_users(
+        tenant_id=tenant_id, event_type="payment_rejected", entity_id=int(proof.get("id") or invoice_id),
+        title="Платёжный документ отклонён",
+        message=f"Платёжный документ отклонён. {safe_note}".strip(), action_url="/app#settings",
+        level="warning", audience="tenant",
+    )
+    reviewers = [item for item in _platform_billing_reviewers() if int(item.get("id") or 0) != int(actor_user_id or 0)]
+    _notify_billing_users(
+        reviewers, tenant_id=tenant_id, event_type="platform_payment_rejected", entity_id=int(proof.get("id") or invoice_id),
+        title="Платёжный документ отклонён", message="Платёжный документ отклонён.",
+        action_url="/platform/payments", level="warning", audience="reviewer",
+    )
+
+
 
 def finalize_verified_registration(
     user: dict[str, Any],
@@ -465,6 +612,7 @@ def sync_telegram_notification_sources() -> None:
     service.sync_tasks(TASKS.raw_states())
     for tenant_id in telegram_link_service().active_tenant_ids():
         service.ensure_expiry_reminders(tenant_id)
+        service.ensure_invoice_due_reminders(tenant_id)
 
 
 def inventory_service() -> InventoryService:
@@ -834,7 +982,7 @@ def action_access_error(action: str, user: dict[str, Any]) -> str | None:
     if action not in ACTION_INFO:
         return "Выберите поддерживаемую операцию."
     if action == "backup_database" and not is_superadmin(user):
-        return "Резервная копия всей базы доступна только platform superadmin."
+        return "Повторите операцию позже или обратитесь в службу поддержки."
     if not company_is_approved(user.get("tenant_status")) and not is_superadmin(user):
         return "Компания ещё не подтверждена. Реальные операции доступны после одобрения."
     if not bool(user.get("tenant_profile_complete")) and not is_superadmin(user):
@@ -3083,6 +3231,7 @@ def api_notifications_get() -> Any:
     service = notification_service()
     service.sync_tasks(tasks)
     service.ensure_expiry_reminders(user.get("tenant_id"))
+    service.ensure_invoice_due_reminders(user.get("tenant_id"))
     return json_ok(**service.list_for_user(
         int(user["id"]), int(request.args.get("limit") or 50)
     ))
@@ -3102,6 +3251,7 @@ def api_notification_read(notification_id: int) -> Any:
     ))
 
 
+@app.get("/api/account/telegram")
 @app.get("/api/telegram/status")
 @login_required
 def api_telegram_status() -> Any:
@@ -3132,6 +3282,30 @@ def api_telegram_status() -> Any:
     )
 
 
+@app.post("/api/account/telegram/link-token")
+@login_required
+def api_account_telegram_link_token() -> Any:
+    user = current_user() or {}
+    username = str(
+        (TELEGRAM_WORKER.bot_username if TELEGRAM_WORKER else "")
+        or os.environ.get("ITP_TELEGRAM_BOT_USERNAME")
+        or ""
+    ).strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,64}", username):
+        return json_error("Telegram bot is not configured.", 503)
+    try:
+        created = telegram_link_service().create_link_token(user)
+    except ValueError as exc:
+        return json_error(str(exc), 429)
+    token = str(created["token"])
+    return json_ok(
+        token=token,
+        expires_at=created["expires_at"],
+        bot_username=username,
+        command=f"/link {token}",
+    )
+
+
 @app.post("/api/telegram/enabled")
 @login_required
 def api_telegram_enabled() -> Any:
@@ -3146,6 +3320,16 @@ def api_telegram_enabled() -> Any:
 @app.post("/api/telegram/disconnect")
 @login_required
 def api_telegram_disconnect() -> Any:
+    user = current_user() or {}
+    disconnected = telegram_link_service().unlink_user(
+        int(user["id"]), actor_user_id=int(user["id"])
+    )
+    return json_ok(disconnected=disconnected)
+
+
+@app.delete("/api/account/telegram")
+@login_required
+def api_account_telegram_disconnect() -> Any:
     user = current_user() or {}
     disconnected = telegram_link_service().unlink_user(
         int(user["id"]), actor_user_id=int(user["id"])
@@ -4235,12 +4419,7 @@ def api_subscription_invoice_create() -> Any:
         billing.generate_invoice_pdf(
             int(invoice["id"])
         )
-        notify_platform_accountants(
-            "invoice_created",
-            tenant_id=int(user["tenant_id"]), entity_id=int(invoice["id"]),
-            title="New invoice created",
-            message=f"Invoice {invoice.get('invoice_number') or invoice['id']} is awaiting payment.",
-        )
+        notify_billing_invoice_created(invoice)
 
         return json_ok(
             billing=(
@@ -4413,12 +4592,7 @@ def api_subscription_payment_proof_upload(
             ),
             content=content,
         )
-        notify_platform_accountants(
-            "payment_proof_uploaded",
-            tenant_id=int(user["tenant_id"]), entity_id=int(proof["id"]),
-            title="Payment document received",
-            message="A payment document is waiting for review.",
-        )
+        notify_billing_payment_proof_uploaded(proof)
 
         return json_ok(
             billing=(
@@ -5255,7 +5429,11 @@ def api_platform_billing_payment_confirm(
         )
 
         if not result.get("already_confirmed"):
-            notify_billing_payment_confirmed(result)
+            notify_billing_payment_confirmed(
+                result,
+                invoice_id=int(invoice_id),
+                actor_user_id=int((current_user() or {})["id"]),
+            )
 
         return json_ok(
             result=result,
@@ -5307,7 +5485,11 @@ def api_platform_billing_payment_reject(
                 ),
             )
         )
-        notify_billing_payment_rejected(result)
+        notify_billing_payment_rejected(
+            result,
+            invoice_id=int(invoice_id),
+            actor_user_id=int((current_user() or {})["id"]),
+        )
 
         return json_ok(
             result=result,

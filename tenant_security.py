@@ -81,7 +81,14 @@ PLATFORM_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         ),
     "accountant":
         frozenset(
-            PLATFORM_PERMISSION_DEFINITIONS
+            {
+                "billing.view",
+                "billing.invoice.download",
+                "billing.payment.view",
+                "billing.payment.confirm",
+                "billing.payment.reject",
+                "billing.report.view",
+            }
         ),
     "support":
         frozenset(),

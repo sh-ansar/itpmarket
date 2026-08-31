@@ -263,6 +263,22 @@ CREATE TABLE IF NOT EXISTS telegram_user_links (
 );
 CREATE INDEX IF NOT EXISTS idx_telegram_user_links_tenant
 ON telegram_user_links(tenant_id,is_enabled);
+CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_user
+ON telegram_link_tokens(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_expires
+ON telegram_link_tokens(expires_at);
 CREATE TABLE IF NOT EXISTS telegram_notification_deliveries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     notification_id INTEGER NOT NULL,

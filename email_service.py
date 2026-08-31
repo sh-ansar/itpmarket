@@ -44,6 +44,12 @@ TEMPLATE_SUBJECTS = {
     "company_approved": "Компания одобрена в Spyon",
     "company_rejected": "Решение по заявке Spyon",
     "subscription_expiry": "Срок подписки Spyon заканчивается",
+    "invoice_created": "Счёт Spyon сформирован",
+    "payment_proof_uploaded": "Платёжный документ получен",
+    "payment_confirmed": "Оплата подтверждена",
+    "payment_rejected": "Платёжный документ отклонён",
+    "invoice_due_reminder": "Напоминание об оплате счёта Spyon",
+    "invoice_overdue": "Срок оплаты счёта Spyon истёк",
     "marketplace_auth_required": "Требуется авторизация marketplace в Spyon",
     "sync_failed": "Ошибка синхронизации Spyon",
 }
@@ -199,7 +205,10 @@ class EmailService:
     def _category_for_template(template_key: str) -> str:
         if template_key in SECURITY_TEMPLATES:
             return "security"
-        if template_key == "subscription_expiry":
+        if template_key in {
+            "subscription_expiry", "invoice_created", "payment_proof_uploaded",
+            "payment_confirmed", "payment_rejected", "invoice_due_reminder", "invoice_overdue",
+        }:
             return "billing"
         if template_key == "marketplace_auth_required":
             return "marketplaces"
@@ -385,6 +394,14 @@ class EmailService:
     ) -> int | None:
         template_key = {
             "subscription_expiry": "subscription_expiry",
+            "invoice_created": "invoice_created",
+            "payment_proof_uploaded": "payment_proof_uploaded",
+            "payment_confirmed": "payment_confirmed",
+            "payment_rejected": "payment_rejected",
+            "invoice_due_3d": "invoice_due_reminder",
+            "invoice_due_1d": "invoice_due_reminder",
+            "invoice_due_today": "invoice_due_reminder",
+            "invoice_overdue": "invoice_overdue",
             "marketplace_auth_required": "marketplace_auth_required",
         }.get(event_type)
         if event_type in {"task_failed", "task_interrupted"}:

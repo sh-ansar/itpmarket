@@ -601,6 +601,15 @@ class BillingPlatformHttpTests(
         )
         self.assertEqual("billing", event["category"])
         self.assertIn("Тариф активирован до", event["message"])
+        conn = self.billing._connect()
+        try:
+            templates = [row[0] for row in conn.execute(
+                "SELECT template_key FROM email_outbox WHERE user_id=?",
+                (int(self.tenant_admin["id"]),),
+            ).fetchall()]
+        finally:
+            conn.close()
+        self.assertIn("payment_confirmed", templates)
 
     def test_accountant_event_is_tenantless_and_deduplicated(self) -> None:
         self.assertIsNone(self.auth.get_user(int(self.accountant["id"]))["tenant_id"])
