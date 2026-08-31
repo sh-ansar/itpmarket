@@ -28,8 +28,7 @@ except ImportError:
 BASE_Q = ":listingType:merchantListing:allMerchants:{seller_id}"
 API_TEMPLATE = (
     "https://kaspi.kz/yml/product-view/pl/filters?"
-    "productCode=165333000&masterSku=165333000&merchantSku=PACK001&"
-    "tabId=PRODUCT&page=0&ui=d&q={q}&filteredByCategory=false&i=-1&c={city_id}"
+    "page=0&ui=d&q={q}&filteredByCategory=false&i=-1&c={city_id}"
 )
 SELLER_URL = "https://kaspi.kz/shop/m/{seller_id}/products/?c={city_id}"
 FILTER_PATH = "/yml/product-view/pl/filters"
@@ -87,7 +86,41 @@ def root_api_url(seller_id: str, city_id: str) -> str:
     return API_TEMPLATE.format(q=quote(q, safe=""), city_id=quote(city_id, safe=""))
 
 
-async def fetch_root_payload(context: Any, page: Any, url: str, retries: int, timeout: int) -> dict[str, Any]:
+def complete_seller_snapshot(reported_total: int, collected_unique: int) -> bool:
+    """Only an exact, positive seller total may replace an active snapshot."""
+    return int(reported_total) > 0 and int(collected_unique) == int(reported_total)
+
+
+def materialize_verified_tenant_snapshot(
+    db_path: Path,
+    args: argparse.Namespace,
+    products: dict[str, dict[str, Any]],
+    product_codes: set[str],
+    *,
+    is_complete: bool,
+) -> int:
+    """Publish a seller snapshot only after its authoritative contract passed.
+
+    The collector's SQLite tables are staging. A partial, unverified or empty
+    seller response must never merge arbitrary rows into a tenant catalogue.
+    """
+    if not is_complete or int(args.tenant_id or 0) <= 0:
+        return 0
+
+    service = CatalogConfigurationService(db_path)
+    if int(args.tenant_seller_id or 0) > 0:
+        return service.replace_catalog_products(
+            int(args.tenant_id),
+            "kaspi",
+            products.values(),
+            tenant_seller_id=int(args.tenant_seller_id),
+        )
+    return service.materialize_legacy_kaspi_catalog(
+        int(args.tenant_id), product_codes, replace=True
+    )
+
+
+async def fetch_root_payload(page: Any, seller_url: str, retries: int, timeout: int) -> dict[str, Any]:
     """Получает только первую страницу каталога и список фильтров.
 
     В отличие от сломанной версии 2.0.1, этот запрос не модифицируется для брендов.
@@ -96,15 +129,19 @@ async def fetch_root_payload(context: Any, page: Any, url: str, retries: int, ti
     last_error: Exception | None = None
     for attempt in range(1, max(1, retries) + 1):
         try:
-            response = await context.request.get(
-                url,
-                headers={
-                    "Accept": "application/json, text/plain, */*",
-                    "Referer": page.url or "https://kaspi.kz/shop/almaty/",
-                    "X-Requested-With": "XMLHttpRequest",
-                },
+            async with page.expect_response(
+                lambda response: (
+                    FILTER_PATH in response.url
+                    and int(response.status) == 200
+                ),
                 timeout=timeout * 1000,
-            )
+            ) as response_info:
+                await page.goto(
+                    seller_url,
+                    wait_until="domcontentloaded",
+                    timeout=timeout * 1000,
+                )
+            response = await response_info.value
             if response.status != 200:
                 body = await response.text()
                 raise RuntimeError(f"HTTP {response.status}: {body[:300]}")
@@ -658,14 +695,12 @@ async def run(args: argparse.Namespace) -> int:
         page = await context.new_page()
         try:
             seller_url = SELLER_URL.format(seller_id=args.seller_id, city_id=args.city_id)
-            await page.goto(seller_url, wait_until="domcontentloaded", timeout=args.timeout * 1000)
+            root_payload = await fetch_root_payload(
+                page, seller_url, args.retries, args.timeout
+            )
             await core.close_city_modal(page)
             controller = core.BlockController()
             await controller.handle(page)
-
-            root_payload = await fetch_root_payload(
-                context, page, root_api_url(args.seller_id, args.city_id), args.retries, args.timeout
-            )
             root_data = root_payload["data"]
             reported_total = int(root_data.get("total") or 0)
             limit = int(root_data.get("limit") or 12)
@@ -678,6 +713,22 @@ async def run(args: argparse.Namespace) -> int:
                 int(item.get("expected") or 0)
                 for item in available_brand_segments
             )
+
+            if reported_total <= 0:
+                # This API response is the seller-specific authority. Never
+                # reinterpret generic page cards as the seller's catalogue:
+                # recommendation and cross-sell widgets can otherwise poison
+                # a tenant's active snapshot.
+                warning = "seller verification failed: authoritative seller total is zero"
+                conn.execute(
+                    """UPDATE catalog_sync_runs
+                       SET status='verification_failed',reported_total=0,
+                           collected_unique=0,warning=?,finished_at=? WHERE id=?""",
+                    (warning, now_iso(), run_id),
+                )
+                conn.commit()
+                print("[Catalog] Seller verification failed: authoritative total is zero.")
+                return 2
 
             # Корневая витрина Kaspi может обрывать DOM-пагинацию примерно
             # после первой тысячи позиций, хотя reported_total больше.
@@ -753,11 +804,7 @@ async def run(args: argparse.Namespace) -> int:
                     print(f"[Каталог] ОШИБКА сегмента {name}: {message}")
 
             # Если брендовый сбор частично сломался, используем старый рабочий V6-проход.
-            minimum_complete = (
-                int(reported_total * 0.97)
-                if reported_total > 0
-                else 0
-            )
+            minimum_complete = reported_total
 
             if reported_total > 0 and len(seen) < minimum_complete:
                 try:
@@ -783,7 +830,7 @@ async def run(args: argparse.Namespace) -> int:
                         f"[Каталог] ОШИБКА резервного прохода: {clean(exc)}"
                     )
 
-            full_enough = reported_total > 0 and len(seen) >= minimum_complete
+            full_enough = complete_seller_snapshot(reported_total, len(seen))
             if full_enough:
                 placeholders = ",".join("?" for _ in seen)
                 # Shared legacy staging contains products collected for many
@@ -811,27 +858,16 @@ async def run(args: argparse.Namespace) -> int:
             # materializer opens its own atomic transaction.
             conn.commit()
             if int(args.tenant_id or 0) > 0:
-                service = CatalogConfigurationService(db_path)
-                if int(args.tenant_seller_id or 0) > 0:
-                    if full_enough:
-                        saved = service.replace_catalog_products(
-                            int(args.tenant_id), "kaspi",
-                            collected_products.values(),
-                            tenant_seller_id=int(args.tenant_seller_id),
-                        )
-                    else:
-                        saved = service.upsert_catalog_products(
-                            int(args.tenant_id), "kaspi",
-                            collected_products.values(),
-                            tenant_seller_id=int(args.tenant_seller_id),
-                        )
-                else:
-                    saved = service.materialize_legacy_kaspi_catalog(
-                        int(args.tenant_id), seen, replace=bool(full_enough)
-                    )
+                saved = materialize_verified_tenant_snapshot(
+                    db_path,
+                    args,
+                    collected_products,
+                    seen,
+                    is_complete=full_enough,
+                )
                 print(
                     f"[Каталог] Каталог компании обновлён: {saved} товаров; "
-                    f"режим={'replace' if full_enough else 'merge'}",
+                    f"режим={'replace' if full_enough else 'active snapshot unchanged'}",
                     flush=True,
                 )
 

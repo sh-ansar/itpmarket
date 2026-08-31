@@ -335,6 +335,45 @@ def notify_billing_payment_confirmed(result: dict[str, Any]) -> None:
         )
 
 
+def notify_platform_accountants(
+    event_type: str,
+    *,
+    tenant_id: int,
+    entity_id: int,
+    title: str,
+    message: str,
+) -> None:
+    """Queue one best-effort, deduplicated billing event for each accountant."""
+    for recipient in AUTH.list_users():
+        if not recipient.get("is_active") or recipient.get("platform_role") != "accountant":
+            continue
+        notification_service().create(
+            tenant_id=int(tenant_id), user_id=int(recipient["id"]),
+            category="billing", event_type=event_type, title=title, message=message,
+            level="info", action_url="/platform/payments",
+            dedupe_key=f"billing:{event_type}:{int(entity_id)}:accountant:{int(recipient['id'])}",
+        )
+
+
+def notify_billing_payment_rejected(result: dict[str, Any]) -> None:
+    """Notify tenant users after a reviewer rejects a payment proof."""
+    subscription = dict(result.get("subscription") or {})
+    proof = dict(result.get("proof") or {})
+    tenant_id = int(subscription.get("tenant_id") or 0)
+    if not tenant_id:
+        return
+    for recipient in AUTH.list_users(tenant_id):
+        if not recipient.get("is_active"):
+            continue
+        notification_service().create(
+            tenant_id=tenant_id, user_id=int(recipient["id"]), category="billing",
+            event_type="payment_rejected", title="Payment requires attention",
+            message="The payment document was rejected. Review the note and upload a corrected document.",
+            level="warning", action_url="/app#settings",
+            dedupe_key=f"billing:payment-rejected:{int(proof.get('invoice_id') or 0)}:user:{int(recipient['id'])}",
+        )
+
+
 
 def finalize_verified_registration(
     user: dict[str, Any],
@@ -4196,6 +4235,12 @@ def api_subscription_invoice_create() -> Any:
         billing.generate_invoice_pdf(
             int(invoice["id"])
         )
+        notify_platform_accountants(
+            "invoice_created",
+            tenant_id=int(user["tenant_id"]), entity_id=int(invoice["id"]),
+            title="New invoice created",
+            message=f"Invoice {invoice.get('invoice_number') or invoice['id']} is awaiting payment.",
+        )
 
         return json_ok(
             billing=(
@@ -4353,7 +4398,7 @@ def api_subscription_payment_proof_upload(
     try:
         billing = billing_service()
 
-        billing.save_payment_proof(
+        proof = billing.save_payment_proof(
             int(invoice_id),
             int(user["tenant_id"]),
             int(user["id"]),
@@ -4367,6 +4412,12 @@ def api_subscription_payment_proof_upload(
                 or ""
             ),
             content=content,
+        )
+        notify_platform_accountants(
+            "payment_proof_uploaded",
+            tenant_id=int(user["tenant_id"]), entity_id=int(proof["id"]),
+            title="Payment document received",
+            message="A payment document is waiting for review.",
         )
 
         return json_ok(
@@ -4887,16 +4938,19 @@ def api_platform_billing_supplier_settings_get() -> Any:
 )
 @platform_roles_required("superadmin")
 def api_platform_billing_supplier_settings_put() -> Any:
+    payload = json_payload()
+    current_password = str(payload.pop("current_password", "") or "")
+    user = current_user() or {}
+    if not current_password or not AUTH.verify_password(
+        int(user["id"]), current_password
+    ):
+        return json_error("Текущий пароль не подтверждён.", 403)
     try:
         supplier = (
             billing_service()
             .update_supplier_settings(
-                json_payload(),
-                int(
-                    (current_user() or {})[
-                        "id"
-                    ]
-                ),
+                payload,
+                int(user["id"]),
             )
         )
 
@@ -5253,6 +5307,7 @@ def api_platform_billing_payment_reject(
                 ),
             )
         )
+        notify_billing_payment_rejected(result)
 
         return json_ok(
             result=result,
@@ -5400,6 +5455,62 @@ def api_platform_marketplace_source_rules_get() -> Any:
         marketplace_source_rules=SAAS.marketplace_source_rules(),
         integration_catalog=SAAS.public_integrations(),
     )
+
+
+@app.get("/api/platform/tenants/<int:tenant_id>/billing-history")
+@platform_permission_required("billing.payment.view")
+def api_platform_tenant_billing_history(tenant_id: int) -> Any:
+    try:
+        return json_ok(history=billing_service().platform_tenant_billing_history(tenant_id))
+    except SubscriptionError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/marketplaces/<marketplace_code>/<int:tenant_seller_id>/purge-preview")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_seller_purge_preview(
+    tenant_id: int, marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    try:
+        return json_ok(preview=SAAS.marketplace_seller_purge_preview(
+            tenant_id, marketplace_code, tenant_seller_id,
+        ))
+    except ValueError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/marketplaces/<marketplace_code>/<int:tenant_seller_id>/purge")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_seller_purge(
+    tenant_id: int, marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    payload = json_payload()
+    password = str(payload.pop("current_password", "") or "")
+    user = current_user() or {}
+    if not password or not AUTH.verify_password(int(user["id"]), password):
+        return json_error("Current password was not confirmed.", 403)
+    try:
+        return json_ok(result=SAAS.purge_marketplace_seller_data(
+            tenant_id, marketplace_code, tenant_seller_id, int(user["id"]),
+        ))
+    except ValueError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/marketplaces/<marketplace_code>/<int:tenant_seller_id>/replace")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_seller_replace(
+    tenant_id: int, marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    payload = json_payload()
+    try:
+        staged = SAAS.stage_marketplace_source_replacement(
+            tenant_id, marketplace_code, tenant_seller_id,
+            str(payload.get("source_url") or ""), int((current_user() or {})["id"]),
+        )
+        return json_ok(candidate=staged)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
 
 
 @app.put("/api/platform/marketplace-source-rules")

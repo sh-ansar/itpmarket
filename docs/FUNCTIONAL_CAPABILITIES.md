@@ -13,7 +13,7 @@
 | Parallel jobs разных sellers | `SUPPORTED` | Seller-scoped resource locks; 6 simultaneous subprocess jobs и 2 TaskManager instances проверены автоматически. |
 | Две операции одного seller | `SUPPORTED` | Безопасная модель C: второй Full Sync/Price job отклоняется как conflict, очередь не реализована. |
 | Browser/session isolation | `PARTIALLY SUPPORTED` | Путь `.runtime/browser_profiles/t<tenant>/<marketplace>/s<seller>` и передача его collectors проверены; live cookies нескольких аккаунтов не инспектировались. |
-| Seller-scoped catalog и Kaspi analytics | `SUPPORTED` | Catalog, own-price и exact-offer snapshots имеют tenant/marketplace/seller keys. |
+| Seller-scoped catalog и Kaspi analytics | `SUPPORTED` | Catalog, own-price и exact-offer snapshots имеют tenant/marketplace/seller keys; Kaspi materializes only an exact, positive seller-total snapshot atomically. |
 | Cross-marketplace product identity | `SUPPORTED WITH CONFIRMATION` | Динамические предложения по артикулу/строгим характеристикам, журнал решений и ручное подтверждение; автоматического слияния нет. |
 | Единый остаток для связанных listings | `SUPPORTED` | Физический товар хранит количество/закупочную цену один раз; tenant summary не удваивает их по числу площадок. |
 | Multi-seller detailed Ozon/Halyk/Forte analytics | `PARTIALLY SUPPORTED` | Seller catalog безопасен; legacy detailed offer enrichment при >1 seller не используется до seller-native analytics migration. |
@@ -129,6 +129,18 @@ A successful reset consumes the token atomically, replaces the password hash
 and increments session_version so previously issued sessions become invalid.
 
 Production schema changes are tracked by checksum and safe additive migrations
+
+## Marketplace source review and billing history
+
+Marketplace source replacement is staged as a pending seller record. The live
+seller remains active until the replacement passes the normal review (including
+Ozon interactive canonical verification); it is then marked `replaced` rather
+than deleted. Platform administrators can preview and, after current-password
+confirmation, purge only the selected seller's collected marketplace rows.
+
+The platform payment drawer exposes bounded invoice and payment-document
+metadata for a company. It never returns document paths or binary content;
+downloads continue through the authenticated invoice/proof endpoints.
 
 ## Юридические документы и электронный акцепт
 

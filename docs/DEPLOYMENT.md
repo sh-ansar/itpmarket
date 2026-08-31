@@ -156,6 +156,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 It creates only `\Spyon\Spyon Ozon Browsers` with `InteractiveToken` / “Run only when user is logged on”, launches `open_ozon_browsers.py` at logon, and stores no password. It neither changes nor restarts `Spyon Production`. Do not run this registration from a developer workstation or a Session-0 service account.
 
+Ozon source approval attaches to that existing interactive browser only. A parsed URL is not enough: the runtime must verify the final same-marketplace seller URL, canonical link and seller identity. Browser unavailability or a challenge leaves the source pending and deployment itself must not start Chrome from Session 0.
+
 ## Post-deploy verification
 
 ```powershell
@@ -223,3 +225,8 @@ Register `\Spyon\Spyon Ozon Browsers` from the interactive RDP account with
 `scripts\register_ozon_browser_task.ps1`. The task uses `InteractiveToken` and
 opens each active Ozon seller's resolved profile after logon; it must not run as
 SYSTEM or in a background session.
+
+Marketplace source replacements and seller data cleanup are application-level
+admin workflows. Deployment must not delete marketplace data manually: a
+replacement is verified and approved before the old seller is retired, and a
+purge remains seller-scoped with preview, audit record and password confirmation.

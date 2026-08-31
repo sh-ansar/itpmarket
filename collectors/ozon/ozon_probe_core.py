@@ -44,15 +44,16 @@ def article_from_url(url: str) -> str:
 
 def extract_state_divs(page_html: str, state_prefix: str) -> list[dict[str, Any]]:
     pattern = re.compile(
-        rf'<div\s+id="state-{re.escape(state_prefix)}[^"]*"\s+data-state="([^"]*)"',
+        rf'<div\s+id="(state-{re.escape(state_prefix)}[^"]*)"\s+data-state="([^"]*)"',
         flags=re.IGNORECASE,
     )
     result: list[dict[str, Any]] = []
-    for raw in pattern.findall(page_html or ""):
+    for state_id, raw in pattern.findall(page_html or ""):
         try:
             decoded = html.unescape(raw)
             parsed = json.loads(decoded)
             if isinstance(parsed, dict):
+                parsed["_spyon_state_id"] = state_id
                 result.append(parsed)
         except Exception:
             continue
@@ -155,14 +156,38 @@ def _extract_tile_image(item: dict[str, Any]) -> str:
     return ""
 
 
+def _seller_identifier_from_catalog_url(value: str) -> str:
+    """Return a seller path token only for an actual seller storefront URL."""
+    match = re.search(r"/seller/([^/?#]+)", urlparse(str(value or "")).path, re.I)
+    return match.group(1).casefold() if match else ""
+
+
 def parse_catalog_html(page_html: str, base_url: str) -> tuple[list[dict[str, Any]], str]:
     products: list[dict[str, Any]] = []
+    expected_seller_id = _seller_identifier_from_catalog_url(base_url)
+    accepted_catalogue_grid = False
 
     grids = extract_state_divs(page_html, "tileGridDesktop")
+    recommendation_markers = (
+        "возможно, вам понравится", "рекомендуем", "популярное",
+        "с этим товаром покупают", "recommend", "popular",
+    )
     for grid in grids:
+        # Widget state carries its own label/metadata.  A recommendation grid
+        # is never a seller catalogue source, even if it contains valid Ozon
+        # product URLs.
+        grid_context = json.dumps(grid, ensure_ascii=False).casefold()
+        if any(marker in grid_context for marker in recommendation_markers):
+            continue
+        # Product grids are reused by Ozon for cross-sell widgets.  On a seller
+        # storefront, require affirmative evidence that the widget belongs to
+        # that seller; an unscoped tile grid is not safe catalogue evidence.
+        if expected_seller_id and expected_seller_id not in grid_context:
+            continue
         items = grid.get("items")
         if not isinstance(items, list):
             continue
+        accepted_catalogue_grid = True
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -187,7 +212,7 @@ def parse_catalog_html(page_html: str, base_url: str) -> tuple[list[dict[str, An
 
     next_page = ""
     paginators = extract_state_divs(page_html, "infiniteVirtualPaginator")
-    if paginators:
+    if accepted_catalogue_grid and paginators:
         next_page = str(paginators[-1].get("nextPage") or "")
         if next_page:
             next_page = urljoin(base_url, html.unescape(next_page))

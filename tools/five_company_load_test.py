@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -103,16 +104,27 @@ def run_scenario(
         detected = saas.detect_marketplace_url(
             tenant_id, scenario["url"], scenario["code"]
         )
-        if not detected["verified"]:
+        if not detected["verified"] and detected.get("verification_state") != "parsed":
             raise AssertionError(f"Seller was not detected for {scenario['code']}")
         connected = saas.connect_marketplace(
             tenant_id, scenario["url"], int(user["id"]), scenario["code"]
         )
         if connected.get("approval_status") != "pending":
             raise AssertionError(f"Marketplace was not submitted for {scenario['code']}")
-        saas.review_marketplace_connection(
-            tenant_id, scenario["code"], "approved", int(platform_admin["id"])
-        )
+        if scenario["code"] in {"ozon", "ozon_kz"}:
+            with patch("saas_service.verify_ozon_storefront", return_value={
+                "canonical_seller_id": str(detected["seller_identifier"]),
+                "canonical_seller_url": str(detected["seller_url"]),
+                "seller_name": str(detected["seller_name"]),
+                "catalogue_empty": "false",
+            }):
+                saas.review_marketplace_connection(
+                    tenant_id, scenario["code"], "approved", int(platform_admin["id"])
+                )
+        else:
+            saas.review_marketplace_connection(
+                tenant_id, scenario["code"], "approved", int(platform_admin["id"])
+            )
         user = auth.get_user(int(user["id"])) or user
         users.append(user)
 

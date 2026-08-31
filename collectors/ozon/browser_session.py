@@ -600,9 +600,11 @@ class BrowserSession:
             try:
                 title, text, page_html = self.snapshot()
                 last_title, last_text, last_html = title, text, page_html
+                # A page-wide anchor scan would include Ozon cross-sell and
+                # recommendation cards.  Only structured catalogue state is
+                # eligible for a seller snapshot.
                 state_products, next_page = parse_catalog_html(page_html, base_url)
-                dom_products = self.dom_catalog_products(base_url)
-                products = dom_products + state_products
+                products = state_products
                 for product in products:
                     article = str(product.get("article") or "")
                     if article:
@@ -651,7 +653,9 @@ class BrowserSession:
                     {
                         "event": "scroll_poll",
                         "visible_products": len(state_products),
-                        "dom_products": len(dom_products),
+                        # Generic DOM anchors are intentionally not collected:
+                        # they also include recommendation and cross-sell cards.
+                        "dom_products": 0,
                         "unique_products": count,
                         "next_page": bool(best_next_page),
                         "moved": moved,

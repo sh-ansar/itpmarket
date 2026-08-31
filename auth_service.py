@@ -333,13 +333,22 @@ class AuthService:
             )
             user_id = int(cursor.lastrowid)
             resolved_tenant_id = tenant_id
-            if resolved_tenant_id is None and actor_user_id is not None:
+            # Platform accountants work across billing records and must not
+            # silently acquire the creator's/default tenant membership.
+            tenantless_platform_accountant = (
+                platform_role_value == "accountant" and tenant_id is None
+            )
+            if (
+                resolved_tenant_id is None
+                and actor_user_id is not None
+                and not tenantless_platform_accountant
+            ):
                 membership = conn.execute(
                     "SELECT tenant_id FROM tenant_users WHERE user_id=? AND is_active=1 ORDER BY is_primary DESC,tenant_id LIMIT 1",
                     (int(actor_user_id),),
                 ).fetchone()
                 resolved_tenant_id = int(membership["tenant_id"]) if membership else None
-            if resolved_tenant_id is None:
+            if resolved_tenant_id is None and not tenantless_platform_accountant:
                 tenant_row = conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()
                 resolved_tenant_id = int(tenant_row["id"]) if tenant_row else None
             if resolved_tenant_id is not None:

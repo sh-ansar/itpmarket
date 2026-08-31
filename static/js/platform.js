@@ -242,6 +242,69 @@
     }
   }
 
+  function openDrawer(title, markup) {
+    const drawer=$('#tenantDetailDrawer');
+    const backdrop=$('#tenantDetailBackdrop');
+    if(!drawer||!backdrop)return;
+    $('#tenantDetailTitle').textContent=title;
+    $('#tenantDetailBody').innerHTML=markup;
+    drawer.hidden=false;
+    backdrop.hidden=false;
+  }
+
+  function closeDrawer() {
+    const drawer=$('#tenantDetailDrawer');
+    const backdrop=$('#tenantDetailBackdrop');
+    if(drawer)drawer.hidden=true;
+    if(backdrop)backdrop.hidden=true;
+  }
+
+  function billingHistoryMarkup(history={}) {
+    const tenant=history.tenant||{};
+    const subscription=history.subscription||{};
+    const items=history.items||[];
+    const rows=items.length ? items.map(item=>{
+      const proof=item.proof;
+      const documents=[
+        item.invoice_pdf_ready ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${Number(item.invoice_id)}/pdf" target="_blank" rel="noopener">Счёт PDF</a>` : '',
+        proof ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${Number(item.invoice_id)}/payment-proof" target="_blank" rel="noopener">${esc(proof.original_filename||'Платёжный документ')}</a>` : ''
+      ].filter(Boolean).join('<br>') || '<span class="muted">Нет документов</span>';
+      const review=proof ? [
+        `<strong>${esc(proof.status||'—')}</strong>`,
+        proof.reviewed_at ? esc(formatDate(proof.reviewed_at)) : '',
+        proof.reviewed_by ? esc(proof.reviewed_by) : '',
+        proof.review_note ? esc(proof.review_note) : ''
+      ].filter(Boolean).join('<br>') : '<span class="muted">Документ не загружен</span>';
+      return `<tr><td><strong>${esc(item.invoice_number)}</strong><small>${esc(formatDate(item.issued_at))}</small></td><td>${formatNumber(item.total_amount)} ${esc(item.currency||'KZT')}<small>${esc(item.plan_name||item.plan_code||'—')}</small></td><td>${esc(formatDate(item.period_start))}<small>до ${esc(formatDate(item.period_end))}</small></td><td><span class="billing-status ${esc(item.subscription_status||'')}">${esc(billingStatusLabel(item.subscription_status))}</span><small>${esc(item.invoice_status||'')}</small></td><td class="billing-document-cell">${documents}</td><td>${review}</td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="loading">История счетов пока пуста.</td></tr>';
+    return `<section class="drawer-section"><p><strong>${esc(tenant.name||'—')}</strong><br><small>БИН: ${esc(tenant.registration_number||'—')}</small><br><small>Пакет: ${esc(subscription.plan_name||subscription.plan_code||'—')} · действует до ${esc(formatDate(subscription.ends_at))}</small></p><div class="company-table-wrap"><table class="company-table payment-table"><thead><tr><th>Счёт</th><th>Сумма</th><th>Период</th><th>Статус</th><th>Документы</th><th>Проверка</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  }
+
+  async function openBillingHistory(tenantId) {
+    try {
+      const data=await api(`/api/platform/tenants/${Number(tenantId)}/billing-history`);
+      const history=data.history||{};
+      openDrawer(`История · ${history.tenant?.name||'Компания'}`, billingHistoryMarkup(history));
+    } catch(error) { toast(error.message,true); }
+  }
+
+  function sellerAdminCard(tenantId, seller) {
+    const id=Number(seller.id||0);
+    const code=String(seller.marketplace_code||'');
+    const pending=String(seller.approval_status||'')==='pending';
+    const active=String(seller.status||'')==='active'&&String(seller.approval_status||'')==='approved';
+    return `<article class="drawer-section"><strong>${esc(marketplaceNames[code]||code)} · ${esc(seller.display_name||seller.external_seller_id||'—')}</strong><small>${esc(seller.external_seller_id||'—')} · ${esc(seller.discovery_status||'parsed')} · ${esc(seller.status||'—')}</small><a href="${esc(seller.source_url||'#')}" target="_blank" rel="noreferrer">${esc(seller.source_url||'—')}</a><div class="company-actions">${pending?`<button type="button" data-marketplace-review="approved" data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Подтвердить источник</button><button type="button" class="decline" data-marketplace-review="rejected" data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Отклонить</button>`:''}${active?`<button type="button" data-replace-source data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Заменить источник</button><button type="button" class="decline" data-purge-seller data-tenant-id="${tenantId}" data-marketplace-code="${esc(code)}" data-seller-id="${id}">Preview очистки</button>`:''}</div></article>`;
+  }
+
+  async function openTenant(tenantId) {
+    try {
+      const data=await api(`/api/platform/tenants/${Number(tenantId)}/detail`);
+      const tenant=data.tenant||{};
+      const sellers=(data.sellers||[]).map(seller=>sellerAdminCard(Number(tenantId),seller)).join('')||'<p class="muted">Источники не подключены.</p>';
+      openDrawer(tenant.name||'Компания', `<section class="drawer-section"><p><strong>БИН:</strong> ${esc(tenant.registration_number||'—')}<br><strong>Email:</strong> ${esc(tenant.contact_email||'—')}</p><button type="button" data-billing-history data-tenant-id="${Number(tenantId)}">Открыть историю платежей</button></section><section class="drawer-section"><h3>Marketplace sources</h3><p class="muted">Замена сначала создаёт pending-кандидат. Текущий источник остаётся активен, пока кандидат не проверен и не подтверждён.</p>${sellers}</section>`);
+    } catch(error) { toast(error.message,true); }
+  }
+
   function openBillingDecision(button) {
     const modal=$('#billingDecisionModal');
     const form=$('#billingDecisionForm');
@@ -405,12 +468,42 @@
   }
 
   document.addEventListener('click', async event => {
+    const openTenantButton=event.target.closest('[data-open-tenant]');
+    const billingHistoryButton=event.target.closest('[data-billing-history]');
+    const marketplaceReview=event.target.closest('[data-marketplace-review]');
+    const replacement=event.target.closest('[data-replace-source]');
+    const purgeSeller=event.target.closest('[data-purge-seller]');
     const admin = event.target.closest('[data-admin]');
     const status = event.target.closest('[data-company-status]');
     const review = event.target.closest('[data-review]');
     const preview = event.target.closest('[data-source-rule-preview]');
     const billingAction=event.target.closest('[data-billing-action]');
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
+    if(openTenantButton){event.preventDefault();await openTenant(openTenantButton.dataset.openTenant);return;}
+    if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
+    if(marketplaceReview){
+      event.preventDefault();
+      try{await api(`/api/platform/tenants/${marketplaceReview.dataset.tenantId}/marketplaces/${marketplaceReview.dataset.marketplaceCode}/${marketplaceReview.dataset.marketplaceReview}`,{method:'POST',body:{tenant_seller_id:Number(marketplaceReview.dataset.sellerId)}});toast('Источник обработан');await openTenant(marketplaceReview.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
+    }
+    if(replacement){
+      event.preventDefault();
+      const sourceUrl=String(window.prompt('Новый URL продавца:')||'').trim();
+      if(!sourceUrl)return;
+      try{await api(`/api/platform/tenants/${replacement.dataset.tenantId}/marketplaces/${replacement.dataset.marketplaceCode}/${replacement.dataset.sellerId}/replace`,{method:'POST',body:{source_url:sourceUrl}});toast('Кандидат источника отправлен на проверку');await openTenant(replacement.dataset.tenantId);await load();}catch(error){toast(error.message,true);}return;
+    }
+    if(purgeSeller){
+      event.preventDefault();
+      const {tenantId,marketplaceCode,sellerId}=purgeSeller.dataset;
+      try{
+        const preview=await api(`/api/platform/tenants/${tenantId}/marketplaces/${marketplaceCode}/${sellerId}/purge-preview`,{method:'POST',body:{}});
+        const counts=Object.entries(preview.preview?.counts||{}).map(([key,value])=>`${key}: ${value}`).join('\n');
+        if(!window.confirm(`Будут очищены только данные выбранного seller.\n${counts}\n\nПродолжить?`))return;
+        const currentPassword=String(window.prompt('Подтвердите текущим паролем:')||'');
+        if(!currentPassword)return;
+        await api(`/api/platform/tenants/${tenantId}/marketplaces/${marketplaceCode}/${sellerId}/purge`,{method:'POST',body:{current_password:currentPassword}});
+        toast('Данные выбранного seller очищены');await openTenant(tenantId);await load();
+      }catch(error){toast(error.message,true);}return;
+    }
     if (admin) {
       event.preventDefault();
       $('#tenantAdminForm').elements.tenant_id.value = admin.dataset.admin;
@@ -632,6 +725,8 @@
     } catch (error) { toast(error.message, true); }
   });
   document.querySelectorAll('.modal-close').forEach(button => button.addEventListener('click', () => { $('#tenantAdminModal').hidden = true; }));
+  $('#closeTenantDetail')?.addEventListener('click', closeDrawer);
+  $('#tenantDetailBackdrop')?.addEventListener('click', closeDrawer);
   $('#saveMarketplaceSourceRules')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {
@@ -756,6 +851,19 @@
 
   const billingSupplierForm=$('#billingSupplierForm');
 
+  // Requisites are secondary to review/active/history.  Keep the trusted
+  // operator profile available, but place the editable billing settings at
+  // the end of the payments screen and collapse them by default.
+  const billingSupplierPanel=$('#billingSupplierSettings');
+  const paymentsPanel=$('#payments');
+  if(billingSupplierPanel&&paymentsPanel){
+    const details=document.createElement('details');
+    details.className='billing-supplier-disclosure';
+    details.innerHTML='<summary>Реквизиты и настройки счёта</summary>';
+    paymentsPanel.after(details);
+    details.append(billingSupplierPanel);
+  }
+
   billingSupplierForm?.elements
     .namedItem('vat_enabled')
     ?.addEventListener('change',event=>{
@@ -769,6 +877,33 @@
         }
       }
     });
+
+  function requestBillingSupplierPassword(){
+    const modal=$('#billingSupplierPasswordModal');
+    const form=$('#billingSupplierPasswordForm');
+    if(!modal||!form)return Promise.resolve(null);
+    return new Promise(resolve=>{
+      const close=()=>{
+        modal.hidden=true;
+        form.reset();
+        form.onsubmit=null;
+        modal.querySelectorAll('[data-billing-supplier-password-close]').forEach(node=>node.onclick=null);
+        resolve(null);
+      };
+      modal.hidden=false;
+      modal.querySelectorAll('[data-billing-supplier-password-close]').forEach(node=>node.onclick=close);
+      form.onsubmit=event=>{
+        event.preventDefault();
+        const password=String(new FormData(form).get('current_password')||'');
+        modal.hidden=true;
+        form.reset();
+        form.onsubmit=null;
+        modal.querySelectorAll('[data-billing-supplier-password-close]').forEach(node=>node.onclick=null);
+        resolve(password||null);
+      };
+      window.setTimeout(()=>form.elements.namedItem('current_password')?.focus(),0);
+    });
+  }
 
   billingSupplierForm?.addEventListener('submit',async event=>{
     event.preventDefault();
@@ -809,6 +944,12 @@
       body.invoice_due_days=Number(
         body.invoice_due_days||5
       );
+
+      const currentPassword=await requestBillingSupplierPassword();
+      if(!currentPassword){
+        return;
+      }
+      body.current_password=currentPassword;
 
       const response=await api(
         '/api/platform/billing/supplier-settings',

@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from auth_service import AuthService
 from saas_service import SaaSService
@@ -131,15 +132,33 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
         for code, url in urls.items():
             checked = self.saas.detect_marketplace_url(tenant_id, url, code)
             self.assertEqual(code, checked["marketplace_code"])
-            self.assertTrue(checked["verified"])
+            self.assertEqual(
+                "parsed" if code in {"ozon", "ozon_kz"} else "verified",
+                checked["verification_state"],
+            )
             submitted = self.saas.connect_marketplace(
                 tenant_id, url, int(self.root["id"]), code
             )
             self.assertFalse(submitted["is_connected"])
             self.assertEqual("pending", submitted["approval_status"])
-            reviewed = self.saas.review_marketplace_connection(
-                tenant_id, code, "approved", int(self.root["id"])
-            )
+            if code in {"ozon", "ozon_kz"}:
+                host = "https://www.ozon.ru" if code == "ozon" else "https://ozon.kz"
+                with patch(
+                    "saas_service.verify_ozon_storefront",
+                    return_value={
+                        "canonical_seller_id": "ridial",
+                        "canonical_seller_url": f"{host}/seller/ridial/",
+                        "seller_name": "Ridial",
+                        "catalogue_empty": "false",
+                    },
+                ):
+                    reviewed = self.saas.review_marketplace_connection(
+                        tenant_id, code, "approved", int(self.root["id"])
+                    )
+            else:
+                reviewed = self.saas.review_marketplace_connection(
+                    tenant_id, code, "approved", int(self.root["id"])
+                )
             self.assertEqual("approved", reviewed["approval_status"])
         halyk = self.saas.detect_marketplace_url(tenant_id, urls["halyk_market"], "halyk_market")
         self.assertEqual("24955", halyk["seller_identifier"])

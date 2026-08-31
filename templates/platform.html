@@ -288,6 +288,20 @@
     </form>
   </div>
 </div>
+<div class="platform-modal billing-decision-modal" id="billingSupplierPasswordModal" hidden>
+  <div>
+    <button type="button" class="modal-close" data-billing-supplier-password-close aria-label="Close">&times;</button>
+    <h3>Подтвердите изменение настроек</h3>
+    <p class="billing-decision-description">Введите текущий пароль superadmin. Пароль используется только для подтверждения и не сохраняется.</p>
+    <form id="billingSupplierPasswordForm">
+      <label><span>Текущий пароль</span><input name="current_password" type="password" autocomplete="current-password" required></label>
+      <div class="billing-decision-actions">
+        <button type="button" data-billing-supplier-password-close>Отмена</button>
+        <button type="submit" class="billing-decision-submit">Подтвердить</button>
+      </div>
+    </form>
+  </div>
+</div>
 <div id="platformToasts"></div>
 <script src="{{ url_for('static', filename='js/locales.js') }}?v={{ version }}"></script>
 <script src="{{ url_for('static', filename='js/ui_core.js') }}?v={{ version }}"></script>

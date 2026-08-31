@@ -70,8 +70,7 @@ class BillingPlatformHttpTests(
                         "id"
                     ]
                 ),
-                tenant_id=
-                    self.tenant_id,
+                tenant_id=None,
                 platform_role=
                     "accountant",
             )
@@ -603,6 +602,36 @@ class BillingPlatformHttpTests(
         self.assertEqual("billing", event["category"])
         self.assertIn("Тариф активирован до", event["message"])
 
+    def test_accountant_event_is_tenantless_and_deduplicated(self) -> None:
+        self.assertIsNone(self.auth.get_user(int(self.accountant["id"]))["tenant_id"])
+        webapp.notify_platform_accountants(
+            "invoice_created", tenant_id=self.tenant_id, entity_id=701,
+            title="Invoice created", message="Waiting for payment.",
+        )
+
+    def test_accountant_can_open_tenant_billing_history_without_document_paths(self) -> None:
+        invoice = self._invoice()
+        self._attach_invoice_pdf(invoice)
+        self._proof(invoice)
+        self._login(self.accountant)
+
+        response = self.client.get(
+            f"/api/platform/tenants/{self.tenant_id}/billing-history"
+        )
+
+        self.assertEqual(200, response.status_code)
+        history = response.get_json()["history"]
+        item = next(value for value in history["items"] if value["invoice_id"] == int(invoice["id"]))
+        self.assertTrue(item["invoice_pdf_ready"])
+        self.assertEqual("payment.pdf", item["proof"]["original_filename"])
+        self.assertNotIn("stored_path", item["proof"])
+        webapp.notify_platform_accountants(
+            "invoice_created", tenant_id=self.tenant_id, entity_id=701,
+            title="Invoice created", message="Waiting for payment.",
+        )
+        items = NotificationService(self.db_path).list_for_user(int(self.accountant["id"]))["items"]
+        self.assertEqual(1, len([item for item in items if item["event_type"] == "invoice_created"]))
+
     def test_reject_requires_reason_and_updates_queue(
         self,
     ) -> None:
@@ -690,6 +719,36 @@ class BillingPlatformHttpTests(
                 "status"
             ],
         )
+
+    def test_supplier_settings_require_current_superadmin_password(self) -> None:
+        self._login(self.superadmin)
+        url = "/api/platform/billing/supplier-settings"
+        payload = {"invoice_prefix": "BILL"}
+
+        for current_password in (None, "wrong-password"):
+            response = self.client.put(
+                url,
+                json=payload | ({"current_password": current_password} if current_password else {}),
+                headers=self._headers(),
+            )
+            self.assertEqual(403, response.status_code)
+
+        response = self.client.put(
+            url,
+            json=payload | {"current_password": "StrongPassword123!"},
+            headers=self._headers(),
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        self.assertEqual("BILL", response.get_json()["supplier"]["invoice_prefix"])
+
+        conn = self.billing._connect()
+        try:
+            stored = conn.execute(
+                "SELECT value_json FROM platform_settings WHERE setting_key='billing_supplier'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertNotIn("current_password", stored)
 
 
 if __name__ == "__main__":

@@ -56,11 +56,9 @@ class AccountantPlatformAccessTests(
                 "StrongPassword456!",
                 "viewer",
                 int(self.admin["id"]),
-                tenant_id=int(
-                    self.admin[
-                        "tenant_id"
-                    ]
-                ),
+                # Platform accountants are deliberately tenantless: billing
+                # scope comes from platform_role, never a tenant membership.
+                tenant_id=None,
                 platform_role=
                     "accountant",
             )
@@ -173,6 +171,7 @@ class AccountantPlatformAccessTests(
             200,
             response.status_code,
         )
+        self.assertIsNone(self.auth.get_user(int(self.accountant["id"]))["tenant_id"])
 
     def test_accountant_cannot_open_other_platform_sections(
         self,

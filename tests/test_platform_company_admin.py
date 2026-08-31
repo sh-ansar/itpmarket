@@ -99,10 +99,15 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         self.assertEqual("pending", connected.get_json()["result"]["approval_status"])
 
         self.login(int(self.root["id"]))
-        reviewed = self.client.post(
-            f"/api/platform/tenants/{self.tenant_b}/marketplaces/ozon_kz/approved",
-            json={}, headers=self.headers,
-        )
+        with patch("saas_service.verify_ozon_storefront", return_value={
+            "canonical_seller_id": "company-b-90210",
+            "canonical_seller_url": "https://ozon.kz/seller/company-b-90210/",
+            "seller_name": "Company B", "catalogue_empty": "false",
+        }):
+            reviewed = self.client.post(
+                f"/api/platform/tenants/{self.tenant_b}/marketplaces/ozon_kz/approved",
+                json={}, headers=self.headers,
+            )
         self.assertEqual(200, reviewed.status_code)
         detail = self.client.get(f"/api/platform/tenants/{self.tenant_b}/detail")
         self.assertEqual(200, detail.status_code)
@@ -385,13 +390,18 @@ class PlatformCompanyAdminTests(unittest.TestCase):
 
         self.login(int(self.root["id"]))
 
-        approved = self.client.post(
-            f"/api/platform/tenants/"
-            f"{self.tenant_b}/marketplaces/"
-            "ozon_kz/approved",
-            json={},
-            headers=self.headers,
-        )
+        with patch("saas_service.verify_ozon_storefront", return_value={
+            "canonical_seller_id": "future-store-456",
+            "canonical_seller_url": "https://ozon.kz/seller/future-store-456/",
+            "seller_name": "Future Store", "catalogue_empty": "false",
+        }):
+            approved = self.client.post(
+                f"/api/platform/tenants/"
+                f"{self.tenant_b}/marketplaces/"
+                "ozon_kz/approved",
+                json={},
+                headers=self.headers,
+            )
         self.assertEqual(
             200,
             approved.status_code,

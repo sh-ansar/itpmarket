@@ -964,6 +964,104 @@ class BillingService:
         finally:
             conn.close()
 
+    def platform_tenant_billing_history(
+        self,
+        tenant_id: int,
+        *,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return a bounded, metadata-only billing history for platform staff.
+
+        The response deliberately contains neither stored document paths nor binary
+        document data.  The UI must continue to use the existing authenticated
+        invoice and proof download endpoints.
+        """
+        bounded_limit = max(1, min(int(limit), 100))
+        conn = self._connect()
+        try:
+            tenant = conn.execute(
+                """SELECT id,name,registration_number
+                   FROM tenants WHERE id=?""",
+                (int(tenant_id),),
+            ).fetchone()
+            if not tenant:
+                raise SubscriptionError("Компания не найдена.")
+
+            subscription = conn.execute(
+                """SELECT s.status,s.starts_at,s.ends_at,p.code AS plan_code,
+                          p.name AS plan_name
+                   FROM tenant_subscriptions s
+                   LEFT JOIN subscription_plans p ON p.id=s.plan_id
+                   WHERE s.tenant_id=?
+                   ORDER BY s.updated_at DESC,s.id DESC
+                   LIMIT 1""",
+                (int(tenant_id),),
+            ).fetchone()
+
+            rows = conn.execute(
+                """SELECT i.id AS invoice_id,i.invoice_number,i.status AS invoice_status,
+                          i.months_count,i.total_amount,i.currency,i.issued_at,i.due_at,
+                          i.pdf_path,i.cancelled_at,i.cancel_reason,
+                          s.status AS subscription_status,s.starts_at,s.ends_at,
+                          p.code AS plan_code,p.name AS plan_name,
+                          proof.id AS proof_id,proof.status AS proof_status,
+                          proof.original_filename,proof.uploaded_at,proof.reviewed_at,
+                          proof.review_note,reviewer.display_name AS reviewed_by
+                   FROM subscription_invoices i
+                   JOIN tenant_subscriptions s ON s.id=i.subscription_id
+                   LEFT JOIN subscription_plans p ON p.id=s.plan_id
+                   LEFT JOIN subscription_payment_proofs proof ON proof.id=(
+                       SELECT p2.id FROM subscription_payment_proofs p2
+                       WHERE p2.invoice_id=i.id AND p2.status<>'superseded'
+                       ORDER BY p2.id DESC LIMIT 1
+                   )
+                   LEFT JOIN app_users reviewer ON reviewer.id=proof.reviewed_by
+                   WHERE i.tenant_id=?
+                   ORDER BY i.issued_at DESC,i.id DESC
+                   LIMIT ?""",
+                (int(tenant_id), bounded_limit),
+            ).fetchall()
+
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                items.append({
+                    "invoice_id": int(item["invoice_id"]),
+                    "invoice_number": str(item["invoice_number"]),
+                    "invoice_status": str(item["invoice_status"]),
+                    "months_count": int(item["months_count"] or 0),
+                    "total_amount": float(item["total_amount"] or 0),
+                    "currency": str(item["currency"] or "KZT"),
+                    "issued_at": item["issued_at"],
+                    "due_at": item["due_at"],
+                    "period_start": item["starts_at"],
+                    "period_end": item["ends_at"],
+                    "plan_code": item["plan_code"],
+                    "plan_name": item["plan_name"],
+                    "subscription_status": item["subscription_status"],
+                    "invoice_pdf_ready": bool(item["pdf_path"]),
+                    "cancelled_at": item["cancelled_at"],
+                    "cancel_reason": item["cancel_reason"],
+                    "proof": ({
+                        "id": int(item["proof_id"]),
+                        "status": item["proof_status"],
+                        "original_filename": item["original_filename"],
+                        "uploaded_at": item["uploaded_at"],
+                        "reviewed_at": item["reviewed_at"],
+                        "review_note": item["review_note"],
+                        "reviewed_by": item["reviewed_by"],
+                    } if item["proof_id"] is not None else None),
+                })
+
+            return {
+                "tenant": dict(tenant),
+                "subscription": dict(subscription) if subscription else None,
+                "items": items,
+                "limit": bounded_limit,
+            }
+        finally:
+            conn.close()
+
     @staticmethod
     def _invoice_pdf_payload(
         invoice: dict[str, Any],
