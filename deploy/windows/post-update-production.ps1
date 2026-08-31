@@ -240,25 +240,68 @@ if (-not (Test-Path -LiteralPath $ozonTaskHelper)) {
     throw 'Ozon browser task helper was not found in the target release.'
 }
 
-$ozonOutput = & powershell.exe `
-    -NoProfile `
-    -NonInteractive `
-    -ExecutionPolicy Bypass `
-    -File $ozonTaskHelper `
-    -RepoRoot $RepoRoot `
-    2>&1
+$ozonStdout = Join-Path `
+    'C:\Spyon\.state' `
+    'ozon-task.stdout.log'
 
-$ozonExitCode = $LASTEXITCODE
+$ozonStderr = Join-Path `
+    'C:\Spyon\.state' `
+    'ozon-task.stderr.log'
 
-foreach ($line in @($ozonOutput)) {
-    $text = [string]$line
-    if ($text.Trim()) {
-        Write-DeployLog ('OZON: ' + $text.Trim())
+Remove-Item `
+    -LiteralPath $ozonStdout `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+Remove-Item `
+    -LiteralPath $ozonStderr `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+$ozonArguments = @(
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    ('"' + $ozonTaskHelper + '"'),
+    '-RepoRoot',
+    ('"' + $RepoRoot + '"')
+)
+
+$ozonProcess = Start-Process `
+    -FilePath 'powershell.exe' `
+    -ArgumentList $ozonArguments `
+    -RedirectStandardOutput $ozonStdout `
+    -RedirectStandardError $ozonStderr `
+    -Wait `
+    -PassThru
+
+foreach ($stream in @(
+    $ozonStdout,
+    $ozonStderr
+)) {
+    if (-not (Test-Path -LiteralPath $stream)) {
+        continue
+    }
+
+    foreach ($line in Get-Content -LiteralPath $stream) {
+        $value = [string]$line
+
+        if ($value.Trim()) {
+            Write-DeployLog (
+                'OZON: ' +
+                $value.Trim()
+            )
+        }
     }
 }
 
-if ($ozonExitCode -ne 0) {
-    throw 'Ozon browser task registration failed.'
+if ($ozonProcess.ExitCode -ne 0) {
+    throw (
+        'Ozon browser task registration failed. exit=' +
+        $ozonProcess.ExitCode
+    )
 }
 
 Write-DeployLog (
