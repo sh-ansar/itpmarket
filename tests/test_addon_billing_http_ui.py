@@ -44,9 +44,7 @@ class AddonBillingHttpUiTests(unittest.TestCase):
             invoice_pdf_service=FakeInvoicePDFService(self.root),
         )
         self.billing.update_supplier_settings({
-            "name": "Supplier", "registration_number": "123456789012",
-            "legal_address": "Astana", "iban": "KZ00TEST",
-            "bank_name": "Bank", "bic": "TESTKZKX",
+            "invoice_due_days": 5,
         }, int(self.superadmin["id"]))
         self.addons = AddonBillingService(
             self.db_path, document_root=self.root, billing_service=self.billing,

@@ -10,7 +10,46 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$gitExe = (Get-Command git.exe).Source
+function Resolve-SpyonGit {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    $command = Get-Command git.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if ($command -and $command.Source) {
+        $candidates.Add([string]$command.Source)
+    }
+
+    foreach ($programFiles in @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)}
+    )) {
+        if ($programFiles) {
+            $candidates.Add((Join-Path $programFiles 'Git\cmd\git.exe'))
+        }
+    }
+
+    # Existing recovery tooling is an explicit last fallback for Windows
+    # installations where Git for Windows is not on PATH.
+    $spyonRoot = Split-Path -Parent $RepoRoot
+    $candidates.Add((Join-Path $spyonRoot 'recovery-tools\PortableGit\cmd\git.exe'))
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            continue
+        }
+
+        & $candidate --version | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return $candidate
+        }
+    }
+
+    throw 'Git for Windows was not found. Install Git for Windows or restore the approved recovery Git runtime.'
+}
+
+$gitExe = Resolve-SpyonGit -RepoRoot $RepoRoot
 
 function Write-DeployLog {
     param([string]$Message)

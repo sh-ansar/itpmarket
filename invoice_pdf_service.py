@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
 import tempfile
@@ -518,6 +519,7 @@ class InvoicePDFService:
         ),
         logo_path: Path | str | None = None,
         stamp_path: Path | str | None = None,
+        stamp_sha256: str | None = None,
     ) -> None:
         self.output_dir = Path(
             output_dir
@@ -538,6 +540,40 @@ class InvoicePDFService:
                 "data/billing-assets/itp_mining_stamp.png",
             )
         )
+
+        self.stamp_sha256 = str(
+            stamp_sha256
+            if stamp_sha256 is not None
+            else os.getenv(
+                "SPYON_INVOICE_STAMP_SHA256",
+                "",
+            )
+        ).strip().lower()
+
+    def _verify_stamp_integrity(self) -> None:
+        """Reject a configured stamp whose bytes differ from its pinned hash."""
+        if not self.stamp_sha256:
+            return
+
+        if not re.fullmatch(
+            r"[0-9a-f]{64}",
+            self.stamp_sha256,
+        ):
+            raise InvoicePDFError(
+                "Invoice stamp integrity configuration is invalid."
+            )
+
+        actual = hashlib.sha256(
+            self.stamp_path.read_bytes()
+        ).hexdigest()
+
+        if not hmac.compare_digest(
+            actual,
+            self.stamp_sha256,
+        ):
+            raise InvoicePDFError(
+                "Invoice stamp integrity check failed."
+            )
 
     @staticmethod
     def _styles() -> dict[str, ParagraphStyle]:
@@ -758,6 +794,8 @@ class InvoicePDFService:
             raise InvoicePDFError(
                 "ITP Mining stamp was not found."
             )
+
+        self._verify_stamp_integrity()
 
         regular, bold = _register_fonts()
 

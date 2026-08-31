@@ -92,7 +92,9 @@ $env:PYTHONPATH = (Get-Location).Path
 .\.venv\Scripts\python.exe .\scripts\generate_legal_pdfs.py
 ```
 
-После публикации PDF версии не перегенерируются. Для локальной проверки
+После публикации PDF версии не перегенерируются. Для новой версии внесите в
+реестр SHA-256 exact DOCX; изменение уже закреплённого файла намеренно
+останавливает выдачу документа. Для локальной проверки
 запустите `tests/test_legal_documents.py` вместе с миграционными тестами.
 
 Диагностика выводит `PASS/WARN/FAIL` для branch/worktree, Python, зависимостей, Playwright, БД, Chrome/ChromeDriver, каталогов и ACL, профилей, scheduler, порта и HTTP. Она не печатает секреты и возвращает код 1 только при `FAIL`; отсутствие live-профиля или незапущенное локальное приложение — `WARN`.
@@ -138,8 +140,12 @@ YYYYMMDD_name.sql filenames.
 Safe automatic migrations must contain SPYON-AUTO-MIGRATION, start with BEGIN
 and end with COMMIT. Run tests/test_postgres_migrations.py before release.
 
-For billing changes, run `tests/test_billing_invoices.py`: it covers creation,
-cancellation, and safe reissue of an unpaid invoice.
+For billing changes, run `tests/test_billing_invoices.py` and
+`tests/test_invoice_pdf_service.py`: they cover creation, cancellation, safe
+reissue of an unpaid invoice, immutable seller snapshots, protected operator
+fields, and configured stamp SHA-256 verification. Invoice stamp and logo
+paths belong in runtime environment (`SPYON_INVOICE_STAMP_PATH` and optional
+`SPYON_INVOICE_STAMP_SHA256`), never in tracked configuration.
 
 The password reset regression test verifies the complete flow from requesting
 an email link through changing the password and consuming the one-use token.

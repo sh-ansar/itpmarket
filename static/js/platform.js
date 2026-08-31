@@ -781,8 +781,21 @@
         button.disabled=true;
       }
 
+      const editableFields=[
+        'payment_purpose_code',
+        'invoice_prefix',
+        'invoice_due_days',
+        'service_name',
+        'agreement_basis',
+        'executor_name',
+        'vat_rate'
+      ];
+
       const body=Object.fromEntries(
-        new FormData(form).entries()
+        editableFields.map(name=>[
+          name,
+          form.elements.namedItem(name)?.value??''
+        ])
       );
 
       body.vat_enabled=Boolean(

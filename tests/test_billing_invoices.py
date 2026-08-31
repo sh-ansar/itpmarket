@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 from auth_service import AuthService
-from billing_service import BillingService
+from billing_service import (
+    BillingService,
+    OPERATOR_LEGAL_PROFILE,
+)
 from schema import ensure_database
 from subscription_service import (
     SubscriptionError,
@@ -521,7 +524,7 @@ class BillingInvoiceTests(unittest.TestCase):
             .supplier_settings()
         )
 
-        self.assertFalse(
+        self.assertTrue(
             settings["is_complete"]
         )
 
@@ -544,11 +547,14 @@ class BillingInvoiceTests(unittest.TestCase):
             settings["vat_rate"],
         )
 
-        self.assertIn(
-            "name",
-            settings[
-                "missing_fields"
-            ],
+        self.assertEqual(
+            [],
+            settings["missing_fields"],
+        )
+
+        self.assertEqual(
+            OPERATOR_LEGAL_PROFILE["name"],
+            settings["name"],
         )
 
     def test_supplier_settings_are_persisted_and_audited(self) -> None:
@@ -556,20 +562,6 @@ class BillingInvoiceTests(unittest.TestCase):
             self.billing
             .update_supplier_settings(
                 {
-                    "name":
-                        "ITP Mining",
-                    "registration_number":
-                        "161240002661",
-                    "legal_address":
-                        "Astana",
-                    "iban":
-                        "KZ20722S000001855383",
-                    "bank_name":
-                        "KASPI BANK",
-                    "bic":
-                        "CASPKZKA",
-                    "kbe":
-                        "17",
                     "payment_purpose_code":
                         "851",
                     "vat_enabled":
@@ -619,12 +611,12 @@ class BillingInvoiceTests(unittest.TestCase):
         ).supplier_settings()
 
         self.assertEqual(
-            "ITP Mining",
+            OPERATOR_LEGAL_PROFILE["name"],
             reloaded["name"],
         )
 
         self.assertEqual(
-            "KZ20722S000001855383",
+            OPERATOR_LEGAL_PROFILE["iban"],
             reloaded["iban"],
         )
 
@@ -670,6 +662,11 @@ class BillingInvoiceTests(unittest.TestCase):
             int(stored[1]),
         )
 
+        self.assertNotIn(
+            "iban",
+            str(stored[0]),
+        )
+
         self.assertIsNotNone(
             audit
         )
@@ -689,6 +686,55 @@ class BillingInvoiceTests(unittest.TestCase):
         self.assertNotIn(
             "KZ20722S000001855383",
             str(audit[3]),
+        )
+
+    def test_operator_legal_profile_cannot_be_mutated(self) -> None:
+        with self.assertRaisesRegex(
+            SubscriptionError,
+            "Юридические реквизиты оператора",
+        ):
+            self.billing.update_supplier_settings(
+                {
+                    "iban": "KZ000000000000000000",
+                },
+                int(self.admin["id"]),
+            )
+
+        self.assertEqual(
+            OPERATOR_LEGAL_PROFILE["iban"],
+            self.billing.supplier_settings()["iban"],
+        )
+
+    def test_issued_invoice_keeps_its_seller_snapshot(self) -> None:
+        reviewed = self._approve_for_invoice("starter")
+        supplier = self.billing.supplier_settings()
+        seller_snapshot = {
+            key: value
+            for key, value in supplier.items()
+            if key not in {"is_complete", "missing_fields"}
+        }
+
+        invoice = self.billing.create_invoice(
+            int(reviewed["id"]),
+            1,
+            int(self.admin["id"]),
+            seller_snapshot=seller_snapshot,
+        )
+
+        self.billing.update_supplier_settings(
+            {"payment_purpose_code": "851"},
+            int(self.admin["id"]),
+        )
+
+        persisted = self.billing.invoice_by_id(int(invoice["id"]))
+        self.assertIsNotNone(persisted)
+        self.assertEqual(
+            "",
+            persisted["seller"]["payment_purpose_code"],
+        )
+        self.assertEqual(
+            OPERATOR_LEGAL_PROFILE["iban"],
+            persisted["seller"]["iban"],
         )
 
     def test_supplier_settings_validation(self) -> None:

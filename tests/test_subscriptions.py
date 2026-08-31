@@ -247,7 +247,7 @@ class SubscriptionServiceTests(unittest.TestCase):
         entitlement = self.service.entitlement(self.tenant_id)
 
         self.assertEqual("active", active["status"])
-        self.assertEqual(31, active["term_days"])
+        self.assertEqual(30, active["term_days"])
         self.assertEqual(12000, active["price_amount"])
         self.assertTrue(entitlement["active"])
         self.assertFalse(entitlement["features"]["reports"])

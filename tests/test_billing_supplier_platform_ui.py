@@ -94,6 +94,48 @@ class BillingSupplierPlatformUiTests(
                 self.template,
             )
 
+        for name in (
+            "name",
+            "registration_number",
+            "legal_address",
+            "iban",
+            "bank_name",
+            "bic",
+            "kbe",
+        ):
+            self.assertIn(
+                f'name="{name}"',
+                self.template,
+            )
+
+        self.assertIn(
+            'name="iban" autocomplete="off" disabled',
+            self.template,
+        )
+
+    def test_supplier_ui_submits_only_invoice_configuration(self):
+        self.assertIn(
+            "const editableFields=[",
+            self.js,
+        )
+        self.assertIn(
+            "'payment_purpose_code'",
+            self.js,
+        )
+
+        editable_fields = self.js.split(
+            "const editableFields=[",
+            1,
+        )[1].split(
+            "];",
+            1,
+        )[0]
+
+        self.assertNotIn(
+            "'iban'",
+            editable_fields,
+        )
+
     def test_supplier_ui_uses_platform_api(self):
         self.assertIn(
             "loadBillingSupplierSettings",

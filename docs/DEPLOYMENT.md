@@ -107,7 +107,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -EnvironmentFile C:\Spyon\current\.runtime\production.env
 ```
 
-Ожидается branch `production`, чистые tracked files, Python 3.10/3.11, целые зависимости, локальный Playwright, machine-wide/custom Chrome, доступная PostgreSQL со схемой `app.tenants`, корректные каталоги/ACL, задачи `Spyon Production` и `Spyon Auto Deploy`, listener и успешные HTTP-пробы. Диагностика скрывает значения секретов. `WARN` нужно объяснить; любой `FAIL` блокирует деплой.
+Ожидается branch `production`, чистые tracked files, Python 3.10/3.11, целые зависимости, локальный Playwright, machine-wide/custom Chrome, доступная PostgreSQL со схемой `app.tenants`, корректные каталоги/ACL, задачи `Spyon Production` и `Spyon Auto Deploy`, listener и успешные HTTP-пробы. Для invoice stamp production env задаёт внешний защищённый путь `SPYON_INVOICE_STAMP_PATH` и его `SPYON_INVOICE_STAMP_SHA256`; сама печать не хранится в checkout. Автодеплой сначала ищет `git.exe` в PATH и стандартной установке Git for Windows, затем использует только существующий approved recovery runtime; при отсутствии проверенного Git он завершается с явной ошибкой. Диагностика скрывает значения секретов. `WARN` нужно объяснить; любой `FAIL` блокирует деплой.
 
 Дополнительная read-only проверка startup-контракта:
 

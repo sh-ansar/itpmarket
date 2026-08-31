@@ -38,6 +38,7 @@ class LegalDefinition:
     title: str
     filename: str
     acceptance_text: str
+    expected_sha256: str
 
     @property
     def source_path(self) -> Path:
@@ -60,12 +61,14 @@ class LegalDocumentRegistry:
             "offer", "SPYON-OF-001", "1.0", "Публичная оферта Spyon",
             "Spyon_Публичная_оферта_v1.0_для_согласования.docx",
             OFFER_ACCEPTANCE_TEXT,
+            "64ec228d143b624438d31ba13519efda16e3d183e4d4ca280351e6ed03e567c0",
         ),
         LegalDefinition(
             "privacy", "SPYON-PD-001", "1.0",
             "Политика конфиденциальности Spyon",
             "Spyon_Политика_конфиденциальности_и_согласие_v1.0_для_согласования.docx",
             PRIVACY_ACCEPTANCE_TEXT,
+            "90da2b84982c11ae60318a286845ea594e76f9dfb58039bc3a560544b1fabb39",
         ),
     )
 
@@ -126,7 +129,14 @@ class LegalDocumentRegistry:
         return values
 
     def sha256(self, definition: LegalDefinition) -> str:
-        return sha256(definition.source_path.read_bytes()).hexdigest()
+        digest = sha256(definition.source_path.read_bytes()).hexdigest()
+
+        if digest != definition.expected_sha256:
+            raise RuntimeError(
+                "Versioned legal document integrity check failed."
+            )
+
+        return digest
 
     def metadata(self, definition: LegalDefinition) -> dict[str, Any]:
         return {

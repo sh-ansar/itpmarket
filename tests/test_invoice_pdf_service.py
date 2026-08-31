@@ -236,6 +236,33 @@ class InvoicePDFServiceTests(
             path.name,
         )
 
+    def test_stamp_sha256_must_match_when_configured(self) -> None:
+        expected = hashlib.sha256(
+            self.stamp_path.read_bytes()
+        ).hexdigest()
+        verified = InvoicePDFService(
+            self.output_dir,
+            logo_path=self.logo_path,
+            stamp_path=self.stamp_path,
+            stamp_sha256=expected,
+        )
+
+        result = verified.generate(self.invoice())
+        self.assertTrue(Path(result["path"]).is_file())
+
+        tampered = InvoicePDFService(
+            self.output_dir,
+            logo_path=self.logo_path,
+            stamp_path=self.stamp_path,
+            stamp_sha256="0" * 64,
+        )
+
+        with self.assertRaisesRegex(
+            InvoicePDFError,
+            "integrity check failed",
+        ):
+            tampered.generate(self.invoice())
+
     def test_same_snapshot_is_deterministic(self) -> None:
         invoice = self.invoice()
 

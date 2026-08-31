@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 import hashlib
 import json
+import os
+from uuid import uuid4
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,14 +41,27 @@ def now_iso() -> str:
 
 BILLING_SUPPLIER_SETTING_KEY = "billing_supplier"
 
-DEFAULT_BILLING_SUPPLIER = {
-    "name": "",
-    "registration_number": "",
-    "legal_address": "",
-    "iban": "",
-    "bank_name": "",
-    "bic": "",
-    "kbe": "",
+# These details are taken from the versioned public offer. They deliberately
+# live in source control rather than a mutable platform setting: a user with
+# platform access must not be able to replace the legal identity shown on
+# newly issued invoices. Historical invoices retain their own seller snapshot,
+# so a future approved legal-profile revision cannot alter them.
+OPERATOR_LEGAL_PROFILE = {
+    "name": "ТОО «ITP Mining»",
+    "registration_number": "161240002661",
+    "legal_address": (
+        "Республика Казахстан, г. Астана, "
+        "пр. Бауыржана Момышулы, 12А, блок B, офис 305"
+    ),
+    "iban": "KZ20722S000001855383",
+    "bank_name": "АО Kaspi Bank, г. Астана",
+    "bic": "CASPKZKA",
+    "kbe": "17",
+}
+
+# Only invoice-configuration values are intentionally mutable through the
+# platform billing settings API. Legal and bank fields above are not.
+DEFAULT_INVOICE_CONFIGURATION = {
     "payment_purpose_code": "",
     "vat_enabled": False,
     "vat_rate": 0.0,
@@ -65,6 +78,14 @@ DEFAULT_BILLING_SUPPLIER = {
     "agreement_basis": "",
     "executor_name": "",
 }
+
+DEFAULT_BILLING_SUPPLIER = {
+    **OPERATOR_LEGAL_PROFILE,
+    **DEFAULT_INVOICE_CONFIGURATION,
+}
+
+OPERATOR_LEGAL_FIELDS = frozenset(OPERATOR_LEGAL_PROFILE)
+INVOICE_CONFIGURATION_FIELDS = frozenset(DEFAULT_INVOICE_CONFIGURATION)
 
 BILLING_SUPPLIER_REQUIRED_FIELDS = (
     "name",
@@ -465,9 +486,7 @@ class BillingService:
                 stored,
                 dict,
             ):
-                for key in (
-                    DEFAULT_BILLING_SUPPLIER
-                ):
+                for key in INVOICE_CONFIGURATION_FIELDS:
                     if key in stored:
                         value[key] = (
                             stored[key]
@@ -542,6 +561,21 @@ class BillingService:
                 "\u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430."
             )
 
+        protected_fields = sorted(
+            key
+            for key in payload
+            if key in OPERATOR_LEGAL_FIELDS
+        )
+
+        if protected_fields:
+            raise SubscriptionError(
+                "\u042e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u0435 "
+                "\u0440\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0430 "
+                "\u0437\u0430\u0444\u0438\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u044b \u0432 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u043e\u0439 "
+                "\u0432\u0435\u0440\u0441\u0438\u0438 \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0439 \u043e\u0444\u0435\u0440\u0442\u044b "
+                "\u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u0447\u0435\u0440\u0435\u0437 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438."
+            )
+
         current = (
             self.supplier_settings()
         )
@@ -557,13 +591,6 @@ class BillingService:
         )
 
         text_fields = {
-            "name",
-            "registration_number",
-            "legal_address",
-            "iban",
-            "bank_name",
-            "bic",
-            "kbe",
             "payment_purpose_code",
             "invoice_prefix",
             "service_name",
@@ -729,7 +756,10 @@ class BillingService:
                 (
                     BILLING_SUPPLIER_SETTING_KEY,
                     json.dumps(
-                        current,
+                        {
+                            key: current[key]
+                            for key in INVOICE_CONFIGURATION_FIELDS
+                        },
                         ensure_ascii=False,
                         separators=(",", ":"),
                     ),
@@ -766,7 +796,7 @@ class BillingService:
                                     for key
                                     in payload
                                     if key
-                                    in DEFAULT_BILLING_SUPPLIER
+                                    in INVOICE_CONFIGURATION_FIELDS
                                 ),
                             "is_complete":
                                 self._supplier_status(
@@ -1003,6 +1033,11 @@ class BillingService:
             invoice
         )
 
+        configured_stamp_path = os.getenv(
+            "SPYON_INVOICE_STAMP_PATH",
+            "",
+        ).strip()
+
         return InvoicePDFService(
             output_dir=(
                 self.document_root
@@ -1017,10 +1052,14 @@ class BillingService:
                 / "itp_mining_logo.png"
             ),
             stamp_path=(
-                self.document_root
-                / "data"
-                / "billing-assets"
-                / "itp_mining_stamp.png"
+                Path(configured_stamp_path)
+                if configured_stamp_path
+                else (
+                    self.document_root
+                    / "data"
+                    / "billing-assets"
+                    / "itp_mining_stamp.png"
+                )
             ),
         )
 
