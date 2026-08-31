@@ -76,7 +76,7 @@ from subscription_service import (
     SubscriptionLimitError,
     SubscriptionService,
 )
-from notification_service import NotificationService
+from notification_service import NotificationMaintenanceWorker, NotificationService
 from telegram_bot import TelegramBotWorker, TelegramLinkService
 from email_service import EmailOutboxWorker, EmailService
 from storage.database_backend import DatabaseSettings
@@ -294,86 +294,6 @@ def queue_password_changed_email(user: dict[str, Any]) -> None:
     )
 
 
-def notify_billing_payment_confirmed(result: dict[str, Any]) -> None:
-    """Publish one idempotent billing event per active company user."""
-    subscription = dict(result.get("subscription") or {})
-    tenant_id = int(subscription.get("tenant_id") or 0)
-    subscription_id = int(subscription.get("id") or 0)
-    payment_id = int((result.get("payment") or {}).get("id") or 0)
-    if not tenant_id or not subscription_id or not payment_id:
-        return
-
-    try:
-        ends_at = datetime.fromisoformat(
-            str(subscription.get("ends_at") or "").replace("Z", "+00:00")
-        ).strftime("%d.%m.%Y")
-    except ValueError:
-        ends_at = str(subscription.get("ends_at") or "")[:10]
-
-    status = str(subscription.get("status") or "")
-    if status == "active":
-        message = f"Оплата подтверждена. Тариф активирован до {ends_at}."
-    else:
-        message = f"Оплата подтверждена. Тариф будет действовать до {ends_at}."
-
-    for recipient in AUTH.list_users(tenant_id):
-        if not recipient.get("is_active"):
-            continue
-        notification_service().create(
-            tenant_id=tenant_id,
-            user_id=int(recipient["id"]),
-            category="billing",
-            event_type="payment_confirmed",
-            title="Оплата подтверждена",
-            message=message,
-            level="success",
-            action_url="/app#settings",
-            dedupe_key=(
-                f"billing:payment:{payment_id}:subscription:{subscription_id}:"
-                f"payment-confirmed:user:{int(recipient['id'])}"
-            ),
-        )
-
-
-def notify_platform_accountants(
-    event_type: str,
-    *,
-    tenant_id: int,
-    entity_id: int,
-    title: str,
-    message: str,
-) -> None:
-    """Queue one best-effort, deduplicated billing event for each accountant."""
-    for recipient in AUTH.list_users():
-        if not recipient.get("is_active") or recipient.get("platform_role") != "accountant":
-            continue
-        notification_service().create(
-            tenant_id=int(tenant_id), user_id=int(recipient["id"]),
-            category="billing", event_type=event_type, title=title, message=message,
-            level="info", action_url="/platform/payments",
-            dedupe_key=f"billing:{event_type}:{int(entity_id)}:accountant:{int(recipient['id'])}",
-        )
-
-
-def notify_billing_payment_rejected(result: dict[str, Any]) -> None:
-    """Notify tenant users after a reviewer rejects a payment proof."""
-    subscription = dict(result.get("subscription") or {})
-    proof = dict(result.get("proof") or {})
-    tenant_id = int(subscription.get("tenant_id") or 0)
-    if not tenant_id:
-        return
-    for recipient in AUTH.list_users(tenant_id):
-        if not recipient.get("is_active"):
-            continue
-        notification_service().create(
-            tenant_id=tenant_id, user_id=int(recipient["id"]), category="billing",
-            event_type="payment_rejected", title="Payment requires attention",
-            message="The payment document was rejected. Review the note and upload a corrected document.",
-            level="warning", action_url="/app#settings",
-            dedupe_key=f"billing:payment-rejected:{int(proof.get('invoice_id') or 0)}:user:{int(recipient['id'])}",
-        )
-
-
 def _tenant_billing_recipients(tenant_id: int) -> list[dict[str, Any]]:
     """Billing contact policy: active tenant admins or manage_company users only."""
     return [
@@ -478,13 +398,15 @@ def notify_billing_payment_confirmed(
     payment_id = int((result.get("payment") or {}).get("id") or invoice_id)
     if not tenant_id:
         return
-    ends = str(subscription.get("ends_at") or "")[:10]
-    starts = str(subscription.get("starts_at") or "")[:10]
+    try:
+        ends = datetime.fromisoformat(
+            str(subscription.get("ends_at") or "").replace("Z", "+00:00")
+        ).strftime("%d.%m.%Y")
+    except ValueError:
+        ends = str(subscription.get("ends_at") or "")[:10]
     invoice = billing_service().invoice_by_id(invoice_id) or {}
     plan = str(subscription.get("plan_name") or invoice.get("plan_name") or "выбранный тариф")
-    message = f"Оплата подтверждена. Доступ активирован. Тариф {plan} действует до {ends}. Тариф активирован до {ends}."
-    if starts:
-        message += f" Начало: {starts}."
+    message = f"Оплата подтверждена. Доступ активирован. Тариф «{plan}» действует до {ends}."
     notify_tenant_billing_users(
         tenant_id=tenant_id, event_type="payment_confirmed", entity_id=payment_id,
         title="Оплата подтверждена", message=message, action_url="/app#settings",
@@ -2020,6 +1942,23 @@ EMAIL_WORKER = EmailOutboxWorker(
 if os.environ.get("ITP_DISABLE_EMAIL_WORKER", "0") != "1":
     EMAIL_WORKER.start()
 atexit.register(EMAIL_WORKER.stop)
+
+
+def notification_maintenance_enabled() -> bool:
+    """Keep test/local scheduler opt-out authoritative for reminder maintenance."""
+    return (
+        os.environ.get("ITP_DISABLE_NOTIFICATION_MAINTENANCE", "0") != "1"
+        and os.environ.get("ITP_DISABLE_SCHEDULER", "0") != "1"
+    )
+
+
+NOTIFICATION_MAINTENANCE_WORKER = NotificationMaintenanceWorker(
+    notification_service(),
+    interval_seconds=float(os.environ.get("ITP_NOTIFICATION_MAINTENANCE_INTERVAL", "1800")),
+)
+if notification_maintenance_enabled():
+    NOTIFICATION_MAINTENANCE_WORKER.start()
+atexit.register(NOTIFICATION_MAINTENANCE_WORKER.stop)
 
 TELEGRAM_WORKER: TelegramBotWorker | None = None
 if environment_flag("ITP_TELEGRAM_BOT_ENABLED"):

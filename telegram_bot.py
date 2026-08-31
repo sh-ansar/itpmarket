@@ -7,7 +7,7 @@ import logging
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -284,7 +284,7 @@ class TelegramLinkService:
         if self._link_rate_limited(f"user:{user_id}"):
             raise ValueError("Слишком много запросов. Повторите операцию позже.")
         token = secrets.token_urlsafe(24)
-        stamp = datetime.now().astimezone()
+        stamp = datetime.now(timezone.utc)
         expires_at = stamp + timedelta(seconds=LINK_TOKEN_TTL_SECONDS)
         tenant_id = int(user["tenant_id"]) if user.get("tenant_id") is not None else None
         conn = self._connect()
@@ -315,7 +315,7 @@ class TelegramLinkService:
         raw = str(token or "").strip()
         if not raw or len(raw) > 256 or self._link_rate_limited(f"chat:{int(chat_id)}"):
             return None
-        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn = self._connect()
         try:
             row = conn.execute(
@@ -702,9 +702,6 @@ class TelegramBotWorker:
         )
         self.bot_username = ""
         self.notification_sync = notification_sync
-        # Retained empty only for safe compatibility with historical /cancel and
-        # /logout branches; no user input is ever placed in this mapping.
-        self._sessions: dict[int, dict[str, Any]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -809,98 +806,10 @@ class TelegramBotWorker:
             self._handle_command(command, chat_id, argument, sender)
             return
 
-        # Password and email messages are never accepted by this bot.  Linking
+        # Password and email messages are never accepted by this bot. Linking
         # starts in authenticated Spyon settings and continues with /link TOKEN.
         self._send(chat_id, "Откройте настройки Spyon и создайте одноразовый код Telegram для команды /link.")
         return
-
-        session = self._active_session(chat_id)
-        if not session:
-            self._send(chat_id, "Начните безопасную привязку командой /login.")
-            return
-        if session["state"] == "await_login":
-            deleted = self._delete_sensitive(chat_id, message_id)
-            email = text.casefold()[:254]
-            if "@" not in email or len(email) < 5:
-                self._send(chat_id, "Введите логин в формате email или отправьте /cancel.")
-                return
-            session.update({
-                "state": "await_password",
-                "email": email,
-                "expires_at": time.monotonic() + SESSION_TTL_SECONDS,
-            })
-            self._send(
-                chat_id,
-                (
-                    "Теперь отправьте пароль Spyon. Сообщение будет сразу удалено и пароль не сохранится."
-                    if deleted
-                    else "Telegram не позволил удалить логин — удалите его вручную. Теперь отправьте пароль Spyon."
-                ),
-            )
-            return
-        if session["state"] != "await_password":
-            self._sessions.pop(chat_id, None)
-            return
-
-        password_deleted = self._delete_sensitive(chat_id, message_id)
-        email = str(session.get("email") or "")
-        password = text
-        self._sessions.pop(chat_id, None)
-        if self._auth_locked(chat_id, email):
-            password = ""
-            self._send(
-                chat_id,
-                "Слишком много попыток входа. Повторите через 15 минут.",
-            )
-            return
-        user = self.auth.authenticate(
-            email,
-            password,
-            event_type="telegram_login",
-        )
-        password = ""
-
-        if user and not user.get("email_verified"):
-            self._send(
-                chat_id,
-                "Сначала подтвердите электронную почту "
-                "в Spyon, затем повторите вход.",
-            )
-            return
-
-        if not user:
-            self._record_auth_failure(chat_id, email)
-            warning = (
-                ""
-                if password_deleted
-                else " Telegram не удалил пароль — удалите сообщение вручную."
-            )
-            self._send(
-                chat_id,
-                "Неверный логин или пароль. Для новой попытки: /login" + warning,
-            )
-            return
-        self._clear_auth_attempts(chat_id, email)
-        display_name = " ".join(
-            str(sender.get(key) or "").strip() for key in ("first_name", "last_name")
-        ).strip()
-        self.links.link_user(
-            user,
-            chat_id=chat_id,
-            telegram_user_id=int(sender.get("id") or chat_id),
-            username=str(sender.get("username") or ""),
-            display_name=display_name,
-        )
-        self._send(
-            chat_id,
-            (
-                f"Готово. Telegram привязан к аккаунту {user.get('display_name') or user.get('email')}. Новые уведомления Spyon будут приходить сюда."
-                + (
-                    " Telegram не удалил сообщение с паролем — удалите его вручную."
-                    if not password_deleted else ""
-                )
-            ),
-        )
 
     def _handle_command(
         self,
@@ -964,35 +873,6 @@ class TelegramBotWorker:
                     "Telegram ещё не привязан. Создайте одноразовый код в настройках Spyon и отправьте /link КОД.",
                 )
             return
-        if command in {"/start", "/help"}:
-            if link:
-                self._send(
-                    chat_id,
-                    "Spyon подключён.\n/status — состояние\n/notifications — последние события\n/pause — пауза\n/resume — возобновить\n/logout — отвязать Telegram",
-                )
-            else:
-                self._send(
-                    chat_id,
-                    "Бот Spyon отправляет уведомления о синхронизациях, ошибках и подписке. Для привязки используйте /login. Логин — email от Spyon.",
-                )
-            return
-        if command == "/login":
-            self._sessions[chat_id] = {
-                "state": "await_login",
-                "expires_at": time.monotonic() + SESSION_TTL_SECONDS,
-            }
-            self._send(
-                chat_id,
-                "Введите логин Spyon (email). Сообщение будет удалено после чтения. /cancel — отмена.",
-            )
-            return
-        if command == "/cancel":
-            self._sessions.pop(chat_id, None)
-            self._send(chat_id, "Вход отменён.")
-            return
-        if not link:
-            self._send(chat_id, "Telegram ещё не привязан. Используйте /login.")
-            return
         user_id = int(link["user_id"])
         if command == "/status":
             unread = self.links.unread_count(user_id)
@@ -1021,8 +901,10 @@ class TelegramBotWorker:
             return
         if command == "/logout":
             self.links.unlink_user(user_id)
-            self._sessions.pop(chat_id, None)
-            self._send(chat_id, "Telegram отвязан от Spyon. Для повторной привязки: /login")
+            self._send(
+                chat_id,
+                "Telegram отвязан. Для повторной привязки создайте новый код в настройках Spyon и используйте /link.",
+            )
             return
         self._send(chat_id, "Неизвестная команда. /help — список команд.")
 

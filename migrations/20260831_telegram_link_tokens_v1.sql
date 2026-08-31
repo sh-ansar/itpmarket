@@ -6,10 +6,10 @@ CREATE TABLE IF NOT EXISTS app.telegram_link_tokens (
     user_id BIGINT NOT NULL REFERENCES app.app_users(id) ON DELETE CASCADE,
     tenant_id BIGINT REFERENCES app.tenants(id) ON DELETE SET NULL,
     token_hash TEXT NOT NULL UNIQUE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    used_at TIMESTAMPTZ,
-    revoked_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_telegram_link_tokens_user

@@ -600,7 +600,9 @@ class BillingPlatformHttpTests(
             if item["event_type"] == "payment_confirmed"
         )
         self.assertEqual("billing", event["category"])
-        self.assertIn("Тариф активирован до", event["message"])
+        self.assertIn("Оплата подтверждена. Доступ активирован.", event["message"])
+        self.assertIn("действует до", event["message"])
+        self.assertNotIn("Тариф активирован до", event["message"])
         conn = self.billing._connect()
         try:
             templates = [row[0] for row in conn.execute(
@@ -613,9 +615,9 @@ class BillingPlatformHttpTests(
 
     def test_accountant_event_is_tenantless_and_deduplicated(self) -> None:
         self.assertIsNone(self.auth.get_user(int(self.accountant["id"]))["tenant_id"])
-        webapp.notify_platform_accountants(
-            "invoice_created", tenant_id=self.tenant_id, entity_id=701,
-            title="Invoice created", message="Waiting for payment.",
+        webapp.notify_platform_billing_reviewers(
+            tenant_id=self.tenant_id, event_type="invoice_created", entity_id=701,
+            title="Invoice created", message="Waiting for payment.", action_url="/platform/payments",
         )
 
     def test_accountant_can_open_tenant_billing_history_without_document_paths(self) -> None:
@@ -634,9 +636,9 @@ class BillingPlatformHttpTests(
         self.assertTrue(item["invoice_pdf_ready"])
         self.assertEqual("payment.pdf", item["proof"]["original_filename"])
         self.assertNotIn("stored_path", item["proof"])
-        webapp.notify_platform_accountants(
-            "invoice_created", tenant_id=self.tenant_id, entity_id=701,
-            title="Invoice created", message="Waiting for payment.",
+        webapp.notify_platform_billing_reviewers(
+            tenant_id=self.tenant_id, event_type="invoice_created", entity_id=701,
+            title="Invoice created", message="Waiting for payment.", action_url="/platform/payments",
         )
         items = NotificationService(self.db_path).list_for_user(int(self.accountant["id"]))["items"]
         self.assertEqual(1, len([item for item in items if item["event_type"] == "invoice_created"]))

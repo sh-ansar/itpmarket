@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import threading
 import time
 from datetime import datetime
@@ -8,6 +9,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from storage.postgres_compat import PostgresConnection, configure_connection, connect_database
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def now_iso() -> str:
@@ -369,6 +373,22 @@ class NotificationService:
             ) for user_id in users)
         self._insert_many(rows)
 
+    def maintenance_tenant_ids(self) -> list[int]:
+        """Return only tenants that can have subscription or invoice reminders."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT DISTINCT tenant_id FROM tenant_subscriptions
+                   WHERE status='active'
+                   UNION
+                   SELECT DISTINCT tenant_id FROM subscription_invoices
+                   WHERE status='issued'"""
+            ).fetchall()
+            return [int(row[0]) for row in rows if row[0] is not None]
+        finally:
+            conn.close()
+
+
     def list_for_user(self, user_id: int, limit: int = 50) -> dict[str, Any]:
         conn = self._connect()
         try:
@@ -414,3 +434,53 @@ class NotificationService:
             return max(0, int(cursor.rowcount))
         finally:
             conn.close()
+
+
+class NotificationMaintenanceWorker:
+    """One bounded worker that creates billing reminders independently of UI and Telegram."""
+
+    def __init__(self, service: NotificationService, interval_seconds: float = 1800.0):
+        self.service = service
+        self.interval_seconds = max(60.0, min(float(interval_seconds), 3600.0))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def run_once(self) -> int:
+        processed = 0
+        try:
+            tenant_ids = self.service.maintenance_tenant_ids()
+        except Exception:
+            LOGGER.exception("notification_maintenance_tenant_discovery_failed")
+            return 0
+        for tenant_id in tenant_ids:
+            try:
+                self.service.ensure_expiry_reminders(tenant_id)
+                self.service.ensure_invoice_due_reminders(tenant_id)
+                processed += 1
+            except Exception:
+                LOGGER.exception("notification_maintenance_tenant_failed tenant_id=%s", tenant_id)
+        return processed
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self.run_once()
+            self._stop.wait(self.interval_seconds)
+
+    def start(self) -> None:
+        if self.running:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="spyon-notification-maintenance", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=10)
+        self._thread = None

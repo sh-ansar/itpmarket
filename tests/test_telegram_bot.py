@@ -4,11 +4,14 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from urllib.error import URLError
 from pathlib import Path
 from unittest.mock import patch
 
 os.environ["ITP_DISABLE_SCHEDULER"] = "1"
+os.environ["ITP_DISABLE_EMAIL_WORKER"] = "1"
+os.environ.pop("ITP_DISABLE_NOTIFICATION_MAINTENANCE", None)
 os.environ.pop("ITP_TELEGRAM_BOT_ENABLED", None)
 os.environ.pop("ITP_TELEGRAM_BOT_TOKEN", None)
 
@@ -100,6 +103,13 @@ class TelegramBotTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.folder.cleanup()
 
+    def test_scheduler_disabled_test_runtime_disables_maintenance(self) -> None:
+        self.assertFalse(webapp.notification_maintenance_enabled())
+
+    def test_explicit_maintenance_opt_out_disables_maintenance(self) -> None:
+        with patch.dict(os.environ, {"ITP_DISABLE_NOTIFICATION_MAINTENANCE": "1"}):
+            self.assertFalse(webapp.notification_maintenance_enabled())
+
     def test_link_token_links_active_user_without_password(self) -> None:
         chat_id = 70001
         created = self.worker.links.create_link_token(self.user)
@@ -142,11 +152,66 @@ class TelegramBotTests(unittest.TestCase):
         self.assertIsNone(self.worker.links.status_for_chat(chat_id))
         self.assertIn("Код", str(self.api.sent[-1]["text"]))
 
-    def test_login_never_requests_password(self) -> None:
+    def test_login_is_compatibility_command_without_legacy_session(self) -> None:
         self.worker.handle_update(telegram_update(70008, 1, "/login"))
         message = str(self.api.sent[-1]["text"])
-        self.assertIn("Пароль", message)
+        self.assertIn("Пароль в Telegram не используется", message)
         self.assertNotIn("email", message.casefold())
+        self.assertNotIn("Введите", message)
+        self.assertFalse(hasattr(self.worker, "_sessions"))
+
+    def test_expired_link_token_is_rejected(self) -> None:
+        created = self.worker.links.create_link_token(self.user)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE telegram_link_tokens SET expires_at='2000-01-01T00:00:00+00:00'"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.worker.handle_update(telegram_update(70009, 1, f"/link {created['token']}"))
+
+        self.assertIsNone(self.worker.links.status_for_chat(70009))
+        self.assertIn("Код недействителен", str(self.api.sent[-1]["text"]))
+
+    def test_link_token_timestamps_are_consistent_utc_iso8601(self) -> None:
+        first = self.worker.links.create_link_token(self.user)
+        second = self.worker.links.create_link_token(self.user)
+        self.worker.handle_update(telegram_update(70010, 1, f"/link {second['token']}"))
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                """SELECT created_at,expires_at,used_at,revoked_at
+                   FROM telegram_link_tokens ORDER BY id"""
+            ).fetchall()
+        finally:
+            conn.close()
+
+        self.assertEqual(2, len(rows))
+        self.assertNotEqual(first["token"], second["token"])
+        for created_at, expires_at, used_at, revoked_at in rows:
+            for value in (created_at, expires_at, used_at, revoked_at):
+                if value is None:
+                    continue
+                parsed = datetime.fromisoformat(value)
+                self.assertEqual(timezone.utc, parsed.tzinfo)
+                self.assertTrue(value.endswith("+00:00"))
+            self.assertGreater(expires_at, created_at)
+        self.assertIsNotNone(rows[0][3])
+        self.assertIsNotNone(rows[1][2])
+
+    def test_logout_instructs_user_to_create_a_new_link_code(self) -> None:
+        created = self.worker.links.create_link_token(self.user)
+        self.worker.handle_update(telegram_update(70011, 1, f"/link {created['token']}"))
+        self.worker.handle_update(telegram_update(70011, 2, "/logout"))
+
+        self.assertIsNone(self.worker.links.status_for_chat(70011))
+        message = str(self.api.sent[-1]["text"])
+        self.assertIn("создайте новый код", message.casefold())
+        self.assertIn("/link", message)
 
     def test_group_chat_cannot_start_authentication(self) -> None:
         self.worker.handle_update(
@@ -293,6 +358,8 @@ class TelegramBotTests(unittest.TestCase):
         ).read_text(encoding="utf-8").upper()
         self.assertIn("TELEGRAM_LINK_TOKENS", token_migration)
         self.assertIn("TOKEN_HASH", token_migration)
+        for column in ("EXPIRES_AT TEXT", "USED_AT TEXT", "REVOKED_AT TEXT", "CREATED_AT TEXT"):
+            self.assertIn(column, token_migration)
         self.assertNotIn("DROP TABLE", token_migration)
 
 

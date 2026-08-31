@@ -10,7 +10,7 @@ from pathlib import Path
 from auth_service import AuthService
 from billing_service import BillingService
 from catalog_configuration_service import CatalogConfigurationService
-from notification_service import NotificationService
+from notification_service import NotificationMaintenanceWorker, NotificationService
 from schema import ensure_database
 from subscription_service import (
     SubscriptionLimitError,
@@ -607,9 +607,8 @@ class SubscriptionServiceTests(unittest.TestCase):
             )
         )
 
-        notifications.ensure_expiry_reminders(
-            self.tenant_id
-        )
+        maintenance = NotificationMaintenanceWorker(notifications)
+        self.assertEqual(1, maintenance.run_once())
 
         inbox = (
             notifications
@@ -640,9 +639,7 @@ class SubscriptionServiceTests(unittest.TestCase):
 
         # Daily reminder remains idempotent
         # even when the UI polls repeatedly.
-        notifications.ensure_expiry_reminders(
-            self.tenant_id
-        )
+        self.assertEqual(1, maintenance.run_once())
 
         self.assertEqual(
             1,
@@ -677,7 +674,7 @@ class SubscriptionServiceTests(unittest.TestCase):
                     ((now + timedelta(days=offset)).isoformat(timespec="seconds"), int(invoice["id"])),
                 )
                 conn.commit()
-                notifications.ensure_invoice_due_reminders(self.tenant_id)
+                NotificationMaintenanceWorker(notifications).run_once()
         finally:
             conn.close()
         events = notifications.list_for_user(int(self.admin["id"]))["items"]
@@ -685,7 +682,7 @@ class SubscriptionServiceTests(unittest.TestCase):
             {"invoice_due_3d", "invoice_due_1d", "invoice_due_today", "invoice_overdue"},
             {item["event_type"] for item in events},
         )
-        notifications.ensure_invoice_due_reminders(self.tenant_id)
+        NotificationMaintenanceWorker(notifications).run_once()
         self.assertEqual(4, notifications.list_for_user(int(self.admin["id"]))["unread"])
         conn = sqlite3.connect(self.db_path)
         try:
@@ -693,8 +690,34 @@ class SubscriptionServiceTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        notifications.ensure_invoice_due_reminders(self.tenant_id)
+        NotificationMaintenanceWorker(notifications).run_once()
         self.assertEqual(4, notifications.list_for_user(int(self.admin["id"]))["unread"])
+
+    def test_maintenance_continues_after_a_tenant_failure(self) -> None:
+        class TenantService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, int]] = []
+
+            def maintenance_tenant_ids(self) -> list[int]:
+                return [101, 202]
+
+            def ensure_expiry_reminders(self, tenant_id: int) -> None:
+                self.calls.append(("expiry", tenant_id))
+                if tenant_id == 101:
+                    raise RuntimeError("first tenant is unavailable")
+
+            def ensure_invoice_due_reminders(self, tenant_id: int) -> None:
+                self.calls.append(("invoice", tenant_id))
+
+        service = TenantService()
+        worker = NotificationMaintenanceWorker(service)  # type: ignore[arg-type]
+
+        with self.assertLogs("notification_service", level="ERROR") as logs:
+            self.assertEqual(1, worker.run_once())
+        self.assertIn("tenant_id=101", "\n".join(logs.output))
+        self.assertEqual(
+            [("expiry", 101), ("expiry", 202), ("invoice", 202)], service.calls
+        )
 
 
 if __name__ == "__main__":
