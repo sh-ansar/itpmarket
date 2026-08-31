@@ -93,6 +93,32 @@ class OzonMarketplaceBrowserTests(unittest.TestCase):
         self.assertNotIn("-RunLevel LeastPrivilege", task_script)
         self.assertNotIn("-LogonType InteractiveToken", task_script)
         self.assertIn("New-ScheduledTaskTrigger -AtLogOn -User $UserId", task_script)
+        self.assertIn("open_ozon_browsers.py", task_script)
+        self.assertIn("--bootstrap", task_script)
+
+    def test_task_reconciliation_preserves_interactive_execution_contract(self) -> None:
+        helper = (ROOT / "scripts" / "ensure_ozon_browser_task.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Get-ScheduledTask", helper)
+        self.assertIn("SPYON_OZON_BROWSER_USER", helper)
+        self.assertIn("Spyon Production", helper)
+        self.assertIn("LogonType -eq 'Interactive'", helper)
+        self.assertIn("Enable-ScheduledTask", helper)
+        self.assertIn("Start-ScheduledTask", helper)
+        self.assertNotIn("Start-Process", helper)
+        self.assertNotIn("chrome.exe", helper)
+
+    def test_task_reconciliation_checks_both_marketplace_debug_ports(self) -> None:
+        helper = (ROOT / "scripts" / "ensure_ozon_browser_task.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Test-OzonDevToolsReady 9222", helper)
+        self.assertIn("Test-OzonDevToolsReady 9333", helper)
+        self.assertIn("OZON_BROWSER_READY ports=9222,9333", helper)
+        self.assertIn(
+            "OZON_BROWSER_DEFERRED reason=no_active_interactive_session", helper
+        )
 
     def test_bootstrap_launches_both_marketplaces_without_db_filter(self) -> None:
         launcher = launcher_module()

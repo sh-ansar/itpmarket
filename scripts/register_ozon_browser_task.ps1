@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 # Interactive means "Run only when user is logged on"; no password or
 # Session-0 service identity is used. -Force updates this helper's task only.
-$action = New-ScheduledTaskAction -Execute $python -Argument ('"{0}"' -f (Join-Path $root 'scripts\open_ozon_browsers.py')) -WorkingDirectory $root
+$action = New-ScheduledTaskAction -Execute $python -Argument ('"{0}" --bootstrap' -f (Join-Path $root 'scripts\open_ozon_browsers.py')) -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserId
 $principal = New-ScheduledTaskPrincipal -UserId $UserId -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew

@@ -56,6 +56,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("ITP_TRUST_PROXY=1", example)
         self.assertIn("ITP_TELEGRAM_BOT_ENABLED=0", example)
         self.assertIn("ITP_TELEGRAM_BOT_TOKEN=CHANGE_ME", example)
+        self.assertIn("SPYON_OZON_BROWSER_USER=DOMAIN\\username", example)
         self.assertIn("CHANGE_ME", example)
         self.assertNotIn("85.159.27.24", example)
 
@@ -118,6 +119,16 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("environment_check.py') --check-only", diagnostic)
         self.assertIn("scripts\\check_postgres.py", diagnostic)
         self.assertNotIn("psycopg.connect(os.environ", diagnostic)
+
+    def test_post_update_reconciles_ozon_task_without_launching_a_gui_browser(self) -> None:
+        post_update = (
+            ROOT / "deploy" / "windows" / "post-update-production.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ensure_ozon_browser_task.ps1", post_update)
+        self.assertIn("OZON: ", post_update)
+        self.assertIn("Ozon browser task registration failed.", post_update)
+        self.assertNotIn("open_ozon_browsers.py", post_update)
+        self.assertNotIn("Start-Process", post_update)
 
     def test_postgres_manifest_covers_every_runtime_schema(self) -> None:
         manifest = json.loads(

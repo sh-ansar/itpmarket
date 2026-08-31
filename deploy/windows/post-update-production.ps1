@@ -232,6 +232,35 @@ if (-not $healthy) {
     )
 }
 
+$ozonTaskHelper = Join-Path `
+    $RepoRoot `
+    'scripts\ensure_ozon_browser_task.ps1'
+
+if (-not (Test-Path -LiteralPath $ozonTaskHelper)) {
+    throw 'Ozon browser task helper was not found in the target release.'
+}
+
+$ozonOutput = & powershell.exe `
+    -NoProfile `
+    -NonInteractive `
+    -ExecutionPolicy Bypass `
+    -File $ozonTaskHelper `
+    -RepoRoot $RepoRoot `
+    2>&1
+
+$ozonExitCode = $LASTEXITCODE
+
+foreach ($line in @($ozonOutput)) {
+    $text = [string]$line
+    if ($text.Trim()) {
+        Write-DeployLog ('OZON: ' + $text.Trim())
+    }
+}
+
+if ($ozonExitCode -ne 0) {
+    throw 'Ozon browser task registration failed.'
+}
+
 Write-DeployLog (
     "Post-update verification OK: " +
     $TargetSha
