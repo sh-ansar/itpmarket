@@ -41,6 +41,8 @@ $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path (Get-Location) '.playwright')
 
 SQLite хранится по пути из `config.json`/`config.local.json` (по умолчанию `data\unityre_kaspi.db`). `config.local.json`, БД, секрет сессии, runtime, профили и браузеры игнорируются Git. Не используйте рабочую или production-БД в тестах.
 
+Static URLs получают ключ из `ITP_DEPLOYMENT_SHA` либо `.runtime\deployment-sha`; локально безопасный fallback — `app-<VERSION>`. Не меняйте `VERSION.txt` или application version для cache busting. Product API пишет безопасные структурированные строки `PRODUCT_API_PERF` без содержимого товаров, покупателей или реквизитов.
+
 `ensure_database()` аддитивно создаёт локальные таблицы `tenant_inventory_products`, `tenant_product_listings`, `tenant_product_match_decisions` и `tenant_inventory_events`. Остаток и закупочная цена принадлежат единому физическому товару; карточки площадок связываются с ним отдельно. Для проверки используйте только новую dev-БД или копию без реальных данных.
 
 ## Опциональный PostgreSQL для разработки

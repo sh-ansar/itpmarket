@@ -33,11 +33,11 @@ STATUS_INFO: dict[str, dict[str, str]] = {
     "NO_OTHER_SELLERS": {"label": "Других продавцов не найдено", "tone": "neutral"},
     "EXACT_LOWEST": {"label": "Единственная минимальная цена среди продавцов", "tone": "success"},
     "EXACT_TIED_LOWEST": {"label": "Делит минимальную цену с другими продавцами", "tone": "info"},
-    "EXACT_BELOW": {"label": "Ниже медианы продавцов", "tone": "success"},
+    "EXACT_BELOW": {"label": "Ниже медианы продавцов", "tone": "danger"},
     "EXACT_IN_MARKET": {"label": "В рыночном диапазоне", "tone": "info"},
-    "EXACT_ABOVE": {"label": "Выше медианы продавцов", "tone": "warning"},
+    "EXACT_ABOVE": {"label": "Выше медианы продавцов", "tone": "danger"},
     "EXACT_HIGHEST": {"label": "Единственная максимальная цена среди продавцов", "tone": "danger"},
-    "EXACT_TIED_HIGHEST": {"label": "Делит максимальную цену с другими продавцами", "tone": "warning"},
+    "EXACT_TIED_HIGHEST": {"label": "Делит максимальную цену с другими продавцами", "tone": "danger"},
     "INSUFFICIENT_DATA": {"label": "Недостаточно точных предложений", "tone": "neutral"},
     "REVIEW_REQUIRED": {"label": "Требует ручной проверки", "tone": "warning"},
     "DATA_COLLECTED": {"label": "Данные собраны", "tone": "info"},
@@ -423,7 +423,9 @@ def exact_offer_position(
 
     difference = own - median
     difference_pct = difference / median * 100 if median else None
-    potential_per_unit = max(0.0, q1 - own) if status in {"EXACT_LOWEST", "EXACT_BELOW"} else 0.0
+    # A price merely below the seller median is a margin risk, not a safe
+    # raise-price opportunity.  Keep potential only where the model proves it.
+    potential_per_unit = max(0.0, q1 - own) if status == "EXACT_LOWEST" else 0.0
     prices_with_own = sorted(prices + [own])
     rank = 1 + sum(price < own - price_epsilon for price in prices)
     rank_tie_count = sum(

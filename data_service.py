@@ -41,8 +41,11 @@ SORT_FIELDS = {
     "platform": "platform",
 }
 
-RISK_STATUSES = {"EXACT_ABOVE", "EXACT_HIGHEST", "DATA_ERROR"}
-OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_BELOW"}
+RISK_STATUSES = {
+    "EXACT_ABOVE", "EXACT_HIGHEST", "EXACT_TIED_HIGHEST",
+    "EXACT_BELOW", "DATA_ERROR",
+}
+OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_TIED_LOWEST"}
 UNSCANNED_STATUSES = {"NOT_ANALYZED", "INSUFFICIENT_DATA", "REVIEW_REQUIRED"}
 TENANT_SNAPSHOT_CACHE_TTL_SECONDS = 2.0
 TENANT_SNAPSHOT_CACHE_MAX_KEYS = 128
@@ -1528,7 +1531,8 @@ class DataService:
             return result
 
     def _load_tenant_catalog_snapshot(
-        self, tenant_id: int, marketplaces: set[str] | None = None
+        self, tenant_id: int, marketplaces: set[str] | None = None,
+        source_product_code: str | None = None,
     ) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
@@ -1541,6 +1545,9 @@ class DataService:
             if requested:
                 where += f" AND marketplace_code IN ({','.join('?' for _ in requested)})"
                 params.extend(sorted(requested))
+            if source_product_code:
+                where += " AND source_product_code=?"
+                params.append(str(source_product_code))
             seller_counts = {
                 str(row["marketplace_code"]): int(row["seller_count"])
                 for row in conn.execute(
@@ -1576,6 +1583,9 @@ class DataService:
                         f"{','.join('?' for _ in requested)})"
                     )
                     seller_params.extend(sorted(requested))
+                if source_product_code:
+                    seller_where += " AND tsp.source_product_code=?"
+                    seller_params.append(str(source_product_code))
                 rows = conn.execute(
                     f"""SELECT tsp.*,s.external_seller_id,s.display_name AS seller_name,
                                s.source_url AS seller_url
@@ -1989,7 +1999,7 @@ class DataService:
             + len(wildberries_ready_rows)
         )
         risk_count = sum(counts[key] for key in RISK_STATUSES)
-        opportunity_count = sum(counts[key] for key in OPPORTUNITY_STATUSES)
+        opportunity_count = sum(1 for row in exact_rows if self._is_opportunity(row))
         potential_rows = [
             row for row in exact_rows
             if float(row.get("potential_margin_monthly_kzt") or 0) > 0
@@ -2119,7 +2129,7 @@ class DataService:
         ]
         combined_ready_count = len(analyzed_rows) + len(ozon_ready_rows) + len(wildberries_ready_rows)
         risk_rows = [row for row in exact_rows if str(row.get("price_status") or "") in RISK_STATUSES]
-        opportunity_rows = [row for row in exact_rows if str(row.get("price_status") or "") in OPPORTUNITY_STATUSES]
+        opportunity_rows = [row for row in exact_rows if self._is_opportunity(row)]
         review_rows = [row for row in exact_rows if str(row.get("price_status") or "") == "REVIEW_REQUIRED"]
         insufficient_rows = [row for row in exact_rows if str(row.get("price_status") or "") == "INSUFFICIENT_DATA"]
 
@@ -2144,7 +2154,7 @@ class DataService:
             status = str(row.get("price_status") or "")
             if status in RISK_STATUSES:
                 item["risks"] += 1
-            if status in OPPORTUNITY_STATUSES:
+            if self._is_opportunity(row):
                 item["opportunities"] += 1
                 item["potential_margin_monthly_kzt"] += float(row.get("potential_margin_monthly_kzt") or 0)
             if status in UNSCANNED_STATUSES:
@@ -2284,6 +2294,17 @@ class DataService:
         return result
 
     @staticmethod
+    def _is_opportunity(row: dict[str, Any]) -> bool:
+        """Return only price increases proven safe by the exact-price model."""
+        status = str(row.get("price_status") or "")
+        if status == "EXACT_LOWEST":
+            return True
+        return (
+            status == "EXACT_TIED_LOWEST"
+            and float(row.get("potential_margin_per_unit_kzt") or 0) > 0
+        )
+
+    @staticmethod
     def _matches(row: dict[str, Any], filters: dict[str, Any]) -> bool:
         attribute_codes = filters.get("attribute_product_codes")
         if attribute_codes is not None and str(row.get("product_code") or "") not in set(attribute_codes):
@@ -2338,7 +2359,7 @@ class DataService:
             return False
         if scope == "unscanned" and status_value not in UNSCANNED_STATUSES:
             return False
-        if scope == "opportunities" and status_value not in OPPORTUNITY_STATUSES:
+        if scope == "opportunities" and not DataService._is_opportunity(row):
             return False
         if scope == "watched" and not row.get("watched"):
             return False
@@ -2638,6 +2659,33 @@ class DataService:
         ]
         result["history"] = self.price_history(code, user_id=user_id)
         return result
+
+    def targeted_product(
+        self, code: str, user_id: int,
+    ) -> dict[str, Any] | None:
+        """Read one tenant catalogue entry without materializing its catalogue.
+
+        Seller-scoped catalogues are authoritative and already contain the
+        current own price, attributes and source metadata.  Legacy shared
+        analytics still use the established fallback in ``product`` so their
+        exact-offer behavior is not changed by this performance fix.
+        """
+        tenant_id = self._tenant_id_for_user(user_id)
+        if tenant_id is None:
+            return None
+        platform, _, source_code = parse_product_code(code)
+        snapshot = self._load_tenant_catalog_snapshot(
+            tenant_id, {platform}, source_product_code=source_code,
+        )
+        base = next(
+            (row for row in snapshot if str(row.get("product_code") or "") == str(code)),
+            None,
+        )
+        if base is not None:
+            return self.product(code, user_id, rows=[base])
+        # Preserve legacy shared-collector details only when there is no
+        # tenant-scoped source row for the requested code.
+        return self.product(code, user_id)
 
     @staticmethod
     def _ozon_specifications(row: dict[str, Any]) -> list[dict[str, str]]:

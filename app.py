@@ -89,6 +89,31 @@ from ozon_browser_runtime import (
 )
 
 VERSION = "3.8.7"
+
+
+def deployment_asset_version() -> str:
+    """Return the deployment-specific static-asset key without requiring git.
+
+    ``post-update-production.ps1`` writes the target commit into this ignored
+    runtime file before restarting Waitress.  An explicit environment value is
+    useful for non-Windows deployments and tests.  Failure to read either must
+    never prevent the application from starting.
+    """
+    candidates = (
+        os.environ.get("ITP_DEPLOYMENT_SHA", ""),
+        (ROOT / ".runtime" / "deployment-sha").read_text(encoding="utf-8")
+        if (ROOT / ".runtime" / "deployment-sha").is_file() else "",
+    )
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if re.fullmatch(r"[0-9a-fA-F]{7,64}", value):
+            return value.lower()
+    # Development needs stable cache semantics too, while production always
+    # receives its SHA from the deployment pipeline.
+    return f"app-{VERSION}"
+
+
+ASSET_VERSION = deployment_asset_version()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = get_secret_key()
 
@@ -2173,7 +2198,12 @@ def template_context() -> dict[str, Any]:
         "csrf_token": ensure_csrf(),
         "current_user": template_user,
         "current_tenant": current_tenant(),
-        "version": VERSION,
+        # Existing templates consistently use ``version`` in static URLs. Keep
+        # that contract, but make it a deploy key rather than a hand-maintained
+        # human release number.  API health/version remains VERSION above.
+        "version": ASSET_VERSION,
+        "application_version": VERSION,
+        "asset_version": ASSET_VERSION,
         "integration_catalog": visible_catalog,
         "visible_marketplace_codes": tuple(
             str(item.get("code") or "") for item in visible_catalog
@@ -3039,9 +3069,16 @@ def api_overview() -> Any:
 @permission_required("view_products")
 def api_product_options() -> Any:
     user = current_user() or {}
-    return json_ok(**DATA.filter_options(
-        allowed_marketplaces(user), user_id=int(user["id"])
-    ))
+    started = time.perf_counter()
+    result = DATA.filter_options(allowed_marketplaces(user), user_id=int(user["id"]))
+    total_ms = round((time.perf_counter() - started) * 1000, 2)
+    app.logger.info("PRODUCT_API_PERF %s", json.dumps({
+        "endpoint": "/api/products/options", "tenant_id": user.get("tenant_id"),
+        "result_count": sum(len(value) for value in result.values() if isinstance(value, list)),
+        "db_ms": None, "filter_ms": total_ms, "enrichment_ms": 0,
+        "inventory_ms": 0, "serialization_ms": 0, "total_ms": total_ms,
+    }, separators=(",", ":")))
+    return json_ok(**result)
 
 
 def product_filters_from_request() -> dict[str, Any]:
@@ -3134,6 +3171,7 @@ def product_filters_from_payload(raw: Any, user: dict[str, Any]) -> dict[str, An
 @app.get("/api/products")
 @permission_required("view_products")
 def api_products() -> Any:
+    started = time.perf_counter()
     try:
         page = int(request.args.get("page", 1))
         page_size = int(request.args.get("page_size", CFG["app"].get("product_page_size", 30)))
@@ -3143,9 +3181,19 @@ def api_products() -> Any:
         filters, _ = requested_platform_filters()
     except PermissionError as exc:
         return json_error(str(exc), 403)
-    return json_ok(result=DATA.products(
+    result = DATA.products(
         page, page_size, filters, int((current_user() or {})["id"])
-    ))
+    )
+    total_ms = round((time.perf_counter() - started) * 1000, 2)
+    user = current_user() or {}
+    app.logger.info("PRODUCT_API_PERF %s", json.dumps({
+        "endpoint": "/api/products", "tenant_id": user.get("tenant_id"),
+        "page": result.get("page"), "page_size": result.get("page_size"),
+        "result_count": len(result.get("items") or []), "total_count": result.get("total"),
+        "db_ms": None, "filter_ms": None, "enrichment_ms": None,
+        "inventory_ms": 0, "serialization_ms": 0, "total_ms": total_ms,
+    }, separators=(",", ":")))
+    return json_ok(result=result)
 
 
 @app.get("/api/products/codes")
@@ -3163,19 +3211,19 @@ def api_product_codes() -> Any:
 @app.get("/api/products/<code>")
 @permission_required("view_products")
 def api_product(code: str) -> Any:
+    started = time.perf_counter()
     user = current_user() or {}
     if user.get("tenant_id") is None:
         return json_error("Складской контур доступен только внутри компании.", 403)
     platform = marketplace_for_product_code(code)
     if platform not in allowed_marketplaces(user):
         return json_error("Нет доступа к выбранной площадке.", 403)
-    rows = DATA.rows_for_user(int(user["id"]), allowed_marketplaces(user))
-    product = DATA.product(code, int(user["id"]), rows=rows)
+    product = DATA.targeted_product(code, int(user["id"]))
     if not product:
         return json_error("Товар не найден.", 404)
     try:
         context = inventory_service().context(
-            int(user["tenant_id"]), code, rows,
+            int(user["tenant_id"]), code, [product],
             include_inventory=has_permission(user, "view_inventory"),
         )
     except PermissionError as exc:
@@ -3183,6 +3231,13 @@ def api_product(code: str) -> Any:
     context["can_manage_inventory"] = has_permission(user, "manage_inventory")
     context["can_manage_matching"] = has_permission(user, "manage_product_matching")
     product["inventory_context"] = context
+    total_ms = round((time.perf_counter() - started) * 1000, 2)
+    app.logger.info("PRODUCT_API_PERF %s", json.dumps({
+        "endpoint": "/api/products/<code>", "tenant_id": user.get("tenant_id"),
+        "result_count": 1, "total_count": 1, "db_ms": None, "filter_ms": None,
+        "enrichment_ms": None, "inventory_ms": None, "serialization_ms": 0,
+        "total_ms": total_ms,
+    }, separators=(",", ":")))
     return json_ok(product=product)
 
 

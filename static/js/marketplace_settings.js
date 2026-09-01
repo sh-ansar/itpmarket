@@ -7,6 +7,11 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const checked = new Map();
   const canManage = Boolean(window.ITP_USER?.permissions?.manage_marketplaces);
+  const modal = document.querySelector('#marketplaceSourceModal');
+  const modalTitle = document.querySelector('#marketplaceSourceModalTitle');
+  const modalBody = document.querySelector('#marketplaceSourceModalBody');
+  let marketplaces = [];
+  let sourceAction = null;
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -27,6 +32,30 @@
     node.textContent = message;
     stack.append(node);
     setTimeout(() => node.remove(), 4500);
+  }
+
+  function render(items) {
+    marketplaces = Array.isArray(items) ? items : [];
+    host.innerHTML = marketplaces.length ? marketplaces.map(card).join('') : `<div class="empty">${esc(t('marketplace_no_access','Поддерживаемые площадки пока не настроены в системном реестре.'))}</div>`;
+    window.ITPUI?.translateTree(host);
+  }
+
+  function closeSourceModal() {
+    sourceAction = null;
+    if (modal) modal.hidden = true;
+  }
+
+  function openSourceModal(kind, marketplace, seller) {
+    if (!modal || !modalTitle || !modalBody) return;
+    sourceAction = {kind, marketplace, seller, verified:null};
+    modalTitle.textContent = kind === 'replace' ? 'Заменить источник' : 'Удалить источник';
+    if (kind === 'replace') {
+      modalBody.innerHTML = `<form id="marketplaceReplaceForm" class="marketplace-modal-form"><p>Введите новый URL или ID продавца и проверьте его перед заменой.</p><label>Новый URL или ID<input name="source" required autocomplete="url"></label><div id="marketplaceReplacementPreview" class="marketplace-discovery-note" hidden></div><div class="modal-actions"><button type="button" class="secondary" data-marketplace-modal-close>Отмена</button><button type="submit" class="secondary" data-modal-verify>Проверить</button><button type="button" class="primary" data-modal-replace disabled>Заменить источник</button></div></form>`;
+    } else {
+      modalBody.innerHTML = `<form id="marketplaceRemoveForm" class="marketplace-modal-form"><p class="marketplace-danger-copy">Источник и связанные текущие собранные данные будут удалены или отвязаны по действующим правилам. История операций и аудит сохранятся.</p><dl class="marketplace-source-summary"><dt>Площадка</dt><dd>${esc(marketplace.name)}</dd><dt>Продавец</dt><dd>${esc(seller.display_name||seller.external_seller_id||'—')}</dd><dt>Источник</dt><dd>${esc(seller.source_url||'—')}</dd></dl><label>Текущий пароль<input name="current_password" type="password" required autocomplete="current-password"></label><div class="modal-actions"><button type="button" class="secondary" data-marketplace-modal-close>Отмена</button><button type="submit" class="danger">Удалить источник</button></div></form>`;
+    }
+    modal.hidden = false;
+    modal.querySelector('input')?.focus();
   }
 
   function card(item) {
@@ -52,9 +81,7 @@
   async function load() {
     try {
       const data = await request('/api/tenant?include_unavailable=1');
-      const marketplaces = data.marketplace_access || [];
-      host.innerHTML = marketplaces.length ? marketplaces.map(card).join('') : `<div class="empty">${esc(t('marketplace_no_access','Поддерживаемые площадки пока не настроены в системном реестре.'))}</div>`;
-      window.ITPUI?.translateTree(host);
+      render(data.marketplace_access);
     } catch (error) { host.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
   }
 
@@ -63,6 +90,7 @@
     const cardNode = event.target.closest('[data-marketplace-code]');
     if (!button || !cardNode) return;
     const code = cardNode.dataset.marketplaceCode;
+    const marketplace = marketplaces.find(item => item.code === code);
     const source = cardNode.querySelector('[data-marketplace-source]')?.value.trim() || checked.get(code)?.source_input || checked.get(code)?.seller_url || '';
     button.disabled = true;
     try {
@@ -71,22 +99,55 @@
         checked.set(code, data.result);
         notify(t('marketplace_url_verified','Ссылка проверена. Подтвердите подключение.'));
       } else if (button.matches('[data-marketplace-connect]')) {
-        await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source}});
+        const data = await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source}});
         checked.delete(code);
+        render(data.marketplace_access);
         notify('Заявка на подключение отправлена супер-администратору.');
       } else if (button.matches('[data-marketplace-replace]')) {
-        const replacement=String(window.prompt('Новый URL продавца:')||'').trim();
-        if (!replacement) return;
-        await request(`/api/tenant/marketplaces/${encodeURIComponent(code)}/${Number(button.dataset.sellerId)}/replace`, {method:'POST', body:{source:replacement}});
-        notify('Источник заменён после проверки.');
+        const seller=(marketplace?.sellers||[]).find(item=>Number(item.id)===Number(button.dataset.sellerId));
+        if (seller) openSourceModal('replace', marketplace, seller);
       } else if (button.matches('[data-marketplace-remove]')) {
-        if (!window.confirm('Удалить источник и его текущие собранные данные? История запусков и аудит сохранятся.')) return;
-        const currentPassword=String(window.prompt('Подтвердите текущим паролем:')||'');
-        if (!currentPassword) return;
-        await request(`/api/tenant/marketplaces/${encodeURIComponent(code)}/${Number(button.dataset.sellerId)}/remove`, {method:'POST', body:{current_password:currentPassword}});
-        notify('Источник удалён. История запусков и аудит сохранены.');
+        const seller=(marketplace?.sellers||[]).find(item=>Number(item.id)===Number(button.dataset.sellerId));
+        if (seller) openSourceModal('remove', marketplace, seller);
       }
-      await load();
+      if (!button.matches('[data-marketplace-replace],[data-marketplace-remove],[data-marketplace-connect]')) await load();
+    } catch (error) { notify(error.message, true); button.disabled = false; }
+  });
+
+  modal?.addEventListener('click', event => {
+    if (event.target === modal || event.target.closest('[data-marketplace-modal-close]')) closeSourceModal();
+  });
+  modal?.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!sourceAction) return;
+    const form = event.target;
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      if (sourceAction.kind === 'replace') {
+        const source = String(new FormData(form).get('source') || '').trim();
+        const data = await request('/api/tenant/marketplaces/check', {method:'POST', body:{marketplace_code:sourceAction.marketplace.code, source}});
+        sourceAction.verified = {source, result:data.result};
+        const found = data.result || {};
+        const preview = modalBody.querySelector('#marketplaceReplacementPreview');
+        preview.innerHTML = `<strong>${esc(found.marketplace_name || sourceAction.marketplace.name)}</strong><br>${esc(found.seller_name || found.seller_identifier || '')}<br><a href="${esc(found.seller_url || '')}" target="_blank" rel="noreferrer">${esc(found.seller_url || '')}</a>`;
+        preview.hidden = false;
+        modalBody.querySelector('[data-modal-replace]').disabled = false;
+      } else {
+        const currentPassword = String(new FormData(form).get('current_password') || '');
+        const data = await request(`/api/tenant/marketplaces/${encodeURIComponent(sourceAction.marketplace.code)}/${Number(sourceAction.seller.id)}/remove`, {method:'POST', body:{current_password:currentPassword}});
+        render(data.marketplace_access); closeSourceModal(); notify('Источник удалён. История операций и аудит сохранены.');
+      }
+    } catch (error) { notify(error.message, true); }
+    finally { if (submit.isConnected) submit.disabled = false; }
+  });
+  modalBody?.addEventListener('click', async event => {
+    const button = event.target.closest('[data-modal-replace]');
+    if (!button || !sourceAction?.verified) return;
+    button.disabled = true;
+    try {
+      const data = await request(`/api/tenant/marketplaces/${encodeURIComponent(sourceAction.marketplace.code)}/${Number(sourceAction.seller.id)}/replace`, {method:'POST', body:{source:sourceAction.verified.source}});
+      render(data.marketplace_access); closeSourceModal(); notify('Источник заменён после проверки.');
     } catch (error) { notify(error.message, true); button.disabled = false; }
   });
 

@@ -198,13 +198,14 @@ Production deployment automatically handles safe PostgreSQL schema updates.
 The deployment sequence is:
 
 1. Fast-forward the production checkout.
-2. Synchronize Python dependencies.
-3. Inspect pending PostgreSQL migrations.
-4. Create a verified PostgreSQL backup when a migration is pending.
-5. Apply safe append-only migrations under an advisory lock.
-6. Verify the PostgreSQL schema.
-7. Restart Spyon.
-8. Require successful /health, /ready and / responses.
+2. Persist the target SHA in ignored `.runtime\deployment-sha` for static-asset cache busting.
+3. Synchronize Python dependencies.
+4. Inspect pending PostgreSQL migrations.
+5. Create a verified PostgreSQL backup when a migration is pending.
+6. Apply safe append-only migrations under an advisory lock.
+7. Verify the PostgreSQL schema.
+8. Restart Spyon.
+9. Require successful /health, /ready and / responses.
 
 Applied migrations are recorded in app.schema_migrations with the migration
 filename, SHA-256 checksum and application timestamp.

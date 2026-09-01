@@ -8,7 +8,7 @@
   <title>Spyon</title>
   <script>(function(){var p=localStorage.getItem("itp_theme")||"system",d=p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=p;document.documentElement.style.colorScheme=d;}());</script>
   <link rel="icon" href="{{ url_for('static', filename='images/spyon-logo.svg') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ asset_version }}">
 </head>
 <body>
 <div class="boot" id="boot"><div class="boot-mark"><img src="{{ url_for('static', filename='images/spyon-logo-dark.svg') }}" alt="Spyon"><i></i></div><strong>Spyon</strong><span data-i18n="boot_text">Инициализация аналитического контура</span></div>
@@ -153,7 +153,7 @@
           <div id="dynamicAttributeFilters" class="dynamic-attribute-filters"></div>
         </div>
         <div class="products-command-row">
-          <div class="scope-tabs" id="scopeTabs"><button class="active" data-scope="all" data-i18n="scope_all">Все</button><button data-scope="risks" data-i18n="scope_risks">Риски</button><button data-scope="opportunities" data-i18n="scope_opportunities">Потенциал</button><button data-scope="unscanned" data-i18n="scope_review">Требуют проверки</button><button data-scope="watched" data-i18n="scope_watched">Наблюдение</button></div>
+          <div class="scope-tabs" id="scopeTabs"><button data-scope="all" data-i18n="scope_all">Все</button><button class="active" data-scope="risks" data-i18n="scope_risks">Риски</button><button data-scope="opportunities" data-i18n="scope_opportunities">Потенциал</button><button data-scope="unscanned" data-i18n="scope_review">Требуют проверки</button><button data-scope="watched" data-i18n="scope_watched">Наблюдение</button></div>
           <div class="products-command-actions">
             <button class="secondary responsive-command" id="refreshProducts" data-i18n-tooltip="refresh"><img class="button-icon" src="{{ url_for('static', filename='icons/refresh.svg') }}" alt=""><span data-i18n="refresh">Обновить</span></button>
             <button class="primary responsive-command" id="selectedReport" data-i18n-tooltip="download_report"><img class="button-icon" src="{{ url_for('static', filename='icons/download.svg') }}" alt=""><span data-i18n="download_report">Скачать отчёт</span></button>
@@ -469,6 +469,12 @@
 
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="12" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
 <div class="modal" id="legalAcceptanceModal" hidden aria-modal="true" role="dialog"><div class="modal-card"><div class="modal-head"><div><small>LEGAL UPDATE</small><h3>Новая редакция документов</h3></div></div><p class="modal-description">Чтобы продолжить работу с данными компании, ознакомьтесь и примите опубликованную редакцию.</p><div id="legalAcceptanceList"></div></div></div>
+<div class="modal" id="marketplaceSourceModal" hidden aria-modal="true" role="dialog" aria-labelledby="marketplaceSourceModalTitle">
+  <div class="modal-card marketplace-source-modal-card">
+    <div class="modal-head"><div><small id="marketplaceSourceModalKicker">MARKETPLACE</small><h3 id="marketplaceSourceModalTitle">Источник площадки</h3></div><button class="icon" type="button" data-marketplace-modal-close aria-label="Закрыть">×</button></div>
+    <div id="marketplaceSourceModalBody"></div>
+  </div>
+</div>
 {% if current_user.permissions.manage_users %}
 <div class="modal" id="userModal" hidden>
   <div class="modal-card">

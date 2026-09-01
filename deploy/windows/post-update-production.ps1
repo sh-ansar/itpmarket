@@ -50,6 +50,16 @@ function Write-DeployLog {
 
 Set-Location $RepoRoot
 
+# This file is intentionally runtime state, not a committed configuration or
+# secret.  app.py reads it as the immutable static asset key for this deploy.
+$assetVersionDirectory = Join-Path $RepoRoot '.runtime'
+New-Item -ItemType Directory -Force $assetVersionDirectory | Out-Null
+[System.IO.File]::WriteAllText(
+    (Join-Path $assetVersionDirectory 'deployment-sha'),
+    ($TargetSha.Trim() + [Environment]::NewLine),
+    [System.Text.UTF8Encoding]::new($false)
+)
+
 Write-DeployLog (
     "Preparing target=$TargetSha " +
     "previous=$PreviousSha"
