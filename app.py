@@ -2792,7 +2792,10 @@ def legal_pdf(document: str, version: str) -> Any:
 @app.get("/legal/<document>/<version>")
 def legal_document_version(document: str, version: str) -> Any:
     managed = legal_document_service().get_version(document, version)
-    if managed is None:
+    if (
+        managed is None
+        or str(managed.get("status") or "") != "published"
+    ):
         abort(404)
     definition = LEGAL_DOCUMENTS.get(document, version)
     if definition is not None and managed.get("legacy_static"):
@@ -2811,11 +2814,33 @@ def legal_document_version(document: str, version: str) -> Any:
 
 @app.get("/legal/<document>/pdf")
 def legal_current_pdf(document: str) -> Any:
-    """Serve the published current PDF through a stable public URL."""
+    """Serve a real PDF when one exists; otherwise open immutable HTML."""
     managed = legal_document_service().get_version(document)
+
     if managed is None:
         abort(404)
-    return legal_pdf(str(managed["type"]), str(managed["version"]))
+
+    definition = LEGAL_DOCUMENTS.get(
+        str(managed["type"]),
+        str(managed["version"]),
+    )
+
+    if (
+        definition is not None
+        and definition.pdf_path.is_file()
+    ):
+        return legal_pdf(
+            str(managed["type"]),
+            str(managed["version"]),
+        )
+
+    return redirect(
+        url_for(
+            "legal_document_version",
+            document=str(managed["type"]),
+            version=str(managed["version"]),
+        )
+    )
 
 
 @app.get("/legal/<document>")
@@ -2849,6 +2874,13 @@ def api_legal_accept() -> Any:
         return json_error("Для принятия документа требуется рабочее пространство.", 409)
     try:
         payload = json_payload()
+
+        if payload.get("accepted") is not True:
+            return json_error(
+                "Подтвердите согласие с новой редакцией документа.",
+                409,
+            )
+
         accepted = legal_document_service().accept(
             int(user["id"]), int(user["tenant_id"]), str(payload.get("document_type") or ""),
             ip_address=request.remote_addr or "", user_agent=request.headers.get("User-Agent", ""),

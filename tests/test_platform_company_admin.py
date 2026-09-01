@@ -86,7 +86,7 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         self.assertEqual(200, checked.status_code)
         self.assertEqual("ozon_kz", checked.get_json()["result"]["marketplace_code"])
         self.assertEqual(
-            "https://ozon.kz/продавец/company-b-90210/",
+            "https://ozon.kz/seller/company-b-90210/",
             checked.get_json()["result"]["seller_url"],
         )
         connected = self.client.post(

@@ -2819,27 +2819,242 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     }catch(e){toast(e.message,true)}
   }
   function renderLegalDocuments(documents){
-    const target=$('#legalDocumentsList');if(!target)return;
-    target.innerHTML=documents.length?documents.map(item=>`<article class="legal-document-item"><div><b>${esc(item.title||'Юридический документ')}</b><small>Версия ${esc(item.version||'—')}${item.accepted_at?` · Принято: ${esc(dateText(item.accepted_at))}`:''}</small></div><div><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}.pdf">PDF</a></div></article>`).join(''):'<div class="empty">Нет зафиксированных юридических документов.</div>';
+    const target=$('#legalDocumentsList');
+
+    if(!target){
+      return;
+    }
+
+    target.innerHTML=documents.length
+      ?documents.map(item=>{
+        const href=
+          `/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}`;
+
+        const pdf=item.pdf_available
+          ?`<a
+              class="secondary"
+              href="${href}.pdf"
+              target="_blank"
+              rel="noopener"
+            >PDF</a>`
+          :'';
+
+        return `<article class="legal-document-item">
+          <div>
+            <b>${esc(item.title||'Юридический документ')}</b>
+
+            <small>
+              ${esc(item.number||'')}
+              · версия ${esc(item.version||'—')}
+            </small>
+
+            <small>
+              ${
+                item.accepted_at
+                  ?`Принято: ${esc(dateText(item.accepted_at))}`
+                  :'Согласие не зафиксировано'
+              }
+            </small>
+          </div>
+
+          <div>
+            <a
+              class="secondary"
+              href="${href}"
+              target="_blank"
+              rel="noopener"
+            >
+              Открыть
+            </a>
+
+            ${pdf}
+          </div>
+        </article>`;
+      }).join('')
+      :'<div class="empty">История согласий пока пуста.</div>';
   }
   async function enforceLegalAcceptance(){
-    const modal=$('#legalAcceptanceModal'),host=$('#legalAcceptanceList');
-    if(!modal||!host)return;
+    const modal=$(
+      '#legalAcceptanceModal'
+    );
+
+    const host=$(
+      '#legalAcceptanceList'
+    );
+
+    if(
+      !modal
+      ||!host
+    ){
+      return false;
+    }
+
     try{
-      const result=await api('/api/legal/required');
-      const required=result.required_documents||[];
-      if(!required.length){modal.hidden=true;return;}
+      const result=
+        await api(
+          '/api/legal/required'
+        );
+
+      const required=
+        result.required_documents||[];
+
+      if(!required.length){
+        modal.hidden=true;
+        host.innerHTML='';
+        return false;
+      }
+
       modal.hidden=false;
-      host.innerHTML=required.map(item=>`<article class="legal-document-item"><div><b>${esc(item.title||'Юридический документ')}</b><small>Версия ${esc(item.version||'—')}</small></div><div><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a><button class="primary" data-accept-legal="${esc(item.type)}">Принять</button></div></article>`).join('');
-      $$('[data-accept-legal]',host).forEach(button=>button.onclick=async()=>{
-        try{
-          button.disabled=true;
-          await api('/api/legal/accept',{method:'POST',body:{document_type:button.dataset.acceptLegal,locale:state.lang}});
-          await enforceLegalAcceptance();
-          if(state.page==='settings')await loadSettings();
-        }catch(error){button.disabled=false;toast(error.message,true);}
+
+      host.innerHTML=
+        required.map(item=>{
+          const type=
+            esc(item.type);
+
+          const href=
+            `/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}`;
+
+          const acceptance=
+            esc(
+              item.acceptance_text
+              ||'Я ознакомился(ась) и принимаю новую редакцию документа.'
+            );
+
+          return `<article
+            class="legal-document-item legal-acceptance-item"
+            data-legal-type="${type}"
+          >
+            <div class="legal-acceptance-copy">
+              <b>
+                ${esc(item.title||'Юридический документ')}
+              </b>
+
+              <small>
+                ${esc(item.number||'')}
+                · версия ${esc(item.version||'—')}
+              </small>
+
+              ${
+                item.effective_at
+                  ?`<small>Действует с ${esc(dateText(item.effective_at))}</small>`
+                  :''
+              }
+
+              <a
+                class="secondary"
+                href="${href}"
+                target="_blank"
+                rel="noopener"
+              >
+                Открыть документ
+              </a>
+            </div>
+
+            <label class="legal-acceptance-check">
+              <input
+                type="checkbox"
+                data-legal-confirm
+              >
+
+              <span>
+                ${acceptance}
+              </span>
+            </label>
+
+            <button
+              class="primary"
+              type="button"
+              data-accept-legal="${type}"
+              disabled
+            >
+              Продолжить
+            </button>
+          </article>`;
+        }).join('');
+
+      $$(
+        '[data-legal-type]',
+        host
+      ).forEach(card=>{
+        const checkbox=
+          $(
+            '[data-legal-confirm]',
+            card
+          );
+
+        const button=
+          $(
+            '[data-accept-legal]',
+            card
+          );
+
+        if(
+          !checkbox
+          ||!button
+        ){
+          return;
+        }
+
+        checkbox.onchange=()=>{
+          button.disabled=
+            !checkbox.checked;
+        };
+
+        button.onclick=async()=>{
+          if(!checkbox.checked){
+            return;
+          }
+
+          try{
+            button.disabled=true;
+
+            await api(
+              '/api/legal/accept',
+              {
+                method:'POST',
+                body:{
+                  document_type:
+                    button.dataset.acceptLegal,
+                  accepted:true,
+                  locale:state.lang
+                }
+              }
+            );
+
+            const stillRequired=
+              await enforceLegalAcceptance();
+
+            if(!stillRequired){
+              /*
+               * Protected requests may have received 428 during
+               * boot before acceptance. Reload once so the full
+               * workspace initializes cleanly.
+               */
+              window.location.reload();
+              return;
+            }
+
+          }catch(error){
+            button.disabled=
+              !checkbox.checked;
+
+            toast(
+              error.message,
+              true
+            );
+          }
+        };
       });
-    }catch(error){console.error(error);}
+
+      return true;
+
+    }catch(error){
+      console.error(
+        error
+      );
+
+      return false;
+    }
   }
   function renderNotificationPreferences(preferences){
     $$('[data-notification-category]').forEach(group=>{

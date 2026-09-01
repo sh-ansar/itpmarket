@@ -125,7 +125,15 @@
       payment_review:
         '\u041d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435',
       payment_rejected:
-        '\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043e'
+        '\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043e',
+      active:'Активно',
+      paid:'Оплачено',
+      confirmed:'Подтверждено',
+      approved:'Подтверждено',
+      issued:'Счёт выставлен',
+      cancelled:'Отменено',
+      overdue:'Просрочено',
+      under_review:'На проверке'
     }[value] || value || '\u2014');
   }
 
@@ -235,8 +243,58 @@
           item.invoice_pdf_ready ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/pdf" target="_blank" rel="noopener">Счёт PDF</a>` : '',
           proof ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/payment-proof" target="_blank" rel="noopener">${esc(proof.original_filename||'Платёжный документ')}</a>` : ''
         ].filter(Boolean).join('<br>')||'<span class="muted">Нет документов</span>';
-        return `<tr><td><strong>${esc(item.tenant_name||'—')}</strong><small>${esc(item.registration_number||'')}</small></td><td><strong>${esc(item.invoice_number||'—')}</strong><small>${esc(formatDate(item.issued_at))}</small></td><td>${formatNumber(item.total_amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>до ${esc(formatDate(item.period_end))}</small></td><td><span class="billing-status ${esc(item.subscription_status||item.invoice_status||'')}">${esc(billingStatusLabel(item.subscription_status||item.invoice_status))}</span><small>${esc(item.invoice_status||'')}</small></td><td class="billing-document-cell">${documents}</td></tr>`;
-      }).join('') : '<tr><td colspan="6" class="loading">История счетов пока пуста.</td></tr>';
+        const reviewInfo=proof
+          ?[
+              proof.status
+                ?`<strong>${esc(billingStatusLabel(proof.status))}</strong>`
+                :'',
+              proof.reviewed_at
+                ?`<small>${esc(formatDate(proof.reviewed_at))}</small>`
+                :'',
+              proof.reviewed_by
+                ?`<small>${esc(proof.reviewed_by)}</small>`
+                :'',
+              proof.review_note
+                ?`<small class="billing-review-note">${esc(proof.review_note)}</small>`
+                :''
+            ].filter(Boolean).join('')
+          :'<span class="muted">Нет платёжного документа</span>';
+
+        const paidInfo=item.paid_at
+          ?`<strong>Оплачено ${esc(formatDate(item.paid_at))}</strong>${reviewInfo}`
+          :reviewInfo;
+
+        return `<tr>
+          <td>
+            <strong>${esc(item.tenant_name||'—')}</strong>
+            <small>${esc(item.registration_number||'')}</small>
+          </td>
+          <td>
+            <strong>${esc(item.invoice_number||'—')}</strong>
+            <small>Выставлен: ${esc(formatDate(item.issued_at))}</small>
+            <small>Оплатить до: ${esc(formatDate(item.due_at))}</small>
+          </td>
+          <td>
+            <strong>${esc(item.plan_name||item.plan_code||'—')}</strong>
+            <small>${Number(item.months_count||0).toLocaleString()} мес.</small>
+          </td>
+          <td>
+            <strong>${formatNumber(item.total_amount)} ${esc(item.currency||'KZT')}</strong>
+          </td>
+          <td>
+            ${esc(formatDate(item.period_start))}
+            <small>до ${esc(formatDate(item.period_end))}</small>
+          </td>
+          <td>
+            <span class="billing-status ${esc(item.subscription_status||item.invoice_status||'')}">
+              ${esc(billingStatusLabel(item.subscription_status||item.invoice_status))}
+            </span>
+            <small>${esc(billingStatusLabel(item.invoice_status||''))}</small>
+          </td>
+          <td class="billing-document-cell">${documents}</td>
+          <td class="billing-history-review">${paidInfo}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="8" class="loading">История счетов пока пуста.</td></tr>';
     }
 
     const addonHost=$('#addonPaymentReviewTableBody');
@@ -419,10 +477,177 @@
     window.ITPUI?.translateTree(document.body);
   }
 
+  function resetLegalDraftForm(){
+    const form=$('#legalDocumentDraftForm');
+
+    if(!form){
+      return;
+    }
+
+    form.reset();
+
+    if(form.elements.version_id){
+      form.elements.version_id.value='';
+    }
+
+    if(form.elements.requires_acceptance){
+      form.elements.requires_acceptance.checked=true;
+    }
+
+    const cancel=$('#cancelLegalDraftEdit');
+
+    if(cancel){
+      cancel.hidden=true;
+    }
+  }
+
+  function editLegalDraft(item){
+    const form=$('#legalDocumentDraftForm');
+
+    if(
+      !form
+      ||!item
+      ||item.status!=='draft'
+    ){
+      return;
+    }
+
+    form.elements.version_id.value=
+      String(item.id||'');
+
+    form.elements.type.value=
+      item.type||'offer';
+
+    form.elements.number.value=
+      item.number||'';
+
+    form.elements.version.value=
+      item.version||'';
+
+    form.elements.title.value=
+      item.title||'';
+
+    form.elements.effective_at.value=
+      String(
+        item.effective_at||''
+      ).slice(0,10);
+
+    form.elements.body_text.value=
+      item.body_text||'';
+
+    form.elements.acceptance_text.value=
+      item.acceptance_text||'';
+
+    form.elements.requires_acceptance.checked=
+      item.requires_acceptance!==false;
+
+    const cancel=$('#cancelLegalDraftEdit');
+
+    if(cancel){
+      cancel.hidden=false;
+    }
+
+    form.scrollIntoView({
+      behavior:'smooth',
+      block:'start'
+    });
+  }
+
   function renderLegalDocumentAdmin(items){
     const host=$('#legalDocumentAdminTable');
-    if(!host)return;
-    host.innerHTML=items.length?items.map(item=>`<tr><td><strong>${esc(item.title||'—')}</strong><small>${esc(item.type||'')}</small></td><td>${esc(item.version||'—')}</td><td><span class="billing-status ${esc(item.status||'')}">${esc(item.status||'')}</span></td><td>${esc(formatDate(item.published_at))}</td><td>${item.status==='draft'?`<button class="approve" data-publish-legal="${Number(item.id)}">Опубликовать</button>`:`<a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a>`}</td></tr>`).join(''):'<tr><td colspan="5" class="loading">Версий пока нет.</td></tr>';
+
+    if(!host){
+      return;
+    }
+
+    host.innerHTML=items.length
+      ?items.map(item=>{
+        const draft=
+          item.status==='draft';
+
+        const effective=
+          item.effective_at
+            ?formatDate(item.effective_at)
+            :'После публикации';
+
+        const statusLabel={
+          draft:'Черновик',
+          published:'Опубликован',
+          archived:'Архив'
+        }[item.status]||item.status||'—';
+
+        const actions=draft
+          ?`<div class="legal-row-actions">
+              <button
+                type="button"
+                class="secondary"
+                data-edit-legal="${Number(item.id)}"
+              >
+                Редактировать
+              </button>
+
+              <button
+                type="button"
+                class="approve"
+                data-publish-legal="${Number(item.id)}"
+              >
+                Опубликовать
+              </button>
+            </div>`
+          :`<div class="legal-row-actions">
+              <a
+                class="secondary"
+                href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}"
+                target="_blank"
+                rel="noopener"
+              >
+                Открыть
+              </a>
+            </div>`;
+
+        return `<tr>
+          <td>
+            <strong>${esc(item.title||'—')}</strong>
+            <small>${esc(item.type||'')}</small>
+          </td>
+
+          <td>
+            <strong>${esc(item.number||'—')}</strong>
+            <small>v${esc(item.version||'—')}</small>
+          </td>
+
+          <td>
+            ${esc(effective)}
+          </td>
+
+          <td>
+            <span class="billing-status ${esc(item.status||'')}">
+              ${esc(statusLabel)}
+            </span>
+
+            <small>
+              ${
+                item.requires_acceptance
+                  ?'Требует согласия'
+                  :'Без повторного согласия'
+              }
+            </small>
+          </td>
+
+          <td>
+            <strong>${formatNumber(item.accepted_count||0)}</strong>
+          </td>
+
+          <td>
+            ${esc(formatDate(item.published_at))}
+          </td>
+
+          <td>
+            ${actions}
+          </td>
+        </tr>`;
+      }).join('')
+      :'<tr><td colspan="7" class="loading">Версий пока нет.</td></tr>';
   }
 
   async function load() {
@@ -504,7 +729,79 @@
     const billingAction=event.target.closest('[data-billing-action]');
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
     const publishLegal=event.target.closest('[data-publish-legal]');
-    if(publishLegal){event.preventDefault();if(!window.confirm('Опубликовать версию? Пользователям потребуется повторное принятие.'))return;try{await api(`/api/platform/legal-documents/${Number(publishLegal.dataset.publishLegal)}/publish`,{method:'POST',body:{}});toast('Новая версия опубликована');await load();}catch(error){toast(error.message,true)}return;}
+    const editLegal=event.target.closest('[data-edit-legal]');
+
+    if(editLegal){
+      event.preventDefault();
+
+      const item=(
+        snapshot?.legal_documents||[]
+      ).find(
+        value=>
+          Number(value.id)
+          ===Number(editLegal.dataset.editLegal)
+      );
+
+      if(item){
+        editLegalDraft(item);
+      }
+
+      return;
+    }
+
+    if(publishLegal){
+      event.preventDefault();
+
+      const item=(
+        snapshot?.legal_documents||[]
+      ).find(
+        value=>
+          Number(value.id)
+          ===Number(publishLegal.dataset.publishLegal)
+      );
+
+      const label=item
+        ?`${item.title} · v${item.version}`
+        :'эту версию';
+
+      if(
+        !window.confirm(
+          `Опубликовать ${label}? `+
+          `После публикации версия станет неизменяемой.`
+        )
+      ){
+        return;
+      }
+
+      try{
+        publishLegal.disabled=true;
+
+        await api(
+          `/api/platform/legal-documents/${Number(publishLegal.dataset.publishLegal)}/publish`,
+          {
+            method:'POST',
+            body:{}
+          }
+        );
+
+        toast(
+          'Новая версия опубликована'
+        );
+
+        resetLegalDraftForm();
+
+        await load();
+
+      }catch(error){
+        publishLegal.disabled=false;
+        toast(
+          error.message,
+          true
+        );
+      }
+
+      return;
+    }
     if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
     if(marketplaceReview){
       event.preventDefault();
@@ -599,8 +896,51 @@
     event.preventDefault();
     try{
       if(legalDraftForm){
-        await api('/api/platform/legal-documents/drafts',{method:'POST',body:Object.fromEntries(new FormData(legalDraftForm))});
-        legalDraftForm.reset();toast('Черновик сохранён');
+        const raw=
+          Object.fromEntries(
+            new FormData(
+              legalDraftForm
+            )
+          );
+
+        const versionId=
+          Number(
+            raw.version_id||0
+          );
+
+        const body={
+          ...raw,
+          requires_acceptance:
+            Boolean(
+              legalDraftForm
+                .elements
+                .requires_acceptance
+                .checked
+            )
+        };
+
+        delete body.version_id;
+
+        await api(
+          versionId
+            ?`/api/platform/legal-documents/drafts/${versionId}`
+            :'/api/platform/legal-documents/drafts',
+          {
+            method:
+              versionId
+                ?'PUT'
+                :'POST',
+            body
+          }
+        );
+
+        resetLegalDraftForm();
+
+        toast(
+          versionId
+            ?'Черновик обновлён'
+            :'Черновик сохранён'
+        );
       }else if(planForm){
         const raw=Object.fromEntries(new FormData(planForm));
         const features={};planForm.querySelectorAll('[data-plan-feature]').forEach(input=>features[input.dataset.planFeature]={is_enabled:input.checked});
@@ -613,6 +953,11 @@
       await load();
     }catch(error){toast(error.message,true)}
   });
+
+  $('#cancelLegalDraftEdit')?.addEventListener(
+    'click',
+    resetLegalDraftForm
+  );
 
   $('#billingDecisionForm')?.addEventListener(
     'submit',
@@ -946,6 +1291,13 @@
       }
 
       const editableFields=[
+        'name',
+        'registration_number',
+        'legal_address',
+        'iban',
+        'bank_name',
+        'bic',
+        'kbe',
         'payment_purpose_code',
         'invoice_prefix',
         'invoice_due_days',

@@ -121,7 +121,7 @@ def _as_bool(value: Any) -> bool:
         return False
 
     raise SubscriptionError(
-        "???????????? ?????????? ????????."
+        "Некорректное логическое значение."
     )
 
 
@@ -1105,7 +1105,15 @@ class BillingService:
                 """SELECT i.id AS invoice_id,i.invoice_number,i.status AS invoice_status,
                           i.months_count,i.total_amount,i.currency,i.issued_at,i.due_at,i.pdf_path,
                           i.cancelled_at,i.cancel_reason,s.status AS subscription_status,
-                          s.starts_at,s.ends_at,p.code AS plan_code,p.name AS plan_name,
+                          s.starts_at,s.ends_at,
+                          (
+                            SELECT sp.paid_at
+                            FROM subscription_payments sp
+                            WHERE sp.subscription_id=s.id
+                            ORDER BY sp.id DESC
+                            LIMIT 1
+                          ) AS paid_at,
+                          p.code AS plan_code,p.name AS plan_name,
                           t.id AS tenant_id,t.name AS tenant_name,t.registration_number,
                           proof.id AS proof_id,proof.status AS proof_status,proof.original_filename,
                           proof.uploaded_at,proof.reviewed_at,proof.review_note,
@@ -1136,6 +1144,7 @@ class BillingService:
                     "months_count": int(value["months_count"] or 0), "total_amount": float(value["total_amount"] or 0),
                     "currency": str(value["currency"] or "KZT"), "issued_at": value["issued_at"], "due_at": value["due_at"],
                     "period_start": value["starts_at"], "period_end": value["ends_at"],
+                    "paid_at": value["paid_at"],
                     "invoice_pdf_ready": bool(value["pdf_path"]), "cancelled_at": value["cancelled_at"],
                     "cancel_reason": value["cancel_reason"],
                     "proof": ({"id": int(value["proof_id"]), "status": value["proof_status"],

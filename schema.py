@@ -423,9 +423,20 @@ CREATE TABLE IF NOT EXISTS legal_document_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id INTEGER NOT NULL,
     version TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','archived')),
+    document_number TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    effective_at TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK(
+            status IN (
+                'draft',
+                'published',
+                'archived'
+            )
+        ),
     body_text TEXT NOT NULL DEFAULT '',
     acceptance_text TEXT NOT NULL DEFAULT '',
+    operator_snapshot_json TEXT NOT NULL DEFAULT '{}',
     content_sha256 TEXT NOT NULL,
     requires_acceptance INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER,
@@ -434,9 +445,15 @@ CREATE TABLE IF NOT EXISTS legal_document_versions (
     published_at TEXT,
     archived_at TEXT,
     UNIQUE(document_id,version),
-    FOREIGN KEY(document_id) REFERENCES legal_documents(id) ON DELETE CASCADE,
-    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL,
-    FOREIGN KEY(published_by) REFERENCES app_users(id) ON DELETE SET NULL
+    FOREIGN KEY(document_id)
+        REFERENCES legal_documents(id)
+        ON DELETE CASCADE,
+    FOREIGN KEY(created_by)
+        REFERENCES app_users(id)
+        ON DELETE SET NULL,
+    FOREIGN KEY(published_by)
+        REFERENCES app_users(id)
+        ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_legal_document_versions_current
 ON legal_document_versions(document_id,status,published_at DESC,id DESC);
@@ -1590,7 +1607,55 @@ def ensure_database(path: Path) -> None:
         conn.executescript(BASE_SCHEMA)
         legal_acceptance_columns = _columns(conn, "legal_acceptances")
         if "legal_document_version_id" not in legal_acceptance_columns:
-            conn.execute("ALTER TABLE legal_acceptances ADD COLUMN legal_document_version_id INTEGER")
+            conn.execute(
+                "ALTER TABLE legal_acceptances "
+                "ADD COLUMN legal_document_version_id INTEGER"
+            )
+
+        legal_version_columns = _columns(
+            conn,
+            "legal_document_versions",
+        )
+
+        for legal_column, legal_ddl in (
+            ("document_number", "TEXT NOT NULL DEFAULT ''"),
+            ("title", "TEXT NOT NULL DEFAULT ''"),
+            ("effective_at", "TEXT NOT NULL DEFAULT ''"),
+            ("operator_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ):
+            if legal_column not in legal_version_columns:
+                conn.execute(
+                    "ALTER TABLE legal_document_versions "
+                    f"ADD COLUMN {legal_column} {legal_ddl}"
+                )
+
+        conn.execute(
+            """UPDATE legal_document_versions
+               SET document_number=COALESCE(
+                     NULLIF(document_number,''),
+                     (
+                       SELECT d.document_number
+                       FROM legal_documents d
+                       WHERE d.id=
+                         legal_document_versions.document_id
+                     ),
+                     ''
+                   ),
+                   title=COALESCE(
+                     NULLIF(title,''),
+                     (
+                       SELECT d.title
+                       FROM legal_documents d
+                       WHERE d.id=
+                         legal_document_versions.document_id
+                     ),
+                     ''
+                   )
+               WHERE
+                 document_number=''
+                 OR title=''"""
+        )
+
         if "expected_monthly_units" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN expected_monthly_units INTEGER")
         if "theme" not in _columns(conn, "app_user_preferences"):
@@ -1807,27 +1872,6 @@ def ensure_database(path: Path) -> None:
                    WHERE approval_status='draft' AND status IN ('active','setup')
                      AND submitted_at IS NULL AND reviewed_at IS NULL"""
             )
-
-        # Onboarding selections are historical metadata, not a marketplace
-        # whitelist. Every approved tenant can connect every registered
-        # marketplace; this idempotent startup backfill repairs existing
-        # tenants before their next settings/operations request.
-        conn.execute(
-            """
-            INSERT INTO tenant_marketplace_access(
-                tenant_id,marketplace_code,is_allowed,granted_at,updated_at
-            )
-            SELECT ti.tenant_id,ti.integration_code,1,?,?
-            FROM tenant_integrations ti
-            JOIN tenants t ON t.id=ti.tenant_id
-            WHERE t.status IN ('active','approved','confirmed')
-            ON CONFLICT(tenant_id,marketplace_code) DO UPDATE SET
-                is_allowed=1,
-                granted_at=COALESCE(tenant_marketplace_access.granted_at,excluded.granted_at),
-                updated_at=excluded.updated_at
-            """,
-            (stamp, stamp),
-        )
 
         # Compatibility only: attach genuinely orphaned legacy users to the
         # default tenant. Never add a second tenant membership to modern users.

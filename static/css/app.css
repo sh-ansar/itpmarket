@@ -4136,3 +4136,128 @@ html[data-theme="dark"] .profile i img {
     white-space: nowrap;
   }
 }
+
+
+/* =========================================================
+   MANDATORY LEGAL RE-ACCEPTANCE
+   ========================================================= */
+
+#legalAcceptanceModal .modal-card{
+  width:min(720px,calc(100vw - 32px));
+  max-width:720px;
+}
+
+#legalAcceptanceList{
+  display:grid;
+  gap:12px;
+  margin-top:14px;
+}
+
+.legal-acceptance-item{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) auto!important;
+  gap:12px!important;
+  align-items:center!important;
+  padding:15px!important;
+}
+
+.legal-acceptance-copy{
+  display:grid;
+  gap:5px;
+  min-width:0;
+}
+
+.legal-acceptance-copy a{
+  width:max-content;
+  max-width:100%;
+  margin-top:4px;
+}
+
+.legal-acceptance-check{
+  grid-column:1/-1;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface-2);
+  color:var(--ink);
+  font-size:11px;
+  line-height:1.5;
+}
+
+.legal-acceptance-check input{
+  width:18px;
+  height:18px;
+  min-width:18px;
+  flex:0 0 auto;
+  margin-top:1px;
+}
+
+.legal-acceptance-item > [data-accept-legal]{
+  justify-self:end;
+  min-width:132px;
+}
+
+.legal-acceptance-item > [data-accept-legal]:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.legal-document-item{
+  min-width:0;
+}
+
+.legal-document-item > div:first-child{
+  min-width:0;
+}
+
+.legal-document-item small{
+  overflow-wrap:anywhere;
+}
+
+.legal-operator-details{
+  margin-top:26px;
+  padding-top:18px;
+  border-top:1px solid var(--line);
+}
+
+.legal-operator-details h2{
+  margin:0 0 12px;
+  font-size:18px;
+}
+
+.legal-operator-details table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+.legal-operator-details th,
+.legal-operator-details td{
+  padding:8px 10px;
+  border:1px solid var(--line);
+  text-align:left;
+  vertical-align:top;
+}
+
+.legal-operator-details th{
+  width:190px;
+  background:var(--surface-2);
+  font-weight:700;
+}
+
+@media(max-width:650px){
+  .legal-acceptance-item{
+    grid-template-columns:1fr!important;
+  }
+
+  .legal-acceptance-item > [data-accept-legal]{
+    width:100%;
+    justify-self:stretch;
+  }
+
+  .legal-operator-details th{
+    width:120px;
+  }
+}
