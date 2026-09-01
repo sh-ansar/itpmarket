@@ -19,6 +19,7 @@ if str(OZON_RU_ROOT) not in sys.path:
 from collector_config import Settings, load_settings  # noqa: E402
 from ozon_collector import (  # noqa: E402
     Collector,
+    has_hard_failure,
     materialize_tenant_catalog,
     result_exit_code,
     structured_result,
@@ -207,7 +208,9 @@ def parse_articles(value: str) -> set[str] | None:
 
 
 def require_success(result: dict[str, Any], operation: str) -> dict[str, Any]:
-    if result_exit_code(result) != 0:
+    # PARTIAL is recoverable: keep its non-zero final process contract, but
+    # allow mirror/materialisation and later safe stages to use successful rows.
+    if has_hard_failure(result):
         raise RuntimeError(
             f"Ozon.kz {operation} завершён со статусом "
             f"{str(result.get('status') or 'FAILED')}."
@@ -242,10 +245,12 @@ def main() -> int:
     articles = parse_articles(args.articles)
     outcome: dict[str, Any] | None = None
     failure: Exception | None = None
+    stages: list[dict[str, Any]] = []
     try:
         if args.action in {"sync-catalog", "full-sync"}:
             discovered = collector.discover(limit, int(args.pages))
             outcome = discovered
+            stages.append(discovered)
             require_success(
                 discovered,
                 "sync-catalog",
@@ -256,22 +261,24 @@ def main() -> int:
                     "Ozon.kz; если показана проверка доступа, пройдите её и повторите запуск."
                 )
         if args.action == "full-sync":
-            require_success(
-                collector.process("enrich-new", limit, None), "enrich-new"
-            )
+            enriched = collector.process("enrich-new", limit, None)
+            stages.append(enriched)
+            require_success(enriched, "enrich-new")
         if args.action in {"refresh-prices", "full-sync"}:
-            require_success(
-                collector.process("refresh-prices", limit, articles),
-                "refresh-prices",
-            )
+            refreshed = collector.process("refresh-prices", limit, articles)
+            stages.append(refreshed)
+            require_success(refreshed, "refresh-prices")
         mirrored = mirror_public_registry(settings)
         tenant_count = materialize_tenant_catalog(
             settings, int(args.tenant_id), str(getattr(args, "app_db", "") or args.db), "ozon_kz",
             tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
         )
-        print(json.dumps({"ok": True, **mirrored, "tenant_products": tenant_count}, ensure_ascii=False))
-        outcome = {"status": "PASSED"}
-        return 0
+        final_status = "PARTIAL" if any(
+            str(stage.get("status") or "").upper() == "PARTIAL" for stage in stages
+        ) else "PASSED"
+        outcome = {"status": final_status, "stages": stages}
+        print(json.dumps({"ok": final_status == "PASSED", **mirrored, "tenant_products": tenant_count, "status": final_status}, ensure_ascii=False))
+        return result_exit_code(outcome)
     except Exception as exc:
         failure = exc
         outcome = outcome or {"status": "FAILED"}

@@ -31,6 +31,96 @@ from task_manager import RESULT_MESSAGES, structured_result
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
+    def test_ru_and_kz_catalogue_scroll_waits_for_delayed_virtual_grid_growth(self) -> None:
+        def catalogue_html(count: int) -> str:
+            items = ",".join(
+                '{&quot;sku&quot;:&quot;%s&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/seller-%s/&quot;},&quot;mainState&quot;:[]}'
+                % (number, number)
+                for number in range(1, count + 1)
+            )
+            return (
+                '<div id="state-tileGridDesktop-seller" data-state="{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,&quot;items&quot;:[%s]}" />'
+                % items
+            )
+
+        product_counts = [8, 8, 8, 8, 16, 24] + [24] * 6
+        heights = [1000, 1000, 1100, 1200, 1200, 2000] + [2000] * 6
+
+        class FakeDriver:
+            def __init__(self) -> None:
+                self.poll = 0
+
+            def execute_script(self, script: str) -> object:
+                if script == "window.scrollTo(0, 0);":
+                    return None
+                index = min(self.poll, len(product_counts) - 1)
+                self.poll += 1
+                return {
+                    "before": 0,
+                    "after": heights[index],
+                    "height": heights[index],
+                    "nearBottom": True,
+                }
+
+        for base_url in (
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            "https://ozon.kz/seller/alfa-tires-3381444/",
+        ):
+            session = BrowserSession.__new__(BrowserSession)
+            session.driver = FakeDriver()
+            session.snapshot = lambda session=session: (
+                "Alfa Tires",
+                "Alfa Tires",
+                catalogue_html(product_counts[min(session.driver.poll, len(product_counts) - 1)]),
+            )
+            session.blocked_state = lambda *_args: False
+            session._safe_dom_text = lambda value: value
+            clock = [0.0]
+
+            def monotonic() -> float:
+                return clock[0]
+
+            def sleep(seconds: float) -> None:
+                clock[0] += seconds
+
+            events: list[dict[str, object]] = []
+            with patch("browser_session.time.monotonic", side_effect=monotonic), patch(
+                "browser_session.time.sleep", side_effect=sleep
+            ):
+                products, _next_page, _title, _text, _html, blocked = (
+                    session._collect_catalog_snapshot(base_url, 60, events)
+                )
+
+            self.assertFalse(blocked)
+            self.assertEqual(24, len(products))
+            self.assertTrue(any(event.get("height_grew") for event in events))
+            self.assertTrue(any(event.get("unique_products") == 24 for event in events))
+
+    def test_market_search_full_sync_is_not_total_capped_by_batch_size(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_search_") as folder:
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                market_search_batch_limit=30,
+                start_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
+            )
+            collector.registry = MagicMock()
+            collector.registry.client_products_for_market_search.return_value = [
+                {"article": f"owner-{number}"} for number in range(31)
+            ]
+            collector._run_dir = MagicMock(return_value=Path(folder))
+            collector.ensure_browser = MagicMock()
+            collector.generate_outputs = MagicMock()
+
+            with patch("ozon_collector.build_search_queries", return_value=[]):
+                result = collector.market_search()
+
+        collector.registry.client_products_for_market_search.assert_called_once_with(
+            0, allowed_articles=None
+        )
+        self.assertEqual(31, result["items_total"])
+        self.assertEqual(31, collector.registry.finish_market_search.call_count)
+        self.assertEqual("PARTIAL", result["status"])
+
     def test_out_of_stock_widget_is_a_valid_exact_product_response(self) -> None:
         article = "2946348346"
         data = {

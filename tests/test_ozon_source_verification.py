@@ -7,6 +7,24 @@ from ozon_source_verification import OzonSourceVerificationError, resolve_ozon_s
 
 
 class OzonSourceVerificationTests(unittest.TestCase):
+    def test_seller_grid_pages_accumulate_more_than_sixteen_unique_products(self) -> None:
+        seen: set[str] = set()
+        for page_no in range(3):
+            items = ",".join(
+                '{&quot;sku&quot;:&quot;%s&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/seller-%s/&quot;},&quot;mainState&quot;:[]}'
+                % (number, number)
+                for number in range(page_no * 8 + 1, page_no * 8 + 9)
+            )
+            page = (
+                '<div id="state-tileGridDesktop-seller" data-state='
+                '"{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,&quot;items&quot;:[%s]}" />'
+            ) % items
+            products, _ = parse_catalog_html(
+                page, "https://www.ozon.ru/seller/alfa-tires-3381444/"
+            )
+            seen.update(str(item["article"]) for item in products)
+        self.assertEqual(24, len(seen))
+
     def test_kz_canonical_identity_requires_agreeing_browser_evidence(self) -> None:
         result = resolve_ozon_snapshot(
             "ozon_kz",

@@ -589,6 +589,12 @@ class BrowserSession:
         saw_block = False
         last_unique = -1
         stable_ticks = 0
+        last_height = -1
+        # Ozon's virtual grid can append rows only after a delayed bottom
+        # settle.  Do not treat three no-growth polls as end-of-catalogue.
+        # A full settle cycle observes both product growth and document height.
+        last_product_growth_at = time.monotonic()
+        last_height_growth_at = last_product_growth_at
 
         try:
             self.driver.execute_script("window.scrollTo(0, 0);")
@@ -649,12 +655,21 @@ class BrowserSession:
                     """
                 )
                 count = len(unique)
+                height = int((scroll_state or {}).get("height") or 0)
                 moved = bool((scroll_state or {}).get("after") != (scroll_state or {}).get("before"))
-                if count == last_unique:
-                    stable_ticks += 1
-                else:
+                product_grew = count > last_unique
+                height_grew = height > last_height
+                now = time.monotonic()
+                if product_grew:
+                    last_product_growth_at = now
+                if height_grew:
+                    last_height_growth_at = now
+                if product_grew or height_grew:
                     stable_ticks = 0
+                else:
+                    stable_ticks += 1
                 last_unique = count
+                last_height = max(last_height, height)
                 events.append(
                     {
                         "event": "scroll_poll",
@@ -665,13 +680,27 @@ class BrowserSession:
                         "unique_products": count,
                         "next_page": bool(best_next_page),
                         "moved": moved,
+                        "scroll_height": height,
+                        "products_grew": product_grew,
+                        "height_grew": height_grew,
+                        "seconds_since_product_growth": round(now - last_product_growth_at, 2),
+                        "seconds_since_height_growth": round(now - last_height_growth_at, 2),
                         "near_bottom": bool((scroll_state or {}).get("nearBottom")),
                         "blocked": blocked,
                     }
                 )
-                if count and bool((scroll_state or {}).get("nearBottom")) and stable_ticks >= 3:
+                # Six complete bottom-settle polls (roughly eight seconds) are
+                # required after *both* the grid and scrollHeight stop growing.
+                # This retains seller-scoped parser safety while accommodating
+                # lazy/virtual append work scheduled after reaching the bottom.
+                settled = (
+                    stable_ticks >= 6
+                    and now - last_product_growth_at >= 7.5
+                    and now - last_height_growth_at >= 7.5
+                )
+                if count and bool((scroll_state or {}).get("nearBottom")) and settled:
                     break
-                if count and best_next_page and stable_ticks >= 4:
+                if count and best_next_page and settled:
                     break
             except Exception as exc:
                 events.append({"event": "scroll_poll_error", "error": f"{type(exc).__name__}: {exc}"})

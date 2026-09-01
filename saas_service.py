@@ -757,15 +757,14 @@ class SaaSService:
                 ]
                 allowed = bool(row.get("is_allowed"))
                 approval_status = str(row.get("approval_status") or "draft")
+                # Connection state and permission are deliberately separate:
+                # onboarding grants must not hide a factual seller connection.
                 connected = (
-                    allowed
-                    and (
-                        bool(active_sellers)
-                        or (
-                            not sellers
-                            and str(row.get("status") or "") == "active"
-                            and approval_status == "approved"
-                        )
+                    bool(active_sellers)
+                    or (
+                        not sellers
+                        and str(row.get("status") or "") == "active"
+                        and approval_status == "approved"
                     )
                 )
                 connection_status = (
@@ -796,8 +795,12 @@ class SaaSService:
                     "seller_count": len(sellers),
                     "active_seller_count": len(active_sellers),
                 }
-                if include_unavailable or allowed:
-                    result.append(item)
+                # Settings passes include_unavailable=True and always receives
+                # the complete registry.  Retain the explicit False mode for
+                # internal grant-only callers (catalogue/template filtering).
+                if not include_unavailable and not allowed:
+                    continue
+                result.append(item)
             # Keep one card per registry integration, prioritising live state
             # without making unselected onboarding integrations disappear.
             result.sort(key=lambda item: (

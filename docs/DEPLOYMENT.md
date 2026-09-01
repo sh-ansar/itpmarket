@@ -160,6 +160,8 @@ Ozon source approval attaches to that existing interactive browser only. A parse
 
 Для seller storefront catalogue parser использует только structured `tileGridDesktop`: recommendation/cross-sell grids исключены. При отсутствии seller slug в widget state допустима ровно одна normal unscoped grid с валидными product actions; несколько неидентифицированных grids остаются `NO_CATALOG`. В trace коллектора событие `catalog_grid_scan` показывает причину выбора без раскрытия browser profile или секретов.
 
+Products uses a bounded PostgreSQL analytics read-model for ordinary catalogue pages. It is schema-compatible with the current production contract and adds no migration; deployment verification still requires `postgres_initialize.py --check` before restart.
+
 Canonical Ozon URL contract: accept both seller path variants on input, but persist and issue all new Ozon.ru/Ozon.kz source URLs as `https://<host>/seller/<slug>/`.
 
 ## Post-deploy verification

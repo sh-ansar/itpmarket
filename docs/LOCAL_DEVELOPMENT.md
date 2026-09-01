@@ -159,7 +159,11 @@ For V2 changes, include `tests/test_addon_billing_service.py`,
 `tests/test_legal_document_lifecycle.py`, and
 `tests/test_product_sql_pagination.py` in the targeted run. The last test
 uses 3,005 tenant products and asserts that the ordinary page path never calls
-the full-catalogue enrichment method.
+the full-catalogue enrichment method. PostgreSQL Products additionally uses a
+bounded analytics projection for `all`, `risks`, `opportunities` and `review`:
+each request performs SQL `COUNT` plus filtered, ordered `LIMIT/OFFSET` reads;
+the projection returns price status, market price, differences, candidate and
+reference counts, safe potential and analytics update time.
 
 Safe automatic migrations must contain SPYON-AUTO-MIGRATION, start with BEGIN
 and end with COMMIT. Run tests/test_postgres_migrations.py before release.

@@ -12,7 +12,7 @@ import statistics
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from storage.database_backend import DatabaseBackend, DatabaseSettings
-from storage.postgres_compat import configure_connection, connect_database, database_error_types, table_exists
+from storage.postgres_compat import PostgresConnection, configure_connection, connect_database, database_error_types, table_exists
 
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
 from collectors.wildberries.wildberries_collector import image_url_for_article
@@ -2297,12 +2297,29 @@ class DataService:
     def _is_opportunity(row: dict[str, Any]) -> bool:
         """Return only price increases proven safe by the exact-price model."""
         status = str(row.get("price_status") or "")
-        if status == "EXACT_LOWEST":
-            return True
         return (
-            status == "EXACT_TIED_LOWEST"
+            status in OPPORTUNITY_STATUSES
             and float(row.get("potential_margin_per_unit_kzt") or 0) > 0
         )
+
+    @staticmethod
+    def _business_priority(row: dict[str, Any]) -> tuple[int, float, str]:
+        """Shared ordering for the default All view and derived surfaces."""
+        status = str(row.get("price_status") or "NOT_ANALYZED")
+        risk_order = {
+            "EXACT_HIGHEST": 0, "EXACT_TIED_HIGHEST": 1,
+            "EXACT_ABOVE": 2, "EXACT_BELOW": 3, "DATA_ERROR": 4,
+        }
+        if status in risk_order:
+            magnitude = abs(float(row.get("difference_kzt") or 0))
+            return (risk_order[status], -magnitude, str(row.get("title") or ""))
+        if DataService._is_opportunity(row):
+            return (10, -float(row.get("potential_margin_per_unit_kzt") or 0), str(row.get("title") or ""))
+        if status in {"EXACT_IN_MARKET", "NO_OTHER_SELLERS"}:
+            return (20, 0.0, str(row.get("title") or ""))
+        if status.startswith("COMPARABLE_"):
+            return (30, 0.0, str(row.get("title") or ""))
+        return (40, 0.0, str(row.get("title") or ""))
 
     @staticmethod
     def _matches(row: dict[str, Any], filters: dict[str, Any]) -> bool:
@@ -2382,7 +2399,10 @@ class DataService:
         sort_name = str(filters.get("sort") or "updated")
         sort_field = SORT_FIELDS.get(sort_name, "_updated_sort")
         reverse = str(filters.get("direction") or "desc").casefold() != "asc"
-        rows.sort(key=lambda row: (row.get(sort_field) is not None, row.get(sort_field) or "", row.get("title") or ""), reverse=reverse)
+        if sort_name == "updated" and str(filters.get("scope") or "all").casefold() == "all":
+            rows.sort(key=self._business_priority)
+        else:
+            rows.sort(key=lambda row: (row.get(sort_field) is not None, row.get(sort_field) or "", row.get("title") or ""), reverse=reverse)
         total = len(rows)
         page_size = max(10, min(int(page_size), 200))
         pages = max(1, math.ceil(total / page_size))
@@ -2426,6 +2446,17 @@ class DataService:
         tenant_id = self._tenant_id_for_user(user_id)
         if tenant_id is None:
             return None
+        # The PostgreSQL tenant projection has the bounded, analytics-aware
+        # path.  SQLite remains a fixture backend and retains the portable
+        # catalogue query below; production never falls back to rows_for_user.
+        probe = self._connect()
+        try:
+            if isinstance(probe, PostgresConnection):
+                return self._postgres_tenant_catalog_page(
+                    probe, int(tenant_id), page, page_size, filters,
+                )
+        finally:
+            probe.close()
         unsupported = {
             "attribute_product_codes", "freshness", "product_type", "size",
             "season", "characteristic_group", "watched",
@@ -2555,6 +2586,118 @@ class DataService:
             })
         return {"items": items, "page": current, "pages": pages, "page_size": size, "total": total,
                 "lookup_strategy": "sql_projection"}
+
+    def _postgres_tenant_catalog_page(
+        self, conn: Any, tenant_id: int, page: int, page_size: int,
+        filters: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Bounded tenant SQL projection with exact-offer analytics.
+
+        The latest seller scan identifies the immutable snapshot run.  The
+        aggregate CTE therefore never enriches or materialises a catalogue in
+        Python; it calculates status/potential only for rows selected by SQL.
+        """
+        unsupported = {"attribute_product_codes", "freshness", "product_type", "size", "season", "characteristic_group", "watched"}
+        if any(filters.get(name) not in (None, "", [], (), set()) for name in unsupported):
+            return None
+        scope = str(filters.get("scope") or "all").strip().casefold()
+        if scope == "watched":
+            return None
+        marketplaces = self._filter_set(filters.get("platforms"))
+        platform = str(filters.get("platform") or "").strip().casefold()
+        if platform:
+            marketplaces.add(platform)
+        query = str(filters.get("query") or "").strip().casefold()
+        brands = self._filter_set(filters.get("brand"))
+        statuses = self._filter_set(filters.get("status"), upper=True)
+        where = ["p.tenant_id=?", "p.active=1"]
+        params: list[Any] = [tenant_id]
+        if marketplaces:
+            where.append("p.marketplace_code IN (" + ",".join("?" for _ in marketplaces) + ")")
+            params.extend(sorted(marketplaces))
+        if query:
+            where.append("(" + " OR ".join(f"LOWER(COALESCE(p.{field},'')) LIKE ?" for field in ("source_product_code", "title", "brand", "model", "seller_sku")) + ")")
+            params.extend([f"%{query}%"] * 5)
+        if brands:
+            where.append("LOWER(COALESCE(p.brand,'')) IN (" + ",".join("?" for _ in brands) + ")")
+            params.extend(sorted(brands))
+        base_where = " AND ".join(where)
+        cte = f"""
+            WITH base AS (
+              SELECT p.*, s.display_name AS seller_name, s.source_url AS seller_url,
+                     sc.status AS scan_status, sc.offers_count, sc.competitor_count,
+                     sc.checked_at, sc.error AS scan_error
+              FROM tenant_seller_catalog_products p
+              JOIN tenant_marketplace_sellers s ON s.id=p.tenant_seller_id
+              LEFT JOIN tenant_seller_offer_scans sc
+                ON sc.tenant_id=p.tenant_id AND sc.marketplace_code=p.marketplace_code
+               AND sc.tenant_seller_id=p.tenant_seller_id AND sc.source_product_code=p.source_product_code
+              WHERE {base_where}
+            ), aggregate_offers AS (
+              SELECT b.tenant_id,b.marketplace_code,b.tenant_seller_id,b.source_product_code,
+                     COUNT(o.id) FILTER (WHERE o.is_own=0 AND o.price_amount>0) AS references,
+                     MIN(o.price_amount) FILTER (WHERE o.is_own=0 AND o.price_amount>0) AS market_min,
+                     MAX(o.price_amount) FILTER (WHERE o.is_own=0 AND o.price_amount>0) AS market_max,
+                     percentile_cont(0.25) WITHIN GROUP (ORDER BY o.price_amount) FILTER (WHERE o.is_own=0 AND o.price_amount>0) AS market_q1,
+                     percentile_cont(0.5) WITHIN GROUP (ORDER BY o.price_amount) FILTER (WHERE o.is_own=0 AND o.price_amount>0) AS market_median,
+                     COUNT(o.id) FILTER (WHERE o.is_own=0 AND o.price_amount>0 AND o.price_amount=(SELECT MIN(x.price_amount) FROM tenant_seller_offer_snapshots x WHERE x.tenant_id=b.tenant_id AND x.marketplace_code=b.marketplace_code AND x.tenant_seller_id=b.tenant_seller_id AND x.source_product_code=b.source_product_code AND x.captured_at=b.checked_at AND x.is_own=0 AND x.price_amount>0)) AS min_ties,
+                     COUNT(o.id) FILTER (WHERE o.is_own=0 AND o.price_amount>0 AND o.price_amount=(SELECT MAX(x.price_amount) FROM tenant_seller_offer_snapshots x WHERE x.tenant_id=b.tenant_id AND x.marketplace_code=b.marketplace_code AND x.tenant_seller_id=b.tenant_seller_id AND x.source_product_code=b.source_product_code AND x.captured_at=b.checked_at AND x.is_own=0 AND x.price_amount>0)) AS max_ties
+              FROM base b LEFT JOIN tenant_seller_offer_snapshots o
+                ON o.tenant_id=b.tenant_id AND o.marketplace_code=b.marketplace_code
+               AND o.tenant_seller_id=b.tenant_seller_id AND o.source_product_code=b.source_product_code
+               AND o.captured_at=b.checked_at
+              GROUP BY b.tenant_id,b.marketplace_code,b.tenant_seller_id,b.source_product_code
+            ), analytics AS (
+              SELECT b.*, a.references,a.market_min,a.market_max,a.market_q1,a.market_median,a.min_ties,a.max_ties,
+                CASE
+                  WHEN b.scan_status='error' THEN 'DATA_ERROR'
+                  WHEN COALESCE(a.references,0)=0 AND b.scan_status IN ('ok','no_competitors') THEN 'NO_OTHER_SELLERS'
+                  WHEN b.scan_status IS NULL THEN 'NOT_ANALYZED'
+                  WHEN b.scan_status NOT IN ('ok','no_competitors','error') THEN 'REVIEW_REQUIRED'
+                  WHEN b.price_amount>a.market_max THEN 'EXACT_HIGHEST'
+                  WHEN b.price_amount=a.market_max THEN 'EXACT_TIED_HIGHEST'
+                  WHEN b.price_amount<a.market_min THEN 'EXACT_LOWEST'
+                  WHEN b.price_amount=a.market_min THEN 'EXACT_TIED_LOWEST'
+                  WHEN b.price_amount>a.market_median THEN 'EXACT_ABOVE'
+                  WHEN b.price_amount<a.market_median THEN 'EXACT_BELOW'
+                  ELSE 'EXACT_IN_MARKET'
+                END AS price_status,
+                GREATEST(0, COALESCE(a.market_q1,0)-COALESCE(b.price_amount,0)) AS safe_potential
+              FROM base b LEFT JOIN aggregate_offers a USING(tenant_id,marketplace_code,tenant_seller_id,source_product_code)
+            )
+        """
+        conditions: list[str] = []
+        extra: list[Any] = []
+        if statuses:
+            conditions.append("price_status IN (" + ",".join("?" for _ in statuses) + ")")
+            extra.extend(sorted(statuses))
+        if scope == "risks":
+            conditions.append("price_status IN ('EXACT_HIGHEST','EXACT_TIED_HIGHEST','EXACT_ABOVE','EXACT_BELOW','DATA_ERROR')")
+        elif scope == "opportunities":
+            conditions.append("price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') AND safe_potential>0")
+        elif scope in {"unscanned", "review"}:
+            conditions.append("price_status IN ('NOT_ANALYZED','INSUFFICIENT_DATA','REVIEW_REQUIRED')")
+        filtered = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        total = int(conn.execute(cte + " SELECT COUNT(*) AS count FROM analytics" + filtered, [*params, *extra]).fetchone()["count"])
+        size = max(10, min(int(page_size), 200)); pages = max(1, math.ceil(total / size)); current = max(1, min(int(page), pages))
+        sort_name = str(filters.get("sort") or "updated")
+        if sort_name == "updated" and scope == "all":
+            order = """CASE price_status WHEN 'EXACT_HIGHEST' THEN 0 WHEN 'EXACT_TIED_HIGHEST' THEN 1 WHEN 'EXACT_ABOVE' THEN 2 WHEN 'EXACT_BELOW' THEN 3 WHEN 'DATA_ERROR' THEN 4 WHEN 'EXACT_LOWEST' THEN 10 WHEN 'EXACT_TIED_LOWEST' THEN 11 WHEN 'EXACT_IN_MARKET' THEN 20 WHEN 'NO_OTHER_SELLERS' THEN 21 WHEN 'NOT_ANALYZED' THEN 40 WHEN 'INSUFFICIENT_DATA' THEN 41 WHEN 'REVIEW_REQUIRED' THEN 42 ELSE 30 END, CASE WHEN price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') THEN safe_potential ELSE ABS(COALESCE(price_amount-market_median,0)) END DESC, title ASC"""
+        else:
+            columns = {"title":"title", "price":"price_amount", "delta":"price_amount-market_median", "status":"price_status", "brand":"brand", "platform":"marketplace_code", "updated":"COALESCE(source_updated_at,last_seen_at)"}
+            direction = "ASC" if str(filters.get("direction") or "desc").casefold()=="asc" else "DESC"
+            order = f"{columns.get(sort_name, columns['updated'])} {direction}, source_product_code ASC"
+        rows = conn.execute(cte + f" SELECT * FROM analytics{filtered} ORDER BY {order} LIMIT ? OFFSET ?", [*params, *extra, size, (current-1)*size]).fetchall()
+        items: list[dict[str, Any]] = []
+        labels = {"kaspi":"Kaspi","ozon":"Ozon.ru","ozon_kz":"Ozon.kz","halyk_market":"Halyk Market","forte_market":"Forte Market","wildberries":"Wildberries"}
+        for raw in rows:
+            value = dict(raw); status = str(value["price_status"]); info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+            amount = value.get("price_amount"); median = value.get("market_median")
+            difference = (float(amount)-float(median)) if amount is not None and median is not None else None
+            percentage = round(difference / float(median) * 100, 2) if difference is not None and float(median) else None
+            code = self._catalog_product_code(str(value["marketplace_code"]), str(value["source_product_code"]))
+            items.append({"product_code":code,"source_product_code":value["source_product_code"],"platform":value["marketplace_code"],"platform_label":labels.get(str(value["marketplace_code"]),str(value["marketplace_code"])),"title":value.get("title") or value["source_product_code"],"product_url":value.get("source_url") or "","brand":value.get("brand") or "","model":value.get("model") or "","image_url":value.get("image_url") or "","own_price_kzt":amount,"price_kzt":amount,"price_original":amount,"currency_original":value.get("currency") or "","market_price_kzt":median,"market_median_price_kzt":median,"market_min_price_kzt":value.get("market_min"),"market_max_price_kzt":value.get("market_max"),"difference_kzt":difference,"difference_pct":percentage,"price_status":status,"status_label":info["label"],"status_tone":info["tone"],"reference_count":int(value.get("references") or 0),"candidate_count":int(value.get("references") or 0),"safe_potential":float(value.get("safe_potential") or 0),"potential_margin_per_unit_kzt":float(value.get("safe_potential") or 0),"analytics_updated_at":value.get("checked_at"),"exact_offer_checked_at":value.get("checked_at"),"exact_offer_status":value.get("scan_status") or "not_checked","seller_name":value.get("seller_name") or "","seller_url":value.get("seller_url") or "","updated_at":value.get("source_updated_at") or value.get("last_seen_at"),"source_type":"TENANT_CATALOG"})
+        return {"items":items,"page":current,"pages":pages,"page_size":size,"total":total,"lookup_strategy":"sql_analytics_projection"}
 
     def product_codes(
         self, filters: dict[str, Any], limit: int = 10000, user_id: int | None = None

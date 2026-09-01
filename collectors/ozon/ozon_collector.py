@@ -102,7 +102,9 @@ def has_hard_failure(result: dict[str, Any] | None) -> bool:
 def structured_result(result: dict[str, Any] | None, error: Exception | None = None) -> dict[str, Any]:
     status = str((result or {}).get("status") or "").upper()
     text = str(error or "")
-    if status == "PARTIAL" and error is None:
+    if status in {"OK", "PASSED", "READY"} and error is None:
+        reason = "success"
+    elif status == "PARTIAL" and error is None:
         reason = "partial_success"
     elif "BLOCKED" in status:
         reason = "ozon_challenge"
@@ -512,8 +514,13 @@ class Collector:
         mode = "market-search"
         run_id = run_id_for(mode)
         run_dir = self._run_dir(run_id)
-        batch_limit = self.settings.market_search_batch_limit if limit is None else max(1, int(limit))
-        owners = self.registry.client_products_for_market_search(batch_limit, allowed_articles=articles)
+        # market_search_batch_limit is a transport/concurrency batch size, not
+        # a total full-sync cap.  An explicit CLI limit remains a total cap.
+        batch_size = self.settings.market_search_batch_limit
+        total_limit = max(1, int(limit)) if limit is not None else 0
+        owners = self.registry.client_products_for_market_search(
+            total_limit, allowed_articles=articles
+        )
         self.registry.begin_run(run_id, mode, self.settings.start_url)
         browser = self.ensure_browser()
         started = time.monotonic()
@@ -531,6 +538,13 @@ class Collector:
         print(f"Товаров клиента в очереди: {len(owners)}")
         try:
             for owner_index, owner in enumerate(owners, start=1):
+                if (owner_index - 1) % batch_size == 0:
+                    batch_number = ((owner_index - 1) // batch_size) + 1
+                    remaining = len(owners) - owner_index + 1
+                    print(
+                        f"[MARKET BATCH {batch_number}] "
+                        f"processed={owner_index - 1} remaining={remaining}"
+                    )
                 owner_article = str(owner.get("article") or "")
                 queries = build_search_queries(owner)
                 print(f"\n[ПОЗИЦИЯ {owner_index}/{len(owners)}] {owner_article} — {owner.get('title','')}")

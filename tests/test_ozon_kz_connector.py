@@ -113,7 +113,7 @@ class OzonKzConnectorTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_collector_result_fails_the_kz_cli(self) -> None:
+    def test_partial_collector_result_can_continue_safe_kz_stages(self) -> None:
         self.assertEqual(
             "PASSED",
             require_success(
@@ -122,8 +122,10 @@ class OzonKzConnectorTests(unittest.TestCase):
             )["status"],
         )
 
-        with self.assertRaisesRegex(RuntimeError, "PARTIAL"):
-            require_success({"status": "PARTIAL"}, "refresh")
+        self.assertEqual(
+            "PARTIAL",
+            require_success({"status": "PARTIAL"}, "refresh")["status"],
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,

@@ -35,7 +35,7 @@ Spyon — многопользовательская SaaS-панель для п
 
 Settings всегда показывает полный реестр этих шести площадок, включая неподключённые, pending и rejected записи; подключённые продавцы отображаются отдельно. Замена и удаление источника выполняются только через application modal: замена сначала проходит серверную проверку, удаление требует текущий пароль и сохраняет audit/history.
 
-Список товаров по умолчанию открывает scope `risks`: `EXACT_BELOW`, `EXACT_ABOVE`, `EXACT_HIGHEST`, `EXACT_TIED_HIGHEST` и `DATA_ERROR` считаются рисками. Opportunity — только доказанная безопасная позиция (`EXACT_LOWEST`, либо `EXACT_TIED_LOWEST` с положительным headroom).
+Список товаров по умолчанию открывает scope `all` и PostgreSQL read-model с `COUNT`, `WHERE`, `ORDER BY`, `LIMIT/OFFSET`; он не материализует весь каталог для обычной страницы. Порядок `all`: risks (`EXACT_HIGHEST`, `EXACT_TIED_HIGHEST`, `EXACT_ABOVE`, `EXACT_BELOW`, `DATA_ERROR`), затем potential с положительным safe headroom, normal, comparable и review. Opportunity — только `EXACT_LOWEST` или `EXACT_TIED_LOWEST` с положительным potential; `EXACT_BELOW`, comparable и review-коды не считаются opportunity.
 
 Основной процесс — Flask-приложение под Waitress. При импорте `app.py` создаются сервисы аутентификации, компаний, подписок, каталога, задач и уведомлений, проверяется выбранное хранилище и, если не установлен `ITP_DISABLE_SCHEDULER=1`, запускается поток планировщика. Долгие операции выполняются отдельными Python-процессами через `TaskManager`; их состояние и хвосты логов отображаются в API/UI. В production Waitress слушает только `127.0.0.1`, а внешний HTTPS завершает Caddy.
 
