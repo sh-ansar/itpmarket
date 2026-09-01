@@ -603,6 +603,13 @@
               >
                 Открыть
               </a>
+              <button
+                type="button"
+                class="secondary"
+                data-legal-acceptances="${Number(item.id)}"
+              >
+                Согласия
+              </button>
             </div>`;
 
         return `<tr>
@@ -648,6 +655,48 @@
         </tr>`;
       }).join('')
       :'<tr><td colspan="7" class="loading">Версий пока нет.</td></tr>';
+  }
+
+  function closeLegalAcceptances(){
+    const modal=$('#legalAcceptanceModal');
+
+    if(modal){
+      modal.hidden=true;
+    }
+  }
+
+  function shortHash(value){
+    const hash=String(value||'');
+    return hash.length>16
+      ?`${hash.slice(0,12)}…${hash.slice(-4)}`
+      :hash||'—';
+  }
+
+  function renderLegalAcceptances(item, rows){
+    const modal=$('#legalAcceptanceModal');
+    const description=$('#legalAcceptanceModalDescription');
+    const host=$('#legalAcceptanceTable');
+
+    if(!modal||!host){
+      return;
+    }
+
+    if(description){
+      description.textContent=`${item.title||'Документ'} · v${item.version||'—'}`;
+    }
+
+    host.innerHTML=rows.length
+      ?rows.map(row=>`<tr>
+          <td><strong>${esc(row.display_name||'—')}</strong><small>${esc(row.email||'')}</small></td>
+          <td>${esc(row.tenant_name||'—')}</td>
+          <td>${esc(formatDate(row.accepted_at))}</td>
+          <td><strong>v${esc(row.document_version||'—')}</strong><small title="${esc(row.document_sha256||'')}">${esc(shortHash(row.document_sha256))}</small></td>
+          <td><strong>${esc(row.locale||'—')}</strong><small>${esc(row.source||'—')}</small></td>
+          <td>${esc(row.ip_address||'—')}</td>
+        </tr>`).join('')
+      :'<tr><td colspan="6" class="loading">Согласий для этой версии пока нет.</td></tr>';
+
+    modal.hidden=false;
   }
 
   async function load() {
@@ -730,6 +779,33 @@
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
     const publishLegal=event.target.closest('[data-publish-legal]');
     const editLegal=event.target.closest('[data-edit-legal]');
+    const legalAcceptances=event.target.closest('[data-legal-acceptances]');
+
+    if(legalAcceptances){
+      event.preventDefault();
+
+      const item=(snapshot?.legal_documents||[]).find(
+        value=>Number(value.id)===Number(legalAcceptances.dataset.legalAcceptances)
+      );
+
+      if(!item){
+        return;
+      }
+
+      try{
+        legalAcceptances.disabled=true;
+        const data=await api(
+          `/api/platform/legal-documents/acceptances?version_id=${Number(item.id)}`
+        );
+        renderLegalAcceptances(item, data.items||[]);
+      }catch(error){
+        toast(error.message,true);
+      }finally{
+        legalAcceptances.disabled=false;
+      }
+
+      return;
+    }
 
     if(editLegal){
       event.preventDefault();
@@ -959,6 +1035,19 @@
     resetLegalDraftForm
   );
 
+  document.querySelectorAll('[data-legal-acceptance-close]').forEach(
+    button=>button.addEventListener('click', closeLegalAcceptances)
+  );
+
+  $('#legalAcceptanceModal')?.addEventListener(
+    'click',
+    event=>{
+      if(event.target===event.currentTarget){
+        closeLegalAcceptances();
+      }
+    }
+  );
+
   $('#billingDecisionForm')?.addEventListener(
     'submit',
     async event=>{
@@ -1078,9 +1167,10 @@
     event=>{
       if(
         event.key==='Escape'
-        && !$('#billingDecisionModal')?.hidden
+        && (!$('#billingDecisionModal')?.hidden||!$('#legalAcceptanceModal')?.hidden)
       ){
         closeBillingDecision();
+        closeLegalAcceptances();
       }
     }
   );

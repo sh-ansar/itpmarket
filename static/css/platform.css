@@ -707,6 +707,57 @@ html[data-theme="dark"] .billing-supplier-status.incomplete{background:rgba(216,
   white-space:nowrap;
 }
 
+.legal-acceptance-modal{
+  position:fixed;
+  z-index:30;
+  inset:0;
+  display:grid;
+  place-items:center;
+  padding:20px;
+  background:rgba(7,31,54,.55);
+}
+
+.legal-acceptance-modal[hidden]{
+  display:none;
+}
+
+.legal-acceptance-dialog{
+  width:min(1180px,100%);
+  max-height:calc(100vh - 40px);
+  overflow:auto;
+  padding:20px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:var(--panel,var(--surface));
+  box-shadow:0 24px 70px rgba(7,31,54,.28);
+}
+
+.legal-acceptance-head{
+  gap:16px;
+}
+
+.legal-acceptance-head>button{
+  flex:none;
+}
+
+.legal-acceptance-table{
+  min-width:900px;
+}
+
+.legal-acceptance-table td{
+  overflow-wrap:anywhere;
+}
+
+.legal-acceptance-table td>strong,
+.legal-acceptance-table td>small{
+  display:block;
+}
+
+.legal-acceptance-table td>small{
+  margin-top:3px;
+  color:var(--muted);
+}
+
 .billing-history-review{
   min-width:170px;
 }
@@ -733,6 +784,10 @@ html[data-theme="dark"] .legal-version-note{
   color:#a9c4d0;
 }
 
+html[data-theme="dark"] .legal-acceptance-dialog{
+  background:#102630;
+}
+
 @media(max-width:1050px){
   .legal-editor-grid{
     grid-template-columns:repeat(2,minmax(0,1fr));
@@ -753,6 +808,24 @@ html[data-theme="dark"] .legal-version-note{
   }
 
   .legal-editor-actions button{
+    width:100%;
+  }
+
+  .legal-acceptance-modal{
+    padding:10px;
+  }
+
+  .legal-acceptance-dialog{
+    max-height:calc(100vh - 20px);
+    padding:14px;
+    border-radius:12px;
+  }
+
+  .legal-acceptance-head{
+    display:grid;
+  }
+
+  .legal-acceptance-head>button{
     width:100%;
   }
 }

@@ -103,6 +103,42 @@ class LegalUIContractTests(
             source,
         )
 
+    def test_platform_legal_audit_uses_existing_endpoint(
+        self,
+    ) -> None:
+        template = (
+            ROOT
+            / "templates"
+            / "platform.html"
+        ).read_text(
+            encoding="utf-8"
+        )
+        source = (
+            ROOT
+            / "static"
+            / "js"
+            / "platform.js"
+        ).read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            'id="legalAcceptanceModal"',
+            template,
+        )
+        self.assertIn(
+            "data-legal-acceptances",
+            source,
+        )
+        self.assertIn(
+            "/api/platform/legal-documents/acceptances?version_id=",
+            source,
+        )
+        self.assertNotIn(
+            "row.acceptance_text",
+            source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

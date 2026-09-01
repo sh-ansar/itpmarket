@@ -220,6 +220,47 @@
       </table>
     </div>
 
+    <div
+      class="legal-acceptance-modal"
+      id="legalAcceptanceModal"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="legalAcceptanceModalTitle"
+    >
+      <div class="legal-acceptance-dialog">
+        <div class="panel-head legal-acceptance-head">
+          <div>
+            <span>LEGAL AUDIT</span>
+            <h2 id="legalAcceptanceModalTitle">Согласия</h2>
+            <p id="legalAcceptanceModalDescription"></p>
+          </div>
+          <button
+            type="button"
+            class="secondary"
+            data-legal-acceptance-close
+          >
+            Закрыть
+          </button>
+        </div>
+        <div class="company-table-wrap legal-acceptance-table-wrap">
+          <table class="company-table legal-acceptance-table">
+            <thead>
+              <tr>
+                <th>Пользователь</th>
+                <th>Компания</th>
+                <th>Принято</th>
+                <th>Версия / hash</th>
+                <th>Язык / источник</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody id="legalAcceptanceTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </section>
   {% elif platform_section == 'payments' %}
 

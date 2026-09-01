@@ -426,6 +426,121 @@ class LegalDocumentLifecycleTests(
             history[0]["version"],
         )
 
+    def test_acceptance_applies_to_all_user_tenants_without_duplicate(
+        self,
+    ) -> None:
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        second_tenant_id = int(
+            conn.execute(
+                """INSERT INTO tenants(
+                     name,
+                     slug,
+                     registration_number,
+                     status,
+                     plan_code,
+                     contact_email,
+                     contact_phone,
+                     created_at,
+                     updated_at,
+                     approved_at
+                   ) VALUES(
+                     ?,?,?,?,?,?,?,?,?,?
+                   )""",
+                (
+                    "Second Legal Tenant",
+                    "second-legal-tenant",
+                    "LEGAL-2",
+                    "approved",
+                    "demo",
+                    "second@example.com",
+                    "+77000000001",
+                    "2026-09-01T10:00:00+00:00",
+                    "2026-09-01T10:00:00+00:00",
+                    "2026-09-01T10:00:00+00:00",
+                ),
+            ).lastrowid
+        )
+
+        conn.execute(
+            """INSERT INTO tenant_users(
+                 tenant_id,
+                 user_id,
+                 tenant_role,
+                 is_primary,
+                 is_active,
+                 created_at
+               ) VALUES(
+                 ?,?,'admin',0,1,?
+               )""",
+            (
+                second_tenant_id,
+                self.user_id,
+                "2026-09-01T10:00:00+00:00",
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+
+        draft = self.draft(
+            "1.1"
+        )
+        published = self.service.publish(
+            int(draft["id"]),
+            self.user_id,
+        )
+
+        self.service.accept(
+            self.user_id,
+            self.tenant_id,
+            "offer",
+            ip_address="127.0.0.1",
+            user_agent="unit-test",
+            locale="ru",
+        )
+
+        self.assertEqual(
+            [],
+            self.service.required_for_user(
+                self.user_id,
+                second_tenant_id,
+            ),
+        )
+
+        self.service.accept(
+            self.user_id,
+            second_tenant_id,
+            "offer",
+            ip_address="127.0.0.1",
+            user_agent="unit-test",
+            locale="ru",
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+        rows = conn.execute(
+            """SELECT
+                 tenant_id,
+                 document_version,
+                 document_sha256
+               FROM legal_acceptances
+               WHERE
+                 user_id=?
+                 AND document_type='offer'
+                 AND document_version='1.1'""",
+            (self.user_id,),
+        ).fetchall()
+        conn.close()
+
+        self.assertEqual(
+            [(self.tenant_id, "1.1", published["sha256"])],
+            rows,
+        )
+
     def test_future_version_does_not_become_current_early(
         self,
     ) -> None:

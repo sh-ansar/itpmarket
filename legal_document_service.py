@@ -1212,7 +1212,6 @@ class LegalDocumentService:
                        FROM legal_acceptances
                        WHERE
                          user_id=?
-                         AND tenant_id=?
                          AND document_type=?
                          AND document_version=?
                          AND document_sha256=?
@@ -1220,9 +1219,6 @@ class LegalDocumentService:
                     (
                         int(
                             user_id
-                        ),
-                        int(
-                            tenant_id
                         ),
                         document["type"],
                         document["version"],
