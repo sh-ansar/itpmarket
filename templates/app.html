@@ -248,7 +248,7 @@
             <div class="card-title"><span><img src="{{ url_for('static', filename='icons/check.svg') }}" alt=""></span><div><h3>Пакет и лимиты</h3><p>Срок, доступные функции, дневные запуски и позиции по каждой площадке.</p></div></div>
             <div id="subscriptionSettings"><div class="loader">Загрузка пакета…</div></div>
           </article>
-          {% if current_user.permissions.manage_marketplaces %}
+          {% if current_user.permissions.view_settings %}
           <div class="marketplace-settings-section">
             <div class="settings-section-head"><div><h3>Площадки компании</h3><p>Вставьте ссылку на магазин, проверьте найденного продавца и подтвердите подключение.</p></div></div>
             <div id="tenantMarketplaceCards" class="tenant-marketplace-cards"><div class="loader">Загрузка площадок…</div></div>

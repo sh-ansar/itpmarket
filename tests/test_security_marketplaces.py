@@ -264,6 +264,31 @@ class SecurityMarketplaceTests(unittest.TestCase):
         self.assertNotIn("password_hash", bootstrap_user)
         self.assertNotIn("recovery_hash", bootstrap_user)
 
+    def test_settings_can_list_all_marketplaces_without_granting_management(self) -> None:
+        response = self.client.get("/api/tenant?include_unavailable=1")
+        self.assertEqual(200, response.status_code)
+        access = response.get_json()["marketplace_access"]
+        self.assertEqual(6, len(access))
+        self.assertEqual(
+            {"halyk_market"},
+            {item["code"] for item in access if item["is_allowed"]},
+        )
+        page = self.client.get("/app")
+        self.assertIn('id="tenantMarketplaceCards"', page.get_data(as_text=True))
+
+    def test_marketplace_source_mutations_require_manage_permission(self) -> None:
+        self.auth.update_user(
+            int(self.operator["id"]),
+            {"permissions": {"view_settings": True, "manage_marketplaces": False}},
+            int(self.admin["id"]),
+        )
+        response = self.client.post(
+            "/api/tenant/marketplaces/kaspi/1/replace",
+            json={"source": "https://kaspi.kz/shop/m/new-source/products"},
+            headers={"X-CSRF-Token": "csrf-test"},
+        )
+        self.assertEqual(403, response.status_code)
+
     def test_reports_and_schedules_are_filtered_by_marketplace(self) -> None:
         conn = sqlite3.connect(self.db_path)
         try:

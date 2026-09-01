@@ -29,14 +29,14 @@ def _canonical_url(value: str, marketplace_code: str) -> str:
     host = str(parsed.hostname or "").casefold()
     if code not in _HOSTS or parsed.scheme != "https" or host not in _HOSTS[code]:
         raise OzonSourceVerificationError("Ozon source belongs to a different marketplace host.")
-    match = re.fullmatch(r"/seller/([^/?#]+)/?", parsed.path, re.IGNORECASE)
+    match = re.fullmatch(r"/(?:seller|продавец)/([^/?#]+)/?", parsed.path, re.IGNORECASE)
     if not match:
         raise OzonSourceVerificationError("The final Ozon URL is not a seller storefront.")
     seller_id = match.group(1).strip()
     if not seller_id:
         raise OzonSourceVerificationError("The Ozon seller identifier is empty.")
     canonical_host = "www.ozon.ru" if code == "ozon" else "ozon.kz"
-    return urlunparse(("https", canonical_host, f"/seller/{seller_id}/", "", "", ""))
+    return urlunparse(("https", canonical_host, f"/продавец/{seller_id}/", "", "", ""))
 
 
 def _canonical_link(page_html: str, final_url: str) -> str:
@@ -71,7 +71,7 @@ def resolve_ozon_snapshot(
     canonical = _canonical_url(canonical_raw, code)
     if canonical != final:
         raise OzonSourceVerificationError("Ozon final URL and canonical seller identity disagree.")
-    seller_id = re.search(r"/seller/([^/]+)/", canonical).group(1)  # validated above
+    seller_id = re.search(r"/(?:seller|продавец)/([^/]+)/", canonical).group(1)  # validated above
     evidence = f"{page_title}\n{page_text}\n{page_html}".casefold()
     if seller_id.casefold() not in evidence:
         raise OzonSourceVerificationError("Ozon page has no seller-specific identity evidence.")

@@ -33,10 +33,10 @@ def seller_root_url(value: str) -> str:
     host = parsed.netloc.lower().split(":")[0]
     if host not in {"ozon.ru", "www.ozon.ru"}:
         return ""
-    match = re.search(r"/seller/([^/?#]+)/?", parsed.path, re.IGNORECASE)
+    match = re.search(r"/(?:seller|продавец)/([^/?#]+)/?", parsed.path, re.IGNORECASE)
     if not match:
         return ""
-    return urlunparse(("https", "www.ozon.ru", f"/seller/{match.group(1)}/", "", "", ""))
+    return urlunparse(("https", "www.ozon.ru", f"/продавец/{match.group(1)}/", "", "", ""))
 
 
 def _pair(value: Any, default: tuple[float, float]) -> tuple[float, float]:
@@ -107,7 +107,10 @@ def load_settings() -> Settings:
 
     # Storefront roots are processed first, so saved seller-category links do not
     # accidentally limit discovery to only one storefront section.
-    sellers = [url for url in start_urls if "/seller/" in url.lower()]
+    sellers = [
+        url for url in start_urls
+        if re.search(r"/(?:seller|продавец)/", url, re.IGNORECASE)
+    ]
     others = [url for url in start_urls if url not in sellers]
     ordered_urls: list[str] = []
     for url in sellers:

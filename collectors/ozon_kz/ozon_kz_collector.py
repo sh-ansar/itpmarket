@@ -36,15 +36,15 @@ def seller_root_url(value: str) -> str:
     if host not in {"ozon.kz", "www.ozon.kz"}:
         return ""
     parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) < 2 or parts[0].casefold() != "seller":
+    if len(parts) < 2 or parts[0].casefold() not in {"seller", "продавец"}:
         return ""
-    return urlunparse(("https", "ozon.kz", f"/seller/{parts[1]}/", "", "", ""))
+    return urlunparse(("https", "ozon.kz", f"/продавец/{parts[1]}/", "", "", ""))
 
 
 def build_settings(args: argparse.Namespace) -> Settings:
     source_url = seller_root_url(args.source_url)
     if not source_url:
-        raise ValueError("Укажите ссылку продавца вида https://ozon.kz/seller/name/.")
+        raise ValueError("Укажите ссылку продавца вида https://ozon.kz/продавец/name/.")
     base = load_settings()
     runtime_dir_value = getattr(args, "runtime_dir", "")
     profile_path_value = getattr(args, "profile_path", "")

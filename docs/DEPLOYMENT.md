@@ -156,7 +156,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 It creates only `\Spyon\Spyon Ozon Browsers` with `InteractiveToken` / “Run only when user is logged on”, launches `open_ozon_browsers.py` at logon, and stores no password. It neither changes nor restarts `Spyon Production`. Do not run this registration from a developer workstation or a Session-0 service account.
 
-Ozon source approval attaches to that existing interactive browser only. A parsed URL is not enough: the runtime must verify the final same-marketplace seller URL, canonical link and seller identity. Browser unavailability or a challenge leaves the source pending and deployment itself must not start Chrome from Session 0.
+Ozon source approval attaches to that existing interactive browser only. A parsed URL is not enough: the runtime must verify the final same-marketplace seller URL, canonical link and seller identity. Both legacy `/seller/<slug>/` and current `/продавец/<slug>/` storefront paths are accepted; new connections normalize to the current path. Browser unavailability, a challenge, or `NO_CATALOG` from every seller source must leave the operation failed rather than successful, and deployment itself must not start Chrome from Session 0.
 
 ## Post-deploy verification
 
@@ -226,7 +226,10 @@ Register `\Spyon\Spyon Ozon Browsers` from the interactive RDP account with
 opens each active Ozon seller's resolved profile after logon; it must not run as
 SYSTEM or in a background session.
 
-Marketplace source replacements and seller data cleanup are application-level
-admin workflows. Deployment must not delete marketplace data manually: a
-replacement is verified and approved before the old seller is retired, and a
-purge remains seller-scoped with preview, audit record and password confirmation.
+Marketplace source replacement and deletion are application-level workflows.
+Deployment must not delete marketplace data manually. Replacement validates the
+new source before its atomic activation, moves only the old seller's schedules,
+marks the old record `replaced` and purges only its current materialized data.
+Delete source is seller-scoped, password-confirmed, disables only its schedules
+and credentials, and preserves run/audit history. Verify these outcomes through
+the application drawer after deployment rather than by editing production data.

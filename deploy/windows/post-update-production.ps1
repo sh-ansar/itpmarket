@@ -264,18 +264,17 @@ $ozonArguments = @(
     '-ExecutionPolicy',
     'Bypass',
     '-File',
-    ('"' + $ozonTaskHelper + '"'),
+    $ozonTaskHelper,
     '-RepoRoot',
-    ('"' + $RepoRoot + '"')
+    $RepoRoot
 )
 
-$ozonProcess = Start-Process `
-    -FilePath 'powershell.exe' `
-    -ArgumentList $ozonArguments `
-    -RedirectStandardOutput $ozonStdout `
-    -RedirectStandardError $ozonStderr `
-    -Wait `
-    -PassThru
+& powershell.exe `
+    @ozonArguments `
+    1>$ozonStdout `
+    2>$ozonStderr
+
+$ozonExitCode = $LASTEXITCODE
 
 foreach ($stream in @(
     $ozonStdout,
@@ -297,10 +296,10 @@ foreach ($stream in @(
     }
 }
 
-if ($ozonProcess.ExitCode -ne 0) {
+if ($ozonExitCode -ne 0) {
     throw (
         'Ozon browser task registration failed. exit=' +
-        $ozonProcess.ExitCode
+        $ozonExitCode
     )
 }
 

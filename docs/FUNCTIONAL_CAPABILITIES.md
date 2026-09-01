@@ -65,8 +65,8 @@ SQLite является локальным backend по умолчанию. Prod
 - Межплощадочный matching формирует предложения динамически: бренд + артикул производителя, затем строгий ключ характеристик, затем требующая проверки похожая модель того же бренда/типа/размера. Объединение выполняется только вручную и записывается в audit events. Подробности: [CATALOG_MATCHING_AND_INVENTORY_RU.md](CATALOG_MATCHING_AND_INVENTORY_RU.md).
 - Чтение tenant-каталога использует короткий двухсекундный in-process snapshot и single-flight только в пределах одинаковых tenant/marketplace scope. Это объединяет одновременные запросы списка, фильтров и сводки, не блокируя другие компании; после TTL данные снова читаются из PostgreSQL. Product drawer повторно использует уже проверенный tenant-каталог вместо второй полной выборки.
 - Операции включают сбор каталога, актуализацию собственных цен, получение точных предложений продавцов, поиск рыночных совпадений, повтор ошибок, полный sync, аудит каталога, экспорт и резервное копирование.
-- Для Ozon.ru есть отдельный реестр обнаружения, нормализация характеристик, оценка качества карточки, очередь повторов, история цен, market matching и HTML/табличный экспорт.
-- Фоновое задание считается успешным только при нулевом exit code. Состояния `PARTIAL`, `BLOCKED`, `FAILED` и `INTERRUPTED` теперь завершают Ozon-задачу ошибкой; частичные ошибки точных предложений Kaspi, Halyk и Forte также возвращают ненулевой код.
+- Для Ozon.ru есть отдельный реестр обнаружения, нормализация характеристик, оценка качества карточки, очередь повторов, история цен, market matching и HTML/табличный экспорт. URL витрины продавца принимается как в прежнем виде `/seller/<slug>/`, так и в актуальном `/продавец/<slug>/`; новые ссылки нормализуются к актуальному пути.
+- Фоновое задание считается успешным только при нулевом exit code. Состояния `PARTIAL`, `BLOCKED`, `FAILED` и `INTERRUPTED`, включая `NO_CATALOG` от всех seller-source, завершают Ozon-задачу ошибкой; успешно собранные до частичного сбоя данные сохраняются. Частичные ошибки точных предложений Kaspi, Halyk и Forte также возвращают ненулевой код.
 - Планировщик запускает разрешённые операции, повторно проверяет роль, tenant, доступ к площадке и feature `schedules`, резервирует лимит подписки и записывает результат исполнения.
 - Уведомления создаются для запуска, завершения, ошибки/остановки операций и для приближающегося окончания подписки; доступны непрочитанные, чтение одного и чтение всех. Те же персональные события могут доставляться Telegram-ботом после входа по email/паролю в личном чате. Сообщения с логином и паролем сразу удаляются, пароль не сохраняется; действуют ограничение попыток, пауза, повтор доставки и ручная отвязка.
 - Подтверждение оплаты создаёт idempotent billing-уведомление для активных пользователей компании с фактической датой окончания подписки. При отсутствии активной подписки app shell показывает общий переход к выбору тарифа или оплате; доступ к настройкам тарифа сохраняется.
@@ -132,11 +132,15 @@ Production schema changes are tracked by checksum and safe additive migrations
 
 ## Marketplace source review and billing history
 
-Marketplace source replacement is staged as a pending seller record. The live
-seller remains active until the replacement passes the normal review (including
-Ozon interactive canonical verification); it is then marked `replaced` rather
-than deleted. Platform administrators can preview and, after current-password
-confirmation, purge only the selected seller's collected marketplace rows.
+Settings always show every marketplace from the registry to every user with
+`view_settings`; onboarding/package selection is not a UI whitelist. Only
+`manage_marketplaces` may submit, replace or delete a source. A replacement
+validates the URL (and Ozon interactive canonical evidence) before one atomic
+transaction activates the new seller, marks the old seller `replaced`, moves
+its schedules and removes only its current materialized data. A deletion needs
+the current password, disables only that seller's schedules, removes its
+credentials/current data and keeps audit and run history; another active seller
+for the same marketplace becomes the integration fallback when present.
 
 The platform payment drawer exposes bounded invoice and payment-document
 metadata for a company. It never returns document paths or binary content;

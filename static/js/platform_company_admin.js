@@ -168,7 +168,7 @@
                     data-tenant-id="${Number(currentTenantId)}"
                     data-marketplace-code="${esc(code)}"
                     data-seller-id="${id}">
-              Очистить данные
+              Удалить источник
             </button>
           </div>`
         :''

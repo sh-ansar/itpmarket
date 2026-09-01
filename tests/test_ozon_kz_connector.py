@@ -42,7 +42,7 @@ class OzonKzConnectorTests(unittest.TestCase):
             registry = Registry(Path(folder) / "ozon_kz_registry.db")
             try:
                 stamp = "2026-08-19T14:00:00+05:00"
-                source_url = "https://ozon.kz/seller/alfa-tires-3381444/"
+                source_url = "https://ozon.kz/продавец/alfa-tires-3381444/"
                 registry.upsert_catalog_product(
                     {
                         "article": "kz-1",
@@ -113,7 +113,7 @@ class OzonKzConnectorTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_collector_result_is_recoverable_for_kz_cli(self) -> None:
+    def test_partial_collector_result_fails_the_kz_cli(self) -> None:
         self.assertEqual(
             "PASSED",
             require_success(
@@ -122,13 +122,8 @@ class OzonKzConnectorTests(unittest.TestCase):
             )["status"],
         )
 
-        self.assertEqual(
-            "PARTIAL",
-            require_success(
-                {"status": "PARTIAL"},
-                "refresh",
-            )["status"],
-        )
+        with self.assertRaisesRegex(RuntimeError, "PARTIAL"):
+            require_success({"status": "PARTIAL"}, "refresh")
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -188,7 +183,7 @@ class OzonKzConnectorTests(unittest.TestCase):
         ))
         self.assertLessEqual(settings.catalog_wait_seconds, 30)
         self.assertLessEqual(settings.page_reloads, 1)
-        self.assertEqual("https://ozon.kz/seller/ridial/", settings.start_url)
+        self.assertEqual("https://ozon.kz/продавец/ridial/", settings.start_url)
 
     def test_source_boundary_accepts_kz_and_rejects_ru(self) -> None:
         self.assertEqual("https://ozon.kz/shop/", validate_source_url("https://ozon.kz/shop/"))

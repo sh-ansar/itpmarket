@@ -223,7 +223,11 @@ def canonical_source_url(value: Any) -> str:
 
 def source_type_for_url(value: Any) -> str:
     text = canonical_source_url(value).casefold()
-    return "CLIENT_CATALOG" if "/seller/" in text else "MARKET_SEARCH" if "/search/" in text else "MARKET_CATEGORY"
+    return (
+        "CLIENT_CATALOG"
+        if "/seller/" in text or "/продавец/" in text
+        else "MARKET_SEARCH" if "/search/" in text else "MARKET_CATEGORY"
+    )
 
 
 def stable_hash(payload: Any) -> str:

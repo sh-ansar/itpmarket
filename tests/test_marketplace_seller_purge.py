@@ -59,6 +59,66 @@ class MarketplaceSellerPurgeTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_remove_disables_only_target_schedules_and_keeps_history(self) -> None:
+        stamp = now_iso()
+        conn = self.saas._connect()
+        try:
+            conn.execute(
+                """UPDATE tenant_marketplace_sellers SET credential_ref=? WHERE id=?""",
+                ("seller-a-token", self.seller_a),
+            )
+            conn.execute(
+                """INSERT INTO seller_encrypted_credentials(credential_ref,tenant_id,tenant_seller_id,marketplace_code,credential_name,ciphertext,key_id,created_by,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                ("seller-a-token", self.tenant_id, self.seller_a, "kaspi", "token", "x", "k", int(self.admin["id"]), stamp, stamp),
+            )
+            conn.execute(
+                """INSERT INTO encrypted_credentials(credential_ref,tenant_id,marketplace_code,credential_name,ciphertext,key_id,created_by,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                ("seller-a-token", self.tenant_id, "kaspi", "legacy-token", "x", "k", int(self.admin["id"]), stamp, stamp),
+            )
+            schedule_a = conn.execute(
+                """INSERT INTO operation_schedules(tenant_id,name,action,platform,tenant_seller_id,created_by,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (self.tenant_id, "A", "kaspi_full_sync", "kaspi", self.seller_a, int(self.admin["id"]), stamp, stamp),
+            ).lastrowid
+            schedule_b = conn.execute(
+                """INSERT INTO operation_schedules(tenant_id,name,action,platform,tenant_seller_id,created_by,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (self.tenant_id, "B", "kaspi_full_sync", "kaspi", self.seller_b, int(self.admin["id"]), stamp, stamp),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO schedule_runs(schedule_id,tenant_id,tenant_seller_id,status,started_at)
+                   VALUES(?,?,?,?,?)""",
+                (schedule_a, self.tenant_id, self.seller_a, "success", stamp),
+            )
+            conn.execute(
+                """INSERT INTO tenant_catalog_import_runs(tenant_id,marketplace_code,tenant_seller_id,status,started_at)
+                   VALUES(?,?,?,?,?)""",
+                (self.tenant_id, "kaspi", self.seller_a, "success", stamp),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = self.saas.remove_marketplace_seller(
+            self.tenant_id, "kaspi", self.seller_a, int(self.admin["id"]),
+        )
+        self.assertEqual(self.seller_b, result["fallback_seller_id"])
+        conn = self.saas._connect()
+        try:
+            seller = conn.execute("SELECT status,approval_status,credential_ref FROM tenant_marketplace_sellers WHERE id=?", (self.seller_a,)).fetchone()
+            self.assertEqual(("removed", "removed", None), (seller["status"], seller["approval_status"], seller["credential_ref"]))
+            schedules = conn.execute("SELECT tenant_seller_id,is_enabled FROM operation_schedules ORDER BY id").fetchall()
+            self.assertEqual([(self.seller_a, 0), (self.seller_b, 1)], [(row["tenant_seller_id"], row["is_enabled"]) for row in schedules])
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM seller_encrypted_credentials WHERE tenant_seller_id=?", (self.seller_a,)).fetchone()[0])
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM encrypted_credentials WHERE credential_ref='seller-a-token'").fetchone()[0])
+            self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM schedule_runs WHERE tenant_seller_id=?", (self.seller_a,)).fetchone()[0])
+            self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM tenant_catalog_import_runs WHERE tenant_seller_id=?", (self.seller_a,)).fetchone()[0])
+            self.assertEqual("tenant_marketplace_seller_removed", conn.execute("SELECT action FROM platform_audit_log ORDER BY id DESC LIMIT 1").fetchone()["action"])
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

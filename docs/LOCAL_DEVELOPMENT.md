@@ -123,13 +123,17 @@ Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru ис�
 
 В production `ITP_ENV=production` по умолчанию запрещает автоматическое создание Chrome из процесса сборщика: он подключается только к уже открытому browser того же seller. Откройте все активные seller-scoped браузеры в интерактивной сессии командой `\.venv\Scripts\python.exe .\scripts\open_ozon_browsers.py`; `--dry-run` безопасно покажет план. Скрипт никогда не использует `--headless`, не завершает Chrome и переиспользует только порт, сохранённый в profile этого seller.
 
-Ozon URL проходит два разных этапа: `parsed` означает только корректный синтаксис, а `verified` появляется лишь после совпадающих evidence из interactive browser (final seller URL, canonical link, seller identity и name). До этого Ozon source нельзя approve. Для Ozon.kz не используйте URL `ozon.ru` и наоборот; при challenge/нет interactive runtime фиксируйте `BLOCKED`, не подменяйте проверку HTTP 200 или product cards.
+Ozon URL проходит два разных этапа: `parsed` означает только корректный синтаксис, а `verified` появляется лишь после совпадающих evidence из interactive browser (final seller URL, canonical link, seller identity и name). До этого Ozon source нельзя approve. Поддерживаются прежний `/seller/<slug>/` и актуальный `/продавец/<slug>/`; в новых настройках используйте второй вариант. Для Ozon.kz не используйте URL `ozon.ru` и наоборот; при challenge, `NO_CATALOG` или отсутствии interactive runtime фиксируйте ошибку, не подменяйте проверку HTTP 200 или product cards.
 
-For marketplace corrections, use the platform company's source drawer. A
-replacement creates a pending candidate; approval verifies it first and only
-then retires the old seller record. Use the seller-specific purge preview before
-any cleanup. The actual purge needs the current superadmin password and affects
-only the selected tenant, marketplace and seller identifier.
+Marketplace settings display the complete registry even for a read-only user;
+the permission to view settings is separate from `manage_marketplaces`. A
+source replacement is immediate only after parsing and required Ozon browser
+verification have completed: the new source is active, schedules move to it,
+and the prior seller is marked `replaced` in one transaction. Delete source
+uses a seller-scoped preview and current-password confirmation; it removes only
+current collected data and credentials, disables that seller's schedules, and
+retains run/audit history. Never clean marketplace tables manually to correct a
+source.
 
 ## Частые проблемы
 

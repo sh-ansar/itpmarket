@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +103,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_result_completes_with_warning_while_blocked_fails(self) -> None:
+    def test_partial_result_fails_the_job_while_retaining_its_warning_reason(self) -> None:
         self.assertEqual(
             "PARTIAL",
             combined_status(
@@ -128,7 +128,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
             result_exit_code({"status": "READY"}),
         )
         self.assertEqual(
-            0,
+            2,
             result_exit_code({"status": "PARTIAL"}),
         )
         self.assertEqual(
@@ -146,7 +146,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
 
         self.assertEqual(
             {
-                "ok": True,
+                "ok": False,
                 "reason": "partial_success",
             },
             partial,
@@ -198,6 +198,39 @@ class OzonRuntimeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(result["prices"])
         self.assertIsNotNone(result["market"])
+
+    def test_empty_failed_seller_source_is_not_reported_as_partial_success(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_empty_source_") as folder:
+            runtime = Path(folder)
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                start_urls=("https://www.ozon.ru/продавец/alfa-tires-3381444/",),
+                start_url="https://www.ozon.ru/продавец/alfa-tires-3381444/",
+                catalog_product_limit=0,
+                catalog_max_pages=1,
+                catalog_wait_seconds=1,
+                page_reloads=0,
+                page_delay_seconds=(0, 0),
+                runs_dir=runtime / "runs",
+                reports_dir=runtime / "reports",
+                exports_dir=runtime / "exports",
+            )
+            collector.registry = MagicMock()
+            browser = MagicMock()
+            browser.load_catalog.return_value = {
+                "ok": False, "status": "NO_CATALOG", "events": [],
+            }
+            with patch.object(collector, "ensure_browser", return_value=browser), patch.object(
+                collector, "generate_outputs"
+            ):
+                result = collector.discover()
+
+        self.assertEqual("FAILED", result["status"])
+        self.assertEqual(2, result_exit_code(result))
+        self.assertEqual(
+            {"ok": False, "reason": "collector_failed"},
+            collector_structured_result(result),
+        )
 
     def test_structured_challenge_result_is_user_safe(self) -> None:
         value = structured_result(

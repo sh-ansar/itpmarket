@@ -87,10 +87,16 @@ def result_exit_code(result: dict[str, Any] | None) -> int:
     if not isinstance(result, dict):
         return 0
     status = str(result.get("status") or "PASSED").upper()
-    # PARTIAL means the collector completed its pass and persisted every
-    # successful item. Failed items remain eligible for a later retry.
-    # It is therefore recoverable and must not abort full-sync/materialization.
-    return 0 if status in {"OK", "PASSED", "READY", "PARTIAL"} else 2
+    # A partial run can preserve successful cards, but the process must still
+    # be non-zero so the task manager never reports it as a full success.
+    return 0 if status in {"OK", "PASSED", "READY"} else 2
+
+
+def has_hard_failure(result: dict[str, Any] | None) -> bool:
+    """Whether a stage cannot safely continue to the next one."""
+    return str((result or {}).get("status") or "PASSED").upper() in {
+        "BLOCKED", "FAILED", "INTERRUPTED",
+    }
 
 
 def structured_result(result: dict[str, Any] | None, error: Exception | None = None) -> dict[str, Any]:
@@ -285,6 +291,11 @@ class Collector:
                     "unique_products_added": len(seen) - source_seen_before,
                 })
             metrics["items_total"] = len(seen)
+            # A source that never produced a seller catalogue is not a
+            # recoverable per-card partial result.  Continuing would refresh
+            # an empty queue and make the job look successful in the UI.
+            if not seen and metrics["sources_completed"] == 0 and status == "PARTIAL":
+                status = "FAILED"
             summary = {
                 "run_id": run_id,
                 "mode": mode,
@@ -619,14 +630,14 @@ class Collector:
     def sync_catalog(self, limit: int | None = None) -> dict[str, Any]:
         discovery = self.discover()
 
-        if result_exit_code(discovery) != 0:
+        if has_hard_failure(discovery):
             discovery_status = str(
                 discovery.get("status") or "PARTIAL"
             ).upper()
 
             print(
-                "Discovery ???????? ???????????. "
-                "??????????? ? ?????????? ??? ?????????."
+                "Discovery не завершён. "
+                "Обогащение и актуализация не запускаются."
             )
 
             return {
@@ -644,8 +655,8 @@ class Collector:
 
         if not remaining:
             print(
-                "????? ??? ???????? ???????? ???. "
-                "????????? ???? ????????? ???????."
+                "Новых товаров для обогащения нет. "
+                "Актуализируем цены текущего каталога."
             )
 
             details = self.process(
@@ -670,7 +681,7 @@ class Collector:
     def full_sync(self, limit: int | None = None) -> dict[str, Any]:
         catalog = self.sync_catalog(limit)
 
-        if result_exit_code(catalog) != 0:
+        if has_hard_failure(catalog):
             return {
                 "status": str(
                     catalog.get("status") or "PARTIAL"
@@ -685,7 +696,7 @@ class Collector:
             limit,
         )
 
-        if result_exit_code(prices) != 0:
+        if has_hard_failure(prices):
             return {
                 "status": str(
                     prices.get("status") or "PARTIAL"
@@ -768,7 +779,7 @@ def marketplace_seller_identifiers(settings: Settings) -> tuple[str, ...]:
     values = {str(settings.expected_seller or "").strip().casefold()}
     parsed = urlparse(str(settings.start_url or ""))
     parts = [part.strip().casefold() for part in parsed.path.split("/") if part.strip()]
-    if len(parts) >= 2 and parts[0] == "seller":
+    if len(parts) >= 2 and parts[0] in {"seller", "продавец"}:
         slug = parts[1]
         values.add(slug)
         values.update(
@@ -808,10 +819,15 @@ def materialize_tenant_catalog(
         for identifier in identifiers:
             offer_conditions.append(
                 "(lower(o.seller_name)=? OR lower(o.seller_id)=? "
-                "OR lower(o.seller_url) LIKE ?)"
+                "OR lower(o.seller_url) LIKE ? OR lower(o.seller_url) LIKE ?)"
             )
             offer_params.extend(
-                (identifier, identifier, f"%/seller/{identifier}/%")
+                (
+                    identifier,
+                    identifier,
+                    f"%/seller/{identifier}/%",
+                    f"%/продавец/{identifier}/%",
+                )
             )
         offers: dict[str, dict[str, Any]] = {}
         if offer_conditions:
@@ -936,7 +952,7 @@ def main() -> int:
             print(json.dumps(collector.registry.counts(), ensure_ascii=False, indent=2))
         if (
             args.command not in {"open-browser", "stats"}
-            and result_exit_code(result) == 0
+            and not has_hard_failure(result)
         ):
             materialize_tenant_catalog(
                 settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon",

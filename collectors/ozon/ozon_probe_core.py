@@ -158,7 +158,11 @@ def _extract_tile_image(item: dict[str, Any]) -> str:
 
 def _seller_identifier_from_catalog_url(value: str) -> str:
     """Return a seller path token only for an actual seller storefront URL."""
-    match = re.search(r"/seller/([^/?#]+)", urlparse(str(value or "")).path, re.I)
+    match = re.search(
+        r"/(?:seller|продавец)/([^/?#]+)",
+        urlparse(str(value or "")).path,
+        re.I,
+    )
     return match.group(1).casefold() if match else ""
 
 

@@ -3960,21 +3960,10 @@ def api_users_recovery(user_id: int) -> Any:
 @permission_required("view_settings")
 def api_tenant_get() -> Any:
     user = current_user() or {}
-    include_unavailable = (
-        str(
-            request.args.get("include_unavailable")
-            or ""
-        ).strip().casefold()
-        in {"1", "true", "yes", "on"}
-        and has_permission(
-            user,
-            "manage_marketplaces",
-        )
-    )
-
     marketplace_access = SAAS.marketplace_access(
         int(user["tenant_id"]),
-        include_unavailable=include_unavailable,
+        # Settings is a registry catalogue, not an onboarding whitelist.
+        include_unavailable=True,
     )
     return json_ok(
         tenant=current_tenant(),
@@ -4079,16 +4068,64 @@ def api_tenant_marketplace_connect() -> Any:
             int(user["id"]),
             str(payload.get("marketplace_code") or ""),
         )
+        DATA.invalidate()
         return json_ok(
             result=result,
             marketplace_access=SAAS.marketplace_access(
-                int(user["tenant_id"]), include_unavailable=False
+                int(user["tenant_id"]), include_unavailable=True
             ),
         )
     except PermissionError as exc:
         return json_error(str(exc), 403)
     except ValueError as exc:
         return json_error(str(exc))
+
+
+@app.post("/api/tenant/marketplaces/<marketplace_code>/<int:tenant_seller_id>/replace")
+@permission_required("manage_marketplaces")
+def api_tenant_marketplace_replace(
+    marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    user = current_user() or {}
+    payload = json_payload()
+    try:
+        result = SAAS.replace_marketplace_source(
+            int(user["tenant_id"]), marketplace_code, tenant_seller_id,
+            str(payload.get("source") or payload.get("source_url") or ""), int(user["id"]),
+        )
+        DATA.invalidate()
+        return json_ok(
+            result=result,
+            marketplace_access=SAAS.marketplace_access(
+                int(user["tenant_id"]), include_unavailable=True,
+            ),
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/tenant/marketplaces/<marketplace_code>/<int:tenant_seller_id>/remove")
+@permission_required("manage_marketplaces")
+def api_tenant_marketplace_remove(
+    marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    user = current_user() or {}
+    password = str(json_payload().get("current_password") or "")
+    if not password or not AUTH.verify_password(int(user["id"]), password):
+        return json_error("Current password was not confirmed.", 403)
+    try:
+        result = SAAS.remove_marketplace_seller(
+            int(user["tenant_id"]), marketplace_code, tenant_seller_id, int(user["id"]),
+        )
+        DATA.invalidate()
+        return json_ok(
+            result=result,
+            marketplace_access=SAAS.marketplace_access(
+                int(user["tenant_id"]), include_unavailable=True,
+            ),
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 404)
 
 
 @app.get("/api/schedules")
@@ -5607,9 +5644,31 @@ def api_platform_marketplace_seller_purge(
     if not password or not AUTH.verify_password(int(user["id"]), password):
         return json_error("Current password was not confirmed.", 403)
     try:
-        return json_ok(result=SAAS.purge_marketplace_seller_data(
+        result = SAAS.purge_marketplace_seller_data(
             tenant_id, marketplace_code, tenant_seller_id, int(user["id"]),
-        ))
+        )
+        DATA.invalidate()
+        return json_ok(result=result)
+    except ValueError as exc:
+        return json_error(str(exc), 404)
+
+
+@app.post("/api/platform/tenants/<int:tenant_id>/marketplaces/<marketplace_code>/<int:tenant_seller_id>/remove")
+@platform_roles_required("superadmin")
+def api_platform_marketplace_seller_remove(
+    tenant_id: int, marketplace_code: str, tenant_seller_id: int,
+) -> Any:
+    payload = json_payload()
+    password = str(payload.pop("current_password", "") or "")
+    user = current_user() or {}
+    if not password or not AUTH.verify_password(int(user["id"]), password):
+        return json_error("Current password was not confirmed.", 403)
+    try:
+        result = SAAS.remove_marketplace_seller(
+            tenant_id, marketplace_code, tenant_seller_id, int(user["id"]),
+        )
+        DATA.invalidate()
+        return json_ok(result=result)
     except ValueError as exc:
         return json_error(str(exc), 404)
 
@@ -5621,11 +5680,12 @@ def api_platform_marketplace_seller_replace(
 ) -> Any:
     payload = json_payload()
     try:
-        staged = SAAS.stage_marketplace_source_replacement(
+        result = SAAS.replace_marketplace_source(
             tenant_id, marketplace_code, tenant_seller_id,
             str(payload.get("source_url") or ""), int((current_user() or {})["id"]),
         )
-        return json_ok(candidate=staged)
+        DATA.invalidate()
+        return json_ok(result=result)
     except ValueError as exc:
         return json_error(str(exc), 409)
 
@@ -5726,6 +5786,7 @@ def api_platform_tenant_marketplace_review(
             str(payload.get("review_note") or ""),
             int(payload.get("tenant_seller_id") or 0) or None,
         )
+        DATA.invalidate()
         return json_ok(integration=result)
     except ValueError as exc:
         return json_error(str(exc), 409)

@@ -86,7 +86,7 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         self.assertEqual(200, checked.status_code)
         self.assertEqual("ozon_kz", checked.get_json()["result"]["marketplace_code"])
         self.assertEqual(
-            "https://ozon.kz/seller/company-b-90210/",
+            "https://ozon.kz/продавец/company-b-90210/",
             checked.get_json()["result"]["seller_url"],
         )
         connected = self.client.post(
@@ -252,7 +252,7 @@ class PlatformCompanyAdminTests(unittest.TestCase):
             tenant["actual_address"],
         )
 
-    def test_company_sees_only_marketplaces_granted_by_superadmin(self) -> None:
+    def test_company_settings_always_list_the_marketplace_registry(self) -> None:
         self.login(int(self.root["id"]))
         response = self.client.put(
             f"/api/platform/tenants/{self.tenant_b}/marketplaces",
@@ -269,11 +269,11 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         tenant = self.client.get("/api/tenant")
         self.assertEqual(200, tenant.status_code)
         tenant_access = tenant.get_json()["marketplace_access"]
+        self.assertEqual(6, len(tenant_access))
         self.assertEqual(
             {"kaspi", "ozon"},
-            {item["code"] for item in tenant_access},
+            {item["code"] for item in tenant_access if item["is_allowed"]},
         )
-        self.assertTrue(all(item["is_allowed"] for item in tenant_access))
         self.assertFalse(any(item["is_connected"] for item in tenant_access))
         page = self.client.get("/app")
         self.assertEqual(200, page.status_code)
@@ -313,16 +313,7 @@ class PlatformCompanyAdminTests(unittest.TestCase):
             200,
             regular.status_code,
         )
-        self.assertEqual(
-            {"kaspi"},
-            {
-                item["code"]
-                for item
-                in regular.get_json()[
-                    "marketplace_access"
-                ]
-            },
-        )
+        self.assertEqual(6, len(regular.get_json()["marketplace_access"]))
 
         expanded = self.client.get(
             "/api/tenant"

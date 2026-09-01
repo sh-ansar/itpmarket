@@ -68,6 +68,24 @@ class MarketplaceSourceRuleTests(unittest.TestCase):
         self.assertEqual("ridial", ozon["seller_identifier"])
         self.assertEqual("url", ozon["input_type"])
 
+    def test_current_ozon_storefront_path_is_canonical_and_legacy_path_is_accepted(self) -> None:
+        for code, source, expected in (
+            (
+                "ozon",
+                "https://www.ozon.ru/продавец/alfa-tires-3381444/",
+                "https://www.ozon.ru/продавец/alfa-tires-3381444/",
+            ),
+            (
+                "ozon_kz",
+                "https://ozon.kz/seller/alfa-tires-3381444/",
+                "https://ozon.kz/продавец/alfa-tires-3381444/",
+            ),
+        ):
+            with self.subTest(code=code):
+                result = parse_marketplace_source(source, code)
+                self.assertEqual("alfa-tires-3381444", result["seller_identifier"])
+                self.assertEqual(expected, result["seller_url"])
+
     def test_product_page_fallback_and_cross_marketplace_rejection(self) -> None:
         product = parse_marketplace_source(
             "https://market.forte.kz/items/noutbuk-asus-rog-strix-g15-602890",
