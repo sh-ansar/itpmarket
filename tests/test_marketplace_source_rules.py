@@ -72,13 +72,13 @@ class MarketplaceSourceRuleTests(unittest.TestCase):
         for code, source, expected in (
             (
                 "ozon",
-                "https://www.ozon.ru/продавец/alfa-tires-3381444/",
-                "https://www.ozon.ru/продавец/alfa-tires-3381444/",
+                "https://www.ozon.ru/seller/alfa-tires-3381444/",
+                "https://www.ozon.ru/seller/alfa-tires-3381444/",
             ),
             (
                 "ozon_kz",
                 "https://ozon.kz/seller/alfa-tires-3381444/",
-                "https://ozon.kz/продавец/alfa-tires-3381444/",
+                "https://ozon.kz/seller/alfa-tires-3381444/",
             ),
         ):
             with self.subTest(code=code):

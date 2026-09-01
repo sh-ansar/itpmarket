@@ -36,7 +36,7 @@ def seller_root_url(value: str) -> str:
     match = re.search(r"/(?:seller|продавец)/([^/?#]+)/?", parsed.path, re.IGNORECASE)
     if not match:
         return ""
-    return urlunparse(("https", "www.ozon.ru", f"/продавец/{match.group(1)}/", "", "", ""))
+    return urlunparse(("https", "www.ozon.ru", f"/seller/{match.group(1)}/", "", "", ""))
 
 
 def _pair(value: Any, default: tuple[float, float]) -> tuple[float, float]:

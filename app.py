@@ -57,6 +57,7 @@ from saas_service import SaaSService, INTEGRATION_CATALOG, SCHEDULE_ACTIONS
 from scheduler_service import SchedulerService
 from public_product_service import PublicProductService, PUBLIC_CAPABILITIES
 from legal_documents import LEGAL_DOCUMENTS
+from legal_document_service import LegalDocumentService
 from marketplace_registry import (
     LEGACY_MARKETPLACE_CODES,
     MARKETPLACE_CODES,
@@ -119,6 +120,7 @@ BILLING = BillingService(
     DB_PATH,
     document_root=ROOT,
 )
+LEGAL_DOCUMENTS_SERVICE = LegalDocumentService(DB_PATH)
 ADDON_BILLING = AddonBillingService(
     DB_PATH,
     document_root=ROOT,
@@ -177,6 +179,14 @@ def billing_service() -> BillingService:
         )
 
     return BILLING
+
+
+def legal_document_service() -> LegalDocumentService:
+    """Return legal lifecycle storage bound to the active test/runtime DB."""
+    global LEGAL_DOCUMENTS_SERVICE
+    if Path(LEGAL_DOCUMENTS_SERVICE.db_path).resolve() != Path(DB_PATH).resolve():
+        LEGAL_DOCUMENTS_SERVICE = LegalDocumentService(DB_PATH)
+    return LEGAL_DOCUMENTS_SERVICE
 
 
 def addon_billing_service() -> AddonBillingService:
@@ -2007,6 +2017,32 @@ def before_request() -> Any:
             return json_error("Требуется первичная настройка.", 428)
         return redirect(url_for("setup"))
 
+    # A newly published legal version is a server-side precondition for every
+    # tenant mutation. Read-only pages, login/session/logout and the legal
+    # acceptance flow stay available so the user can review and accept it.
+    if (
+        g.user
+        and g.user.get("tenant_id")
+        and not is_superadmin(g.user)
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.endpoint not in {
+            "api_legal_accept", "logout", "login", "forgot_password",
+            "reset_password", "verify_email", "resend_verification",
+        }
+    ):
+        required_legal = legal_document_service().required_for_user(
+            int(g.user["id"]), int(g.user["tenant_id"]),
+        )
+        if required_legal:
+            payload = {
+                "error": "Требуется принять новую редакцию юридических документов.",
+                "code": "legal_acceptance_required",
+                "required_documents": required_legal,
+            }
+            if is_api_request():
+                return jsonify(payload), 428
+            return Response(payload["error"], status=428, mimetype="text/plain")
+
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         if request.endpoint in {
             "login", "setup", "forgot_password", "registration",
@@ -2408,8 +2444,8 @@ def robots_txt() -> Response:
 def sitemap_xml() -> Response:
     urls = [url_for("landing", _external=True)]
     urls.extend(
-        url_for("legal_document", document=document.document_type, _external=True)
-        for document in LEGAL_DOCUMENTS.current_documents()
+        url_for("legal_document", document=document["type"], _external=True)
+        for document in legal_document_service().current_documents()
     )
     body = "".join(f"<url><loc>{url}</loc></url>" for url in urls)
     return Response(
@@ -2572,7 +2608,7 @@ def registration() -> Any:
                     None,
                     tenant_id=int(provision["tenant_id"]),
                     email_verified=not verification_required,
-                    legal_acceptances=LEGAL_DOCUMENTS.acceptance_records(
+                    legal_acceptances=legal_document_service().acceptance_records(
                         ip_address=request.remote_addr or "",
                         user_agent=request.headers.get("User-Agent", ""),
                         locale=str(payload.get("locale") or "ru"),
@@ -2755,13 +2791,20 @@ def legal_pdf(document: str, version: str) -> Any:
 
 @app.get("/legal/<document>/<version>")
 def legal_document_version(document: str, version: str) -> Any:
-    definition = LEGAL_DOCUMENTS.get(document, version)
-    if definition is None:
+    managed = legal_document_service().get_version(document, version)
+    if managed is None:
         abort(404)
+    definition = LEGAL_DOCUMENTS.get(document, version)
+    if definition is not None and managed.get("legacy_static"):
+        legal = LEGAL_DOCUMENTS.metadata(definition)
+        body = LEGAL_DOCUMENTS.html(definition)
+    else:
+        legal = managed
+        body = legal_document_service().html(managed)
     return render_template(
         "legal_versioned.html",
-        legal=LEGAL_DOCUMENTS.metadata(definition),
-        document_html=LEGAL_DOCUMENTS.html(definition),
+        legal=legal,
+        document_html=body,
         embedded=str(request.args.get("embed") or "").casefold() in {"1", "true"},
     )
 
@@ -2769,22 +2812,98 @@ def legal_document_version(document: str, version: str) -> Any:
 @app.get("/legal/<document>/pdf")
 def legal_current_pdf(document: str) -> Any:
     """Serve the published current PDF through a stable public URL."""
-    definition = LEGAL_DOCUMENTS.get(document)
-    if definition is None:
+    managed = legal_document_service().get_version(document)
+    if managed is None:
         abort(404)
-    return legal_pdf(definition.document_type, definition.version)
+    return legal_pdf(str(managed["type"]), str(managed["version"]))
 
 
 @app.get("/legal/<document>")
 def legal_document(document: str) -> Any:
-    definition = LEGAL_DOCUMENTS.get(document)
-    if definition is not None:
-        return legal_document_version(document, definition.version)
+    managed = legal_document_service().get_version(document)
+    if managed is not None:
+        return legal_document_version(document, str(managed["version"]))
     if document not in {"privacy", "terms", "cookies", "consent", "offer"}: abort(404)
     locale=str(request.args.get("lang") or "ru").casefold()
     try: value=PUBLIC.legal_document(document,locale)
     except KeyError: abort(404)
     return render_template("legal.html", document=value, has_users=AUTH.has_users())
+
+
+@app.get("/api/legal/required")
+@login_required
+def api_legal_required() -> Any:
+    user = current_user() or {}
+    if not user.get("tenant_id"):
+        return json_ok(required_documents=[])
+    return json_ok(required_documents=legal_document_service().required_for_user(
+        int(user["id"]), int(user["tenant_id"]),
+    ))
+
+
+@app.post("/api/legal/accept")
+@login_required
+def api_legal_accept() -> Any:
+    user = current_user() or {}
+    if not user.get("tenant_id"):
+        return json_error("Для принятия документа требуется рабочее пространство.", 409)
+    try:
+        payload = json_payload()
+        accepted = legal_document_service().accept(
+            int(user["id"]), int(user["tenant_id"]), str(payload.get("document_type") or ""),
+            ip_address=request.remote_addr or "", user_agent=request.headers.get("User-Agent", ""),
+            locale=str(payload.get("locale") or "ru"),
+        )
+        return json_ok(accepted=accepted, required_documents=legal_document_service().required_for_user(
+            int(user["id"]), int(user["tenant_id"]),
+        ))
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.get("/api/platform/legal-documents")
+@platform_roles_required("superadmin")
+def api_platform_legal_documents_get() -> Any:
+    return json_ok(items=legal_document_service().list_versions())
+
+
+@app.post("/api/platform/legal-documents/drafts")
+@platform_roles_required("superadmin")
+def api_platform_legal_draft_create() -> Any:
+    try:
+        item = legal_document_service().save_draft(json_payload(), int((current_user() or {})["id"]))
+        return json_ok(item=item)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.put("/api/platform/legal-documents/drafts/<int:version_id>")
+@platform_roles_required("superadmin")
+def api_platform_legal_draft_update(version_id: int) -> Any:
+    try:
+        item = legal_document_service().save_draft(json_payload(), int((current_user() or {})["id"]), version_id)
+        return json_ok(item=item)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.post("/api/platform/legal-documents/<int:version_id>/publish")
+@platform_roles_required("superadmin")
+def api_platform_legal_publish(version_id: int) -> Any:
+    try:
+        return json_ok(item=legal_document_service().publish(version_id, int((current_user() or {})["id"])))
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.get("/api/platform/legal-documents/acceptances")
+@platform_roles_required("superadmin")
+def api_platform_legal_acceptances() -> Any:
+    raw_version_id = str(request.args.get("version_id") or "").strip()
+    try:
+        return json_ok(items=legal_document_service().acceptance_audit(int(raw_version_id) if raw_version_id else None))
+    except ValueError:
+        return json_error("Некорректная версия документа.", 400)
 
 
 @app.get("/app")
@@ -2830,6 +2949,7 @@ def platform_index(section: str) -> Any:
         "companies",
         "packages",
         "link-rules",
+        "legal-documents",
         "payments",
     }:
         abort(404)
@@ -3687,15 +3807,9 @@ def api_events() -> Any:
 @permission_required("view_settings")
 def api_settings_get() -> Any:
     user = current_user() or {}
-    legal_conn = AUTH._connect()
-    try:
-        legal_documents = LEGAL_DOCUMENTS.accepted_documents_for_user(
-            legal_conn,
-            int(user["id"]),
-            int(user["tenant_id"]) if user.get("tenant_id") else None,
-        )
-    finally:
-        legal_conn.close()
+    legal_documents = legal_document_service().accepted_documents_for_user(
+        int(user["id"]), int(user["tenant_id"]) if user.get("tenant_id") else None,
+    )
     config_result = None
     if is_superadmin(user):
         config_result = public_config(CFG)
@@ -5127,6 +5241,29 @@ def api_platform_billing_payments_get() -> Any:
             .platform_payment_items()
         )
     )
+
+
+@app.get("/api/platform/billing/history")
+@platform_permission_required("billing.payment.view")
+def api_platform_billing_history_get() -> Any:
+    """Paged, company-wide invoice and payment history for accountants."""
+    try:
+        raw_tenant_id = str(request.args.get("tenant_id") or "").strip()
+        tenant_id = int(raw_tenant_id) if raw_tenant_id else None
+        if tenant_id is not None and tenant_id <= 0:
+            raise ValueError
+        history = billing_service().platform_billing_history(
+            page=int(request.args.get("page", 1)),
+            page_size=int(request.args.get("page_size", 50)),
+            status=str(request.args.get("status") or ""),
+            tenant_id=tenant_id,
+            query=str(request.args.get("query") or ""),
+            date_from=str(request.args.get("date_from") or ""),
+            date_to=str(request.args.get("date_to") or ""),
+        )
+    except (TypeError, ValueError):
+        return json_error("Некорректные параметры истории оплат.", 400)
+    return json_ok(history=history)
 
 
 @app.get("/api/platform/billing/addon-payments")

@@ -468,6 +468,7 @@
 </div>
 
 <div class="modal" id="passwordModal" hidden><div class="modal-card"><div class="modal-head"><h3 data-i18n="change_password">Изменить пароль</h3><button class="icon modal-close">×</button></div><form id="passwordForm"><label>Текущий пароль<input name="current_password" type="password" required></label><label>Новый пароль<input name="new_password" type="password" minlength="12" required></label><label>Повторите пароль<input name="new_password_confirm" type="password" minlength="12" required></label><div class="modal-actions"><button type="button" class="secondary modal-close">Отмена</button><button class="primary">Сохранить</button></div></form></div></div>
+<div class="modal" id="legalAcceptanceModal" hidden aria-modal="true" role="dialog"><div class="modal-card"><div class="modal-head"><div><small>LEGAL UPDATE</small><h3>Новая редакция документов</h3></div></div><p class="modal-description">Чтобы продолжить работу с данными компании, ознакомьтесь и примите опубликованную редакцию.</p><div id="legalAcceptanceList"></div></div></div>
 {% if current_user.permissions.manage_users %}
 <div class="modal" id="userModal" hidden>
   <div class="modal-card">

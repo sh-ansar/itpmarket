@@ -366,11 +366,12 @@ class AuthService:
                 for acceptance in legal_acceptances:
                     conn.execute(
                         """INSERT INTO legal_acceptances(
-                            user_id,tenant_id,document_type,document_number,
+                            legal_document_version_id,user_id,tenant_id,document_type,document_number,
                             document_version,document_sha256,accepted_at,ip_address,
                             user_agent,locale,acceptance_text,source,created_at
-                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
+                            acceptance.get("legal_document_version_id"),
                             user_id,
                             int(resolved_tenant_id),
                             str(acceptance["document_type"]),

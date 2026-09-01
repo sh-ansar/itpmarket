@@ -19,7 +19,7 @@ class OzonSourceVerificationTests(unittest.TestCase):
         )
         self.assertEqual("verified", result["verification_state"])
         self.assertEqual("alfa-tires-3381444", result["canonical_seller_id"])
-        self.assertEqual("https://ozon.kz/продавец/alfa-tires-3381444/", result["canonical_seller_url"])
+        self.assertEqual("https://ozon.kz/seller/alfa-tires-3381444/", result["canonical_seller_url"])
 
     def test_legacy_seller_path_is_normalized_to_current_storefront_path(self) -> None:
         result = resolve_ozon_snapshot(
@@ -32,7 +32,7 @@ class OzonSourceVerificationTests(unittest.TestCase):
             page_text="Alfa Tires alfa-tires-3381444",
         )
         self.assertEqual(
-            "https://www.ozon.ru/продавец/alfa-tires-3381444/",
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
             result["canonical_seller_url"],
         )
 

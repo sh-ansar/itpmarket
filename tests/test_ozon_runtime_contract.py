@@ -204,8 +204,8 @@ class OzonRuntimeContractTests(unittest.TestCase):
             runtime = Path(folder)
             collector = Collector.__new__(Collector)
             collector.settings = SimpleNamespace(
-                start_urls=("https://www.ozon.ru/продавец/alfa-tires-3381444/",),
-                start_url="https://www.ozon.ru/продавец/alfa-tires-3381444/",
+                start_urls=("https://www.ozon.ru/seller/alfa-tires-3381444/",),
+                start_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
                 catalog_product_limit=0,
                 catalog_max_pages=1,
                 catalog_wait_seconds=1,

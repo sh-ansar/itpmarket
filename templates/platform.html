@@ -11,7 +11,7 @@
 <body>
 <header class="platform-header">
   <a href="{{ url_for('landing') }}"><img src="{{ url_for('static', filename='images/spyon-logo.svg') }}" alt="Spyon"><span><b>Spyon</b><small data-i18n="platform_system_admin">Управление платформой</small></span></a>
-  <nav>{% if current_user.platform_role == "accountant" %}<a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% else %}<a class="{{ 'active' if platform_section == 'companies' else '' }}" href="{{ url_for('platform_index', section='companies') }}" data-i18n="platform_companies">Компании</a><a class="{{ 'active' if platform_section == 'packages' else '' }}" href="{{ url_for('platform_index', section='packages') }}">Пакеты</a><a class="{{ 'active' if platform_section == 'link-rules' else '' }}" href="{{ url_for('platform_index', section='link-rules') }}" data-i18n="marketplace_source_rules_nav">Правила ссылок</a><a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% endif %}</nav>
+  <nav>{% if current_user.platform_role == "accountant" %}<a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% else %}<a class="{{ 'active' if platform_section == 'companies' else '' }}" href="{{ url_for('platform_index', section='companies') }}" data-i18n="platform_companies">Компании</a><a class="{{ 'active' if platform_section == 'packages' else '' }}" href="{{ url_for('platform_index', section='packages') }}">Пакеты</a><a class="{{ 'active' if platform_section == 'link-rules' else '' }}" href="{{ url_for('platform_index', section='link-rules') }}" data-i18n="marketplace_source_rules_nav">Правила ссылок</a><a class="{{ 'active' if platform_section == 'legal-documents' else '' }}" href="{{ url_for('platform_index', section='legal-documents') }}">Документы</a><a class="{{ 'active' if platform_section == 'payments' else '' }}" href="{{ url_for('platform_index', section='payments') }}">Оплаты</a>{% endif %}</nav>
   <div class="platform-actions">
     <button class="theme-switch" data-theme-toggle aria-label="Theme"><span class="theme-icon sun"><img src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""></span><i></i><span class="theme-icon moon"><img src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></span></button>
     <div class="languages"><button data-lang="ru">RU</button><button data-lang="kk">KZ</button><button data-lang="en">EN</button></div>
@@ -48,6 +48,8 @@
     </div>
     <div class="source-rules-grid" id="marketplaceSourceRules"><div class="loading" data-i18n="loading_catalog">Загрузка…</div></div>
   </section>
+  {% elif platform_section == 'legal-documents' %}
+  <section class="platform-panel"><div class="panel-head"><div><span>LEGAL DOCUMENTS</span><h2>Версии и публикации</h2><p>Опубликованная версия неизменяема; новая редакция создаётся черновиком.</p></div></div><form id="legalDocumentDraftForm" class="billing-supplier-form"><label><span>Тип</span><select name="type"><option value="offer">Оферта</option><option value="privacy">Конфиденциальность</option></select></label><label><span>Номер</span><input name="number" required></label><label><span>Версия</span><input name="version" required placeholder="1.1"></label><label><span>Название</span><input name="title" required></label><label><span>Текст документа</span><textarea name="body_text" rows="10" required></textarea></label><label><span>Формулировка принятия</span><textarea name="acceptance_text" rows="4" required></textarea></label><button class="approve">Сохранить черновик</button></form><div class="company-table-wrap"><table class="company-table"><thead><tr><th>Документ</th><th>Версия</th><th>Статус</th><th>Опубликован</th><th>Действия</th></tr></thead><tbody id="legalDocumentAdminTable"><tr><td colspan="5" class="loading">Загрузка…</td></tr></tbody></table></div></section>
   {% elif platform_section == 'payments' %}
 
   {% if current_user.platform_role == "superadmin" %}
@@ -73,37 +75,37 @@
 
         <label>
           <span>&#1053;&#1072;&#1080;&#1084;&#1077;&#1085;&#1086;&#1074;&#1072;&#1085;&#1080;&#1077; &#1087;&#1086;&#1089;&#1090;&#1072;&#1074;&#1097;&#1080;&#1082;&#1072;</span>
-          <input name="name" autocomplete="organization" disabled>
+          <input name="name" autocomplete="organization">
         </label>
 
         <label>
           <span>&#1041;&#1048;&#1053; / &#1088;&#1077;&#1075;&#1080;&#1089;&#1090;&#1088;&#1072;&#1094;&#1080;&#1086;&#1085;&#1085;&#1099;&#1081; &#1085;&#1086;&#1084;&#1077;&#1088;</span>
-          <input name="registration_number" disabled>
+          <input name="registration_number">
         </label>
 
         <label class="billing-wide">
           <span>&#1070;&#1088;&#1080;&#1076;&#1080;&#1095;&#1077;&#1089;&#1082;&#1080;&#1081; &#1072;&#1076;&#1088;&#1077;&#1089;</span>
-          <input name="legal_address" disabled>
+          <input name="legal_address">
         </label>
 
         <label>
           <span>IBAN</span>
-          <input name="iban" autocomplete="off" disabled>
+          <input name="iban" autocomplete="off">
         </label>
 
         <label>
           <span>&#1041;&#1072;&#1085;&#1082;</span>
-          <input name="bank_name" disabled>
+          <input name="bank_name">
         </label>
 
         <label>
           <span>&#1041;&#1048;&#1050;</span>
-          <input name="bic" disabled>
+          <input name="bic">
         </label>
 
         <label>
           <span>&#1050;&#1041;&#1077;</span>
-          <input name="kbe" disabled>
+          <input name="kbe">
         </label>
 
         <label>
@@ -252,6 +254,27 @@
           <tr>
             <td colspan="5" class="loading">&#1047;&#1072;&#1075;&#1088;&#1091;&#1079;&#1082;&#1072;&#8230;</td>
           </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel-head">
+      <div>
+        <span>ALL BILLING RECORDS</span>
+        <h2>Все счета и платёжные документы</h2>
+        <p>Общая история по компаниям: до 50 последних записей, включая отменённые и отклонённые.</p>
+      </div>
+    </div>
+
+    <div class="company-table-wrap">
+      <table class="company-table payment-table">
+        <thead>
+          <tr>
+            <th>Компания</th><th>Счёт</th><th>Сумма</th><th>Период</th><th>Статус</th><th>Документы</th>
+          </tr>
+        </thead>
+        <tbody id="platformBillingHistoryTableBody">
+          <tr><td colspan="6" class="loading">Загрузка…</td></tr>
         </tbody>
       </table>
     </div>

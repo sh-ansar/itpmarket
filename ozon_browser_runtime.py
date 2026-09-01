@@ -37,9 +37,9 @@ def marketplace_for_url(value: str) -> str:
 def marketplace_start_url(marketplace_code: str) -> str:
     marketplace = str(marketplace_code or "").strip().casefold()
     if marketplace == "ozon":
-        return "https://www.ozon.ru/продавец/"
+        return "https://www.ozon.ru/seller/"
     if marketplace == "ozon_kz":
-        return "https://ozon.kz/продавец/"
+        return "https://ozon.kz/seller/"
     raise ValueError("Unsupported Ozon marketplace.")
 
 

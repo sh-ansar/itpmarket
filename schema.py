@@ -411,6 +411,36 @@ CREATE TABLE IF NOT EXISTS legal_acceptances (
 );
 CREATE INDEX IF NOT EXISTS idx_legal_acceptances_tenant ON legal_acceptances(tenant_id, accepted_at DESC);
 
+CREATE TABLE IF NOT EXISTS legal_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_type TEXT NOT NULL UNIQUE,
+    document_number TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS legal_document_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    version TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','archived')),
+    body_text TEXT NOT NULL DEFAULT '',
+    acceptance_text TEXT NOT NULL DEFAULT '',
+    content_sha256 TEXT NOT NULL,
+    requires_acceptance INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    published_by INTEGER,
+    published_at TEXT,
+    archived_at TEXT,
+    UNIQUE(document_id,version),
+    FOREIGN KEY(document_id) REFERENCES legal_documents(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(published_by) REFERENCES app_users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_legal_document_versions_current
+ON legal_document_versions(document_id,status,published_at DESC,id DESC);
+
 CREATE TABLE IF NOT EXISTS tenant_roles (
     tenant_id INTEGER NOT NULL,
     role_code TEXT NOT NULL,
@@ -1558,6 +1588,9 @@ def ensure_database(path: Path) -> None:
     )
     try:
         conn.executescript(BASE_SCHEMA)
+        legal_acceptance_columns = _columns(conn, "legal_acceptances")
+        if "legal_document_version_id" not in legal_acceptance_columns:
+            conn.execute("ALTER TABLE legal_acceptances ADD COLUMN legal_document_version_id INTEGER")
         if "expected_monthly_units" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN expected_monthly_units INTEGER")
         if "theme" not in _columns(conn, "app_user_preferences"):
@@ -1775,9 +1808,10 @@ def ensure_database(path: Path) -> None:
                      AND submitted_at IS NULL AND reviewed_at IS NULL"""
             )
 
-        # Company grants and live connections are different concepts. Preserve
-        # only proven legacy connections during the one-way compatibility
-        # backfill; pending and newly created companies receive no grants.
+        # Onboarding selections are historical metadata, not a marketplace
+        # whitelist. Every approved tenant can connect every registered
+        # marketplace; this idempotent startup backfill repairs existing
+        # tenants before their next settings/operations request.
         conn.execute(
             """
             INSERT INTO tenant_marketplace_access(
@@ -1787,9 +1821,10 @@ def ensure_database(path: Path) -> None:
             FROM tenant_integrations ti
             JOIN tenants t ON t.id=ti.tenant_id
             WHERE t.status IN ('active','approved','confirmed')
-              AND ti.status IN ('active','setup')
-              AND ti.approval_status='approved'
-            ON CONFLICT(tenant_id,marketplace_code) DO NOTHING
+            ON CONFLICT(tenant_id,marketplace_code) DO UPDATE SET
+                is_allowed=1,
+                granted_at=COALESCE(tenant_marketplace_access.granted_at,excluded.granted_at),
+                updated_at=excluded.updated_at
             """,
             (stamp, stamp),
         )

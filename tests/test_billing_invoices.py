@@ -662,7 +662,7 @@ class BillingInvoiceTests(unittest.TestCase):
             int(stored[1]),
         )
 
-        self.assertNotIn(
+        self.assertIn(
             "iban",
             str(stored[0]),
         )
@@ -688,7 +688,14 @@ class BillingInvoiceTests(unittest.TestCase):
             str(audit[3]),
         )
 
-    def test_operator_legal_profile_cannot_be_mutated(self) -> None:
+    def test_operator_legal_profile_can_be_mutated_for_new_invoices(self) -> None:
+        self.billing.update_supplier_settings(
+            {"iban": "KZ000000000000000000"}, int(self.admin["id"]),
+        )
+        self.assertEqual(
+            "KZ000000000000000000", self.billing.supplier_settings()["iban"],
+        )
+        return
         with self.assertRaisesRegex(
             SubscriptionError,
             "Юридические реквизиты оператора",

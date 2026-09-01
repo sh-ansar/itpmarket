@@ -125,6 +125,8 @@ Live Kaspi требует заполненную `.kaspi_profile`. Ozon.ru ис�
 
 Ozon URL проходит два разных этапа: `parsed` означает только корректный синтаксис, а `verified` появляется лишь после совпадающих evidence из interactive browser (final seller URL, canonical link, seller identity и name). До этого Ozon source нельзя approve. Поддерживаются прежний `/seller/<slug>/` и актуальный `/продавец/<slug>/`; в новых настройках используйте второй вариант. Для Ozon.kz не используйте URL `ozon.ru` и наоборот; при challenge, `NO_CATALOG` или отсутствии interactive runtime фиксируйте ошибку, не подменяйте проверку HTTP 200 или product cards.
 
+Canonical Ozon URL contract: accept both seller path variants on input and normalize every new/stored Ozon.ru and Ozon.kz source to `/seller/<slug>/`.
+
 Marketplace settings display the complete registry even for a read-only user;
 the permission to view settings is separate from `manage_marketplaces`. A
 source replacement is immediate only after parsing and required Ozon browser

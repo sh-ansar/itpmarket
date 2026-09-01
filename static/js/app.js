@@ -2822,6 +2822,25 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     const target=$('#legalDocumentsList');if(!target)return;
     target.innerHTML=documents.length?documents.map(item=>`<article class="legal-document-item"><div><b>${esc(item.title||'Юридический документ')}</b><small>Версия ${esc(item.version||'—')}${item.accepted_at?` · Принято: ${esc(dateText(item.accepted_at))}`:''}</small></div><div><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}.pdf">PDF</a></div></article>`).join(''):'<div class="empty">Нет зафиксированных юридических документов.</div>';
   }
+  async function enforceLegalAcceptance(){
+    const modal=$('#legalAcceptanceModal'),host=$('#legalAcceptanceList');
+    if(!modal||!host)return;
+    try{
+      const result=await api('/api/legal/required');
+      const required=result.required_documents||[];
+      if(!required.length){modal.hidden=true;return;}
+      modal.hidden=false;
+      host.innerHTML=required.map(item=>`<article class="legal-document-item"><div><b>${esc(item.title||'Юридический документ')}</b><small>Версия ${esc(item.version||'—')}</small></div><div><a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a><button class="primary" data-accept-legal="${esc(item.type)}">Принять</button></div></article>`).join('');
+      $$('[data-accept-legal]',host).forEach(button=>button.onclick=async()=>{
+        try{
+          button.disabled=true;
+          await api('/api/legal/accept',{method:'POST',body:{document_type:button.dataset.acceptLegal,locale:state.lang}});
+          await enforceLegalAcceptance();
+          if(state.page==='settings')await loadSettings();
+        }catch(error){button.disabled=false;toast(error.message,true);}
+      });
+    }catch(error){console.error(error);}
+  }
   function renderNotificationPreferences(preferences){
     $$('[data-notification-category]').forEach(group=>{
       const value=preferences[group.dataset.notificationCategory]||{};
@@ -3341,7 +3360,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     if(can('view_dashboard'))jobs.push(loadOverview());
     if(can('view_operations'))jobs.push(loadTasks());
     if(can('view_settings'))jobs.push(loadSettings());
-    jobs.push(loadNotifications({announce:false}));
+    jobs.push(loadNotifications({announce:false}),enforceLegalAcceptance());
     Promise.allSettled(jobs).then(results=>results.filter(item=>item.status==='rejected').forEach(item=>console.error(item.reason)));
     setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(()=>{if(state.page==='dashboard')loadOverview()},15000);
     setInterval(()=>loadNotifications(),10000);

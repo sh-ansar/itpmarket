@@ -36,7 +36,7 @@ def _canonical_url(value: str, marketplace_code: str) -> str:
     if not seller_id:
         raise OzonSourceVerificationError("The Ozon seller identifier is empty.")
     canonical_host = "www.ozon.ru" if code == "ozon" else "ozon.kz"
-    return urlunparse(("https", canonical_host, f"/продавец/{seller_id}/", "", "", ""))
+    return urlunparse(("https", canonical_host, f"/seller/{seller_id}/", "", "", ""))
 
 
 def _canonical_link(page_html: str, final_url: str) -> str:

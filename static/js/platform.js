@@ -133,6 +133,7 @@
     const reviewHost=$('#paymentReviewTableBody');
     const activeHost=$('#activeSubscriptionTableBody');
     const paymentHost=$('#paymentTableBody');
+    const historyHost=$('#platformBillingHistoryTableBody');
 
     if(reviewHost){
       const items=data.payment_review_items||[];
@@ -222,6 +223,20 @@
       paymentHost.innerHTML=items.length
         ?items.map(item=>`<tr><td><strong>${esc(item.tenant_name)}</strong></td><td>${esc(item.plan_name||item.plan_code)}</td><td>${formatNumber(item.amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>\u0434\u043e ${esc(formatDate(item.period_end))} \u00b7 ${Number(item.months_count||0).toLocaleString()} \u043c\u0435\u0441.</small></td><td>${esc(formatDate(item.paid_at))}</td></tr>`).join('')
         :'<tr><td colspan="5" class="loading">\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u044b\u0445 \u043e\u043f\u043b\u0430\u0442 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.</td></tr>';
+    }
+
+    if(historyHost){
+      const history=data.platform_billing_history||{};
+      const items=history.items||[];
+      historyHost.innerHTML=items.length ? items.map(item=>{
+        const proof=item.proof||null;
+        const invoiceId=Number(item.invoice_id||0);
+        const documents=[
+          item.invoice_pdf_ready ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/pdf" target="_blank" rel="noopener">Счёт PDF</a>` : '',
+          proof ? `<a class="billing-document-link" href="/api/platform/billing/invoices/${invoiceId}/payment-proof" target="_blank" rel="noopener">${esc(proof.original_filename||'Платёжный документ')}</a>` : ''
+        ].filter(Boolean).join('<br>')||'<span class="muted">Нет документов</span>';
+        return `<tr><td><strong>${esc(item.tenant_name||'—')}</strong><small>${esc(item.registration_number||'')}</small></td><td><strong>${esc(item.invoice_number||'—')}</strong><small>${esc(formatDate(item.issued_at))}</small></td><td>${formatNumber(item.total_amount)} ${esc(item.currency||'KZT')}</td><td>${esc(formatDate(item.period_start))}<small>до ${esc(formatDate(item.period_end))}</small></td><td><span class="billing-status ${esc(item.subscription_status||item.invoice_status||'')}">${esc(billingStatusLabel(item.subscription_status||item.invoice_status))}</span><small>${esc(item.invoice_status||'')}</small></td><td class="billing-document-cell">${documents}</td></tr>`;
+      }).join('') : '<tr><td colspan="6" class="loading">История счетов пока пуста.</td></tr>';
     }
 
     const addonHost=$('#addonPaymentReviewTableBody');
@@ -400,7 +415,14 @@
     renderSubscriptions(data.subscriptions||{});
     renderSourceRules(data.marketplace_source_rules, data.integration_catalog);
     renderPayments(data.subscriptions||{});
+    renderLegalDocumentAdmin(data.legal_documents||[]);
     window.ITPUI?.translateTree(document.body);
+  }
+
+  function renderLegalDocumentAdmin(items){
+    const host=$('#legalDocumentAdminTable');
+    if(!host)return;
+    host.innerHTML=items.length?items.map(item=>`<tr><td><strong>${esc(item.title||'—')}</strong><small>${esc(item.type||'')}</small></td><td>${esc(item.version||'—')}</td><td><span class="billing-status ${esc(item.status||'')}">${esc(item.status||'')}</span></td><td>${esc(formatDate(item.published_at))}</td><td>${item.status==='draft'?`<button class="approve" data-publish-legal="${Number(item.id)}">Опубликовать</button>`:`<a class="secondary" href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}" target="_blank" rel="noopener">Открыть</a>`}</td></tr>`).join(''):'<tr><td colspan="5" class="loading">Версий пока нет.</td></tr>';
   }
 
   async function load() {
@@ -415,10 +437,13 @@
             '/api/platform/billing/payments'
           );
 
+          const history=await api('/api/platform/billing/history?page=1&page_size=50');
+
           data.subscriptions={
             ...(data.subscriptions||{}),
             payment_review_items:
-              review.items||[]
+              review.items||[],
+            platform_billing_history:history.history||{}
           };
         }catch(error){
           data.subscriptions={
@@ -438,6 +463,11 @@
           data.subscriptions={...(data.subscriptions||{}),addon_payment_review_items:[]};
           toast(error.message,true);
         }
+      }
+
+      if(section==='legal-documents'){
+        const legal=await api('/api/platform/legal-documents');
+        data.legal_documents=legal.items||[];
       }
 
       render(data);
@@ -473,6 +503,8 @@
     const preview = event.target.closest('[data-source-rule-preview]');
     const billingAction=event.target.closest('[data-billing-action]');
     const addonPaymentAction=event.target.closest('[data-addon-payment-action]');
+    const publishLegal=event.target.closest('[data-publish-legal]');
+    if(publishLegal){event.preventDefault();if(!window.confirm('Опубликовать версию? Пользователям потребуется повторное принятие.'))return;try{await api(`/api/platform/legal-documents/${Number(publishLegal.dataset.publishLegal)}/publish`,{method:'POST',body:{}});toast('Новая версия опубликована');await load();}catch(error){toast(error.message,true)}return;}
     if(billingHistoryButton){event.preventDefault();await openBillingHistory(billingHistoryButton.dataset.tenantId);return;}
     if(marketplaceReview){
       event.preventDefault();
@@ -562,10 +594,14 @@
   document.addEventListener('submit',async event=>{
     const planForm=event.target.closest('.subscription-plan-editor');
     const addonForm=event.target.closest('.subscription-addon-editor');
-    if(!planForm&&!addonForm)return;
+    const legalDraftForm=event.target.closest('#legalDocumentDraftForm');
+    if(!planForm&&!addonForm&&!legalDraftForm)return;
     event.preventDefault();
     try{
-      if(planForm){
+      if(legalDraftForm){
+        await api('/api/platform/legal-documents/drafts',{method:'POST',body:Object.fromEntries(new FormData(legalDraftForm))});
+        legalDraftForm.reset();toast('Черновик сохранён');
+      }else if(planForm){
         const raw=Object.fromEntries(new FormData(planForm));
         const features={};planForm.querySelectorAll('[data-plan-feature]').forEach(input=>features[input.dataset.planFeature]={is_enabled:input.checked});
         const marketplaces={};planForm.querySelectorAll('[data-plan-marketplace]').forEach(row=>marketplaces[row.dataset.planMarketplace]={is_enabled:row.querySelector('[data-limit-enabled]').checked,position_limit:row.querySelector('[data-limit-positions]').value,daily_operation_limit:row.querySelector('[data-limit-daily]').value});

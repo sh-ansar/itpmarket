@@ -41,11 +41,8 @@ def now_iso() -> str:
 
 BILLING_SUPPLIER_SETTING_KEY = "billing_supplier"
 
-# These details are taken from the versioned public offer. They deliberately
-# live in source control rather than a mutable platform setting: a user with
-# platform access must not be able to replace the legal identity shown on
-# newly issued invoices. Historical invoices retain their own seller snapshot,
-# so a future approved legal-profile revision cannot alter them.
+# Defaults seed an admin-managed operator profile. Every invoice snapshots the
+# effective profile at issuance, so later edits never rewrite older invoices.
 OPERATOR_LEGAL_PROFILE = {
     "name": "ТОО «ITP Mining»",
     "registration_number": "161240002661",
@@ -59,8 +56,6 @@ OPERATOR_LEGAL_PROFILE = {
     "kbe": "17",
 }
 
-# Only invoice-configuration values are intentionally mutable through the
-# platform billing settings API. Legal and bank fields above are not.
 DEFAULT_INVOICE_CONFIGURATION = {
     "payment_purpose_code": "",
     "vat_enabled": False,
@@ -486,7 +481,7 @@ class BillingService:
                 stored,
                 dict,
             ):
-                for key in INVOICE_CONFIGURATION_FIELDS:
+                for key in (OPERATOR_LEGAL_FIELDS | INVOICE_CONFIGURATION_FIELDS):
                     if key in stored:
                         value[key] = (
                             stored[key]
@@ -561,21 +556,6 @@ class BillingService:
                 "\u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430."
             )
 
-        protected_fields = sorted(
-            key
-            for key in payload
-            if key in OPERATOR_LEGAL_FIELDS
-        )
-
-        if protected_fields:
-            raise SubscriptionError(
-                "\u042e\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043a\u0438\u0435 "
-                "\u0440\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0430 "
-                "\u0437\u0430\u0444\u0438\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u044b \u0432 \u0443\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043d\u043d\u043e\u0439 "
-                "\u0432\u0435\u0440\u0441\u0438\u0438 \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u043e\u0439 \u043e\u0444\u0435\u0440\u0442\u044b "
-                "\u0438 \u043d\u0435 \u0438\u0437\u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u0447\u0435\u0440\u0435\u0437 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438."
-            )
-
         current = (
             self.supplier_settings()
         )
@@ -591,6 +571,13 @@ class BillingService:
         )
 
         text_fields = {
+            "name",
+            "registration_number",
+            "legal_address",
+            "iban",
+            "bank_name",
+            "bic",
+            "kbe",
             "payment_purpose_code",
             "invoice_prefix",
             "service_name",
@@ -758,7 +745,7 @@ class BillingService:
                     json.dumps(
                         {
                             key: current[key]
-                            for key in INVOICE_CONFIGURATION_FIELDS
+                            for key in (OPERATOR_LEGAL_FIELDS | INVOICE_CONFIGURATION_FIELDS)
                         },
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -795,8 +782,7 @@ class BillingService:
                                     key
                                     for key
                                     in payload
-                                    if key
-                                    in INVOICE_CONFIGURATION_FIELDS
+                                    if key in (OPERATOR_LEGAL_FIELDS | INVOICE_CONFIGURATION_FIELDS)
                                 ),
                             "is_complete":
                                 self._supplier_status(
@@ -1059,6 +1045,106 @@ class BillingService:
                 "items": items,
                 "limit": bounded_limit,
             }
+        finally:
+            conn.close()
+
+    def platform_billing_history(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        tenant_id: int | None = None,
+        query: str = "",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> dict[str, Any]:
+        """Bounded global invoice history for payment reviewers.
+
+        This intentionally shares the tenant-history projection: paths stay on
+        the server and the browser receives only ids for authenticated document
+        endpoints.
+        """
+        current_page = max(1, int(page or 1))
+        size = max(1, min(100, int(page_size or 50)))
+        filters: list[str] = []
+        params: list[Any] = []
+        normalized_status = str(status or "").strip().casefold()
+        if normalized_status:
+            filters.append("(lower(i.status)=? OR lower(s.status)=? OR lower(COALESCE(proof.status,''))=?)")
+            params.extend([normalized_status, normalized_status, normalized_status])
+        if tenant_id:
+            filters.append("i.tenant_id=?")
+            params.append(int(tenant_id))
+        needle = str(query or "").strip()
+        if needle:
+            filters.append("(lower(i.invoice_number) LIKE ? OR lower(t.name) LIKE ? OR lower(COALESCE(t.registration_number,'')) LIKE ?)")
+            like = f"%{needle.casefold()}%"
+            params.extend([like, like, like])
+        if date_from:
+            filters.append("i.issued_at>=?")
+            params.append(str(date_from))
+        if date_to:
+            filters.append("i.issued_at<=?")
+            params.append(str(date_to))
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        conn = self._connect()
+        try:
+            total = int(conn.execute(
+                """SELECT COUNT(*) FROM subscription_invoices i
+                   JOIN tenant_subscriptions s ON s.id=i.subscription_id
+                   JOIN tenants t ON t.id=i.tenant_id
+                   LEFT JOIN subscription_payment_proofs proof ON proof.id=(
+                       SELECT p2.id FROM subscription_payment_proofs p2
+                       WHERE p2.invoice_id=i.id AND p2.status<>'superseded'
+                       ORDER BY p2.id DESC LIMIT 1
+                   ) """ + where,
+                params,
+            ).fetchone()[0])
+            rows = conn.execute(
+                """SELECT i.id AS invoice_id,i.invoice_number,i.status AS invoice_status,
+                          i.months_count,i.total_amount,i.currency,i.issued_at,i.due_at,i.pdf_path,
+                          i.cancelled_at,i.cancel_reason,s.status AS subscription_status,
+                          s.starts_at,s.ends_at,p.code AS plan_code,p.name AS plan_name,
+                          t.id AS tenant_id,t.name AS tenant_name,t.registration_number,
+                          proof.id AS proof_id,proof.status AS proof_status,proof.original_filename,
+                          proof.uploaded_at,proof.reviewed_at,proof.review_note,
+                          reviewer.display_name AS reviewed_by
+                   FROM subscription_invoices i
+                   JOIN tenant_subscriptions s ON s.id=i.subscription_id
+                   LEFT JOIN subscription_plans p ON p.id=s.plan_id
+                   JOIN tenants t ON t.id=i.tenant_id
+                   LEFT JOIN subscription_payment_proofs proof ON proof.id=(
+                       SELECT p2.id FROM subscription_payment_proofs p2
+                       WHERE p2.invoice_id=i.id AND p2.status<>'superseded'
+                       ORDER BY p2.id DESC LIMIT 1
+                   )
+                   LEFT JOIN app_users reviewer ON reviewer.id=proof.reviewed_by """
+                + where
+                + " ORDER BY i.issued_at DESC,i.id DESC LIMIT ? OFFSET ?",
+                [*params, size, (current_page - 1) * size],
+            ).fetchall()
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                value = dict(row)
+                items.append({
+                    "invoice_id": int(value["invoice_id"]), "invoice_number": str(value["invoice_number"]),
+                    "invoice_status": str(value["invoice_status"]), "subscription_status": str(value["subscription_status"]),
+                    "tenant_id": int(value["tenant_id"]), "tenant_name": str(value["tenant_name"]),
+                    "registration_number": str(value["registration_number"] or ""),
+                    "plan_code": value["plan_code"], "plan_name": value["plan_name"],
+                    "months_count": int(value["months_count"] or 0), "total_amount": float(value["total_amount"] or 0),
+                    "currency": str(value["currency"] or "KZT"), "issued_at": value["issued_at"], "due_at": value["due_at"],
+                    "period_start": value["starts_at"], "period_end": value["ends_at"],
+                    "invoice_pdf_ready": bool(value["pdf_path"]), "cancelled_at": value["cancelled_at"],
+                    "cancel_reason": value["cancel_reason"],
+                    "proof": ({"id": int(value["proof_id"]), "status": value["proof_status"],
+                               "original_filename": value["original_filename"], "uploaded_at": value["uploaded_at"],
+                               "reviewed_at": value["reviewed_at"], "review_note": value["review_note"],
+                               "reviewed_by": value["reviewed_by"]}
+                              if value["proof_id"] is not None else None),
+                })
+            return {"items": items, "page": current_page, "page_size": size, "total": total}
         finally:
             conn.close()
 

@@ -158,6 +158,8 @@ It creates only `\Spyon\Spyon Ozon Browsers` with `InteractiveToken` / “Run on
 
 Ozon source approval attaches to that existing interactive browser only. A parsed URL is not enough: the runtime must verify the final same-marketplace seller URL, canonical link and seller identity. Both legacy `/seller/<slug>/` and current `/продавец/<slug>/` storefront paths are accepted; new connections normalize to the current path. Browser unavailability, a challenge, or `NO_CATALOG` from every seller source must leave the operation failed rather than successful, and deployment itself must not start Chrome from Session 0.
 
+Canonical Ozon URL contract: accept both seller path variants on input, but persist and issue all new Ozon.ru/Ozon.kz source URLs as `https://<host>/seller/<slug>/`.
+
 ## Post-deploy verification
 
 ```powershell

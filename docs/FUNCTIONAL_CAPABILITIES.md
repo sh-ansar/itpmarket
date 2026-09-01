@@ -2,6 +2,8 @@
 
 Документ описывает состояние проекта после аудита 19 августа 2026 года. Источники истины — исполняемый код, схема данных и автоматические тесты; наличие элемента в интерфейсе само по себе не считается подтверждением backend-функции.
 
+Ozon.ru and Ozon.kz accept both recognized seller URL forms on input; all templates, collector start URLs and persisted canonical sources use `/seller/<slug>/`.
+
 ## Multi-user and Multi-seller Architecture
 
 | Возможность | Статус | Подтверждение / ограничение |
