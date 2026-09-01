@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from legal_document_service import LegalDocumentService
+from legal_documents import LEGAL_DOCUMENT_TYPE_TITLES
 from schema import ensure_database
 
 
@@ -179,11 +180,76 @@ class LegalDocumentLifecycleTests(
         conn.commit()
         conn.close()
 
-        self.service = (
-            LegalDocumentService(
-                self.db_path
-            )
+        self.service = LegalDocumentService(self.db_path)
+
+    def test_all_five_document_types_share_draft_publish_and_acceptance_lifecycle(self) -> None:
+        self.assertEqual(
+            ["offer", "terms", "privacy", "cookies", "personal_data_consent"],
+            [item["type"] for item in self.service.document_types()],
         )
+        self.assertEqual(
+            "Политика использования cookie-файлов и локального хранения",
+            LEGAL_DOCUMENT_TYPE_TITLES["cookies"],
+        )
+        for document_type, title in LEGAL_DOCUMENT_TYPE_TITLES.items():
+            version = "2.0" if document_type in {"offer", "privacy"} else "1.0"
+            if document_type not in {"offer", "privacy"}:
+                self.assertIsNone(self.service.get_version(document_type))
+            draft = self.service.save_draft({
+                "type": document_type, "number": f"TEST-{document_type}",
+                "version": version, "title": title, "body_text": "Test-approved legal body.",
+                "acceptance_text": "Test acceptance.", "requires_acceptance": True,
+            }, self.user_id)
+            self.assertEqual("draft", draft["status"])
+            if document_type not in {"offer", "privacy"}:
+                self.assertIsNone(self.service.get_version(document_type))
+            published = self.service.publish(int(draft["id"]), self.user_id)
+            self.assertEqual("published", published["status"])
+            self.assertEqual(title, published["title"])
+            self.assertEqual([document_type], [item["type"] for item in self.service.required_for_user(self.user_id, self.tenant_id) if item["type"] == document_type])
+            accepted = self.service.accept(
+                self.user_id, self.tenant_id, document_type,
+                ip_address="127.0.0.1", user_agent="test", locale="ru",
+            )
+            self.assertEqual(document_type, accepted["type"])
+            self.assertNotIn(document_type, [item["type"] for item in self.service.required_for_user(self.user_id, self.tenant_id)])
+
+    def test_sqlite_legacy_acceptance_check_is_widened_without_losing_evidence(self) -> None:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("DROP TABLE legal_acceptances")
+            conn.execute(
+                """CREATE TABLE legal_acceptances (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,tenant_id INTEGER NOT NULL,
+                    document_type TEXT NOT NULL CHECK(document_type IN ('offer','privacy')),
+                    document_number TEXT NOT NULL,document_version TEXT NOT NULL,document_sha256 TEXT NOT NULL,
+                    accepted_at TEXT NOT NULL,ip_address TEXT NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',
+                    locale TEXT NOT NULL DEFAULT 'ru',acceptance_text TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'registration',
+                    created_at TEXT NOT NULL,legal_document_version_id INTEGER,
+                    UNIQUE(user_id,document_type,document_version))"""
+            )
+            conn.execute(
+                """INSERT INTO legal_acceptances(
+                     user_id,tenant_id,document_type,document_number,document_version,document_sha256,
+                     accepted_at,acceptance_text,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (self.user_id, self.tenant_id, "offer", "OLD", "1.0", "hash", "2026-09-01T00:00:00+00:00", "old", "2026-09-01T00:00:00+00:00"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        ensure_database(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual("OLD", conn.execute("SELECT document_number FROM legal_acceptances").fetchone()[0])
+            conn.execute(
+                """INSERT INTO legal_acceptances(
+                     user_id,tenant_id,document_type,document_number,document_version,document_sha256,
+                     accepted_at,acceptance_text,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (self.user_id, self.tenant_id, "cookies", "NEW", "1.0", "hash2", "2026-09-01T00:00:01+00:00", "new", "2026-09-01T00:00:01+00:00"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def tearDown(self) -> None:
         self.tmp.cleanup()

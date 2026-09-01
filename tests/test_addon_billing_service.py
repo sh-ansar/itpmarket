@@ -17,9 +17,11 @@ class FakeInvoicePDFService:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.calls = 0
+        self.payloads: list[dict] = []
 
     def generate(self, payload: dict) -> dict:
         self.calls += 1
+        self.payloads.append(payload)
         folder = self.root / "output" / "invoices" / str(payload["issued_at"][:4])
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{payload['invoice_number']}.pdf"
@@ -148,6 +150,43 @@ class AddonBillingServiceTests(unittest.TestCase):
             [replacement["id"], original["id"]],
             [item["id"] for item in audit_history],
         )
+
+    def test_addon_uses_subscription_supplier_snapshot_and_inclusive_vat(self) -> None:
+        supplier = self.billing.update_supplier_settings({
+            "name": "Unified supplier", "registration_number": "BIN-1",
+            "legal_address": "Astana", "bank_name": "Bank", "iban": "KZ1",
+            "bic": "BIC", "kbe": "17", "payment_purpose_code": "851",
+            "vat_enabled": True, "vat_rate": 16,
+        }, self.actor_id)
+        request = self.subscriptions.request_plan(self.tenant_id, "starter", self.actor_id)
+        reviewed = self.subscriptions.review_subscription(int(request["id"]), "approved", self.actor_id)
+        subscription_invoice = self.billing.create_invoice(
+            int(reviewed["id"]), 1, self.actor_id,
+            seller_snapshot={key: value for key, value in supplier.items() if key not in {"is_complete", "missing_fields"}},
+            due_days=int(supplier["invoice_due_days"]),
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("UPDATE tenant_subscriptions SET status='active' WHERE id=?", (int(reviewed["id"]),))
+            conn.commit()
+        finally:
+            conn.close()
+        addon = self.service.create_order(self.tenant_id, "positions_100", "kaspi", 1, self.actor_id)
+        addon_invoice = addon["invoice"]
+        self.assertEqual(subscription_invoice["seller"], addon_invoice["seller"])
+        self.assertEqual(16.0, addon_invoice["vat_rate"])
+        self.assertEqual(689.66, addon_invoice["vat_amount"])
+        self.assertEqual(4310.34, addon_invoice["subtotal_amount"])
+        self.assertEqual(5000.0, addon_invoice["total_amount"])
+        self.assertEqual(addon_invoice["seller"], self.pdf.payloads[-1]["seller_snapshot"])
+        proof = self.service.upload_payment_proof(
+            addon["id"], self.tenant_id, self.actor_id,
+            original_filename="payment.pdf", mime_type="application/pdf", content=b"%PDF-1.4\nproof",
+        )
+        self.service.reject_payment(proof["id"], self.actor_id, "retry")
+        reissued = self.service.reissue(addon["id"], self.actor_id, tenant_id=self.tenant_id)
+        self.assertEqual(addon_invoice["seller"], reissued["invoice"]["seller"])
+        self.assertEqual(689.66, reissued["invoice"]["vat_amount"])
 
 
 if __name__ == "__main__":

@@ -153,6 +153,23 @@ The platform payment drawer exposes bounded invoice and payment-document
 metadata for a company. It never returns document paths or binary content;
 downloads continue through the authenticated invoice/proof endpoints.
 
+## Post-release V2 billing, legal and catalogue projection
+
+New add-on invoices use the same VAT-inclusive calculation and the same
+`billing_supplier` snapshot as subscription invoices. Their persisted payload
+contains subtotal, VAT rate, VAT amount and total; historical invoice rows are
+not recalculated. Add-on order/invoice identities use PostgreSQL `RETURNING`.
+
+The shared legal lifecycle supports `offer`, `terms`, `privacy`, `cookies` and
+`personal_data_consent`. Only offer/privacy have legacy published seeds. The
+other types appear in superadmin draft management but have no public URL, PDF,
+or generated wording until a real version is published.
+
+`GET /api/products` uses a tenant SQL projection for ordinary catalogue pages:
+tenant scope and supported filters are counted in SQL, then ordered with
+`LIMIT/OFFSET`. Detail lookups report whether they were targeted or a genuine
+unmigrated legacy fallback.
+
 ## Юридические документы и электронный акцепт
 
 Публичные immutable-редакции доступны по `/legal/offer` и `/legal/privacy`

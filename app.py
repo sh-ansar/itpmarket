@@ -2881,11 +2881,9 @@ def legal_document(document: str) -> Any:
     managed = legal_document_service().get_version(document)
     if managed is not None:
         return legal_document_version(document, str(managed["version"]))
-    if document not in {"privacy", "terms", "cookies", "consent", "offer"}: abort(404)
-    locale=str(request.args.get("lang") or "ru").casefold()
-    try: value=PUBLIC.legal_document(document,locale)
-    except KeyError: abort(404)
-    return render_template("legal.html", document=value, has_users=AUTH.has_users())
+    # Lifecycle types exist in admin before publication, but never receive an
+    # auto-generated public legal page.
+    abort(404)
 
 
 @app.get("/api/legal/required")
@@ -2929,7 +2927,10 @@ def api_legal_accept() -> Any:
 @app.get("/api/platform/legal-documents")
 @platform_roles_required("superadmin")
 def api_platform_legal_documents_get() -> Any:
-    return json_ok(items=legal_document_service().list_versions())
+    return json_ok(
+        items=legal_document_service().list_versions(),
+        document_types=legal_document_service().document_types(),
+    )
 
 
 @app.post("/api/platform/legal-documents/drafts")
@@ -3190,6 +3191,7 @@ def api_products() -> Any:
         "endpoint": "/api/products", "tenant_id": user.get("tenant_id"),
         "page": result.get("page"), "page_size": result.get("page_size"),
         "result_count": len(result.get("items") or []), "total_count": result.get("total"),
+        "lookup_strategy": result.get("lookup_strategy", "legacy_materialized"),
         "db_ms": None, "filter_ms": None, "enrichment_ms": None,
         "inventory_ms": 0, "serialization_ms": 0, "total_ms": total_ms,
     }, separators=(",", ":")))
@@ -3235,6 +3237,7 @@ def api_product(code: str) -> Any:
     app.logger.info("PRODUCT_API_PERF %s", json.dumps({
         "endpoint": "/api/products/<code>", "tenant_id": user.get("tenant_id"),
         "result_count": 1, "total_count": 1, "db_ms": None, "filter_ms": None,
+        "lookup_strategy": product.get("lookup_strategy", "legacy_fallback"),
         "enrichment_ms": None, "inventory_ms": None, "serialization_ms": 0,
         "total_ms": total_ms,
     }, separators=(",", ":")))

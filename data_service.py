@@ -2366,6 +2366,9 @@ class DataService:
         return True
 
     def products(self, page: int, page_size: int, filters: dict[str, Any], user_id: int | None = None) -> dict[str, Any]:
+        projected = self._tenant_catalog_page(page, page_size, filters, user_id)
+        if projected is not None:
+            return projected
         preferences = self.preferences(user_id)
         marketplaces = self._filter_set(filters.get("platforms"))
         platform = str(filters.get("platform") or "").strip().casefold()
@@ -2410,6 +2413,148 @@ class DataService:
         }
         items = [{key: row.get(key) for key in fields} for row in rows[start:start + page_size]]
         return {"items": items, "page": page, "pages": pages, "page_size": page_size, "total": total}
+
+    def _tenant_catalog_page(
+        self, page: int, page_size: int, filters: dict[str, Any], user_id: int | None,
+    ) -> dict[str, Any] | None:
+        """Paginate the tenant catalogue in SQL without collector enrichment.
+
+        This projection is authoritative for catalogue metadata and own price.
+        Complex legacy-analytics filters retain the established compatibility
+        path below; the normal catalogue request is COUNT + ORDER/LIMIT/OFFSET.
+        """
+        tenant_id = self._tenant_id_for_user(user_id)
+        if tenant_id is None:
+            return None
+        unsupported = {
+            "attribute_product_codes", "freshness", "product_type", "size",
+            "season", "characteristic_group", "watched",
+        }
+        if any(filters.get(name) not in (None, "", [], (), set()) for name in unsupported):
+            return None
+        statuses = self._filter_set(filters.get("status"), upper=True)
+        scope = str(filters.get("scope") or "all").strip().casefold()
+        # A raw tenant catalogue has not yet been exact-offer enriched.
+        if (statuses and "NOT_ANALYZED" not in statuses) or scope in {
+            "risks", "opportunities", "watched",
+        }:
+            return {"items": [], "page": 1, "pages": 1, "page_size": max(10, min(int(page_size), 200)), "total": 0,
+                    "lookup_strategy": "sql_projection"}
+
+        marketplaces = self._filter_set(filters.get("platforms"))
+        platform = str(filters.get("platform") or "").strip().casefold()
+        if platform:
+            marketplaces.add(platform)
+        query = str(filters.get("query") or "").strip().casefold()
+        brands = self._filter_set(filters.get("brand"))
+        conn = self._connect()
+        try:
+            seller_counts = {
+                str(row["marketplace_code"]): int(row["seller_count"])
+                for row in conn.execute(
+                    """SELECT marketplace_code,COUNT(DISTINCT tenant_seller_id) AS seller_count
+                       FROM tenant_seller_catalog_products
+                       WHERE tenant_id=? AND active=1 GROUP BY marketplace_code""",
+                    (int(tenant_id),),
+                ).fetchall()
+            }
+            for row in conn.execute(
+                """SELECT marketplace_code,COUNT(*) AS seller_count
+                   FROM tenant_marketplace_sellers
+                   WHERE tenant_id=? AND status='active' AND approval_status='approved'
+                   GROUP BY marketplace_code""",
+                (int(tenant_id),),
+            ).fetchall():
+                code = str(row["marketplace_code"])
+                seller_counts[code] = max(seller_counts.get(code, 0), int(row["seller_count"]))
+            seller_source = bool(seller_counts)
+            alias = "tsp" if seller_source else "tcp"
+            table = "tenant_seller_catalog_products" if seller_source else "tenant_catalog_products"
+            where = [f"{alias}.tenant_id=?", f"{alias}.active=1"]
+            params: list[Any] = [int(tenant_id)]
+            if marketplaces:
+                where.append(f"{alias}.marketplace_code IN ({','.join('?' for _ in marketplaces)})")
+                params.extend(sorted(marketplaces))
+            if query:
+                where.append(
+                    "(" + " OR ".join(
+                        f"LOWER(COALESCE({alias}.{field},'')) LIKE ?"
+                        for field in ("source_product_code", "title", "brand", "model", "seller_sku")
+                    ) + ")"
+                )
+                params.extend([f"%{query}%"] * 5)
+            if brands:
+                where.append(f"LOWER(COALESCE({alias}.brand,'')) IN ({','.join('?' for _ in brands)})")
+                params.extend(sorted(brands))
+            clause = " AND ".join(where)
+            total = int(conn.execute(f"SELECT COUNT(*) AS count FROM {table} {alias} WHERE {clause}", params).fetchone()["count"])
+            size = max(10, min(int(page_size), 200))
+            pages = max(1, math.ceil(total / size))
+            current = max(1, min(int(page), pages))
+            sort_name = str(filters.get("sort") or "updated")
+            sort_columns = {
+                "updated": f"COALESCE({alias}.source_updated_at,{alias}.last_seen_at)",
+                "title": f"{alias}.title", "price": f"{alias}.price_amount",
+                "delta": f"{alias}.price_amount", "status": f"{alias}.availability_status",
+                "brand": f"{alias}.brand", "platform": f"{alias}.marketplace_code",
+            }
+            order = sort_columns.get(sort_name, sort_columns["updated"])
+            direction = "ASC" if str(filters.get("direction") or "desc").casefold() == "asc" else "DESC"
+            join = (
+                "JOIN tenant_marketplace_sellers s ON s.id=tsp.tenant_seller_id AND s.tenant_id=tsp.tenant_id"
+                if seller_source else ""
+            )
+            seller_fields = "s.external_seller_id,s.display_name AS seller_name,s.source_url AS seller_url" if seller_source else "NULL AS external_seller_id,NULL AS seller_name,NULL AS seller_url"
+            rows = conn.execute(
+                f"""SELECT {alias}.*,{seller_fields} FROM {table} {alias} {join}
+                    WHERE {clause} ORDER BY {order} {direction},{alias}.source_product_code ASC
+                    LIMIT ? OFFSET ?""",
+                [*params, size, (current - 1) * size],
+            ).fetchall()
+            tenant = conn.execute("SELECT name FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
+            integrations = {
+                str(row["integration_code"]): dict(row)
+                for row in conn.execute(
+                    """SELECT integration_code,seller_identifier,seller_name,seller_url
+                       FROM tenant_integrations WHERE tenant_id=?""", (int(tenant_id),)
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        labels = {"kaspi": "Kaspi", "ozon": "Ozon.ru", "ozon_kz": "Ozon.kz", "halyk_market": "Halyk Market", "forte_market": "Forte Market", "wildberries": "Wildberries"}
+        tenant_name = str(tenant["name"] if tenant else "")
+        items: list[dict[str, Any]] = []
+        for raw in rows:
+            value = dict(raw); platform_value = str(value.get("marketplace_code") or "")
+            source_code = str(value.get("source_product_code") or "")
+            seller_id = int(value.get("tenant_seller_id") or 0)
+            product_code = self._catalog_product_code(platform_value, source_code)
+            if seller_id and seller_counts.get(platform_value, 0) > 1:
+                product_code = seller_scoped_product_code(platform_value, seller_id, source_code)
+            amount = value.get("price_amount")
+            is_rub = str(value.get("currency") or "").upper() == "RUB"
+            integration = integrations.get(platform_value, {})
+            updated = value.get("source_updated_at") or value.get("last_seen_at")
+            items.append({
+                "product_code": product_code, "source_product_code": source_code,
+                "platform": platform_value, "platform_label": labels.get(platform_value, platform_value),
+                "title": value.get("title") or source_code, "product_url": value.get("source_url") or "",
+                "image_url": value.get("image_url") or (image_url_for_article(source_code) if platform_value == "wildberries" else ""),
+                "brand": value.get("brand") or "", "model": value.get("model") or "", "size": "",
+                "product_type": "other", "product_type_label": PRODUCT_TYPE_LABELS.get("other", "Other"),
+                "season": "UNKNOWN", "season_label": SEASON_LABELS.get("UNKNOWN", "Unknown"),
+                "own_price_kzt": None if is_rub else amount, "price_original": amount if is_rub else None,
+                "currency_original": value.get("currency") or "", "price_kzt": None if is_rub else amount,
+                "market_price_kzt": None, "difference_kzt": None, "difference_pct": None,
+                "price_status": "NOT_ANALYZED", "status_label": STATUS_INFO.get("NOT_ANALYZED", {}).get("label", "Not analyzed"),
+                "status_tone": STATUS_INFO.get("NOT_ANALYZED", {}).get("tone", "neutral"),
+                "reference_count": 0, "candidate_count": 0, "seller_name": value.get("seller_name") or integration.get("seller_name") or tenant_name,
+                "seller_url": value.get("seller_url") or integration.get("seller_url") or "", "updated_at": updated,
+                "freshness_status": self._freshness(updated)[0], "freshness_label": self._freshness(updated)[1],
+                "source_type": "TENANT_CATALOG", "watched": False, "priority": "normal", "note": "",
+            })
+        return {"items": items, "page": current, "pages": pages, "page_size": size, "total": total,
+                "lookup_strategy": "sql_projection"}
 
     def product_codes(
         self, filters: dict[str, Any], limit: int = 10000, user_id: int | None = None
@@ -2682,10 +2827,33 @@ class DataService:
             None,
         )
         if base is not None:
-            return self.product(code, user_id, rows=[base])
-        # Preserve legacy shared-collector details only when there is no
-        # tenant-scoped source row for the requested code.
-        return self.product(code, user_id)
+            result = self.product(code, user_id, rows=[base])
+            if result is not None:
+                result["lookup_strategy"] = "targeted"
+            return result
+        # A populated tenant projection is authoritative for its marketplace.
+        # Do not turn a normal detail miss into a full shared-catalog scan.
+        conn = self._connect()
+        try:
+            exists = conn.execute(
+                """SELECT 1 FROM tenant_seller_catalog_products
+                   WHERE tenant_id=? AND marketplace_code=? AND active=1 LIMIT 1""",
+                (int(tenant_id), platform),
+            ).fetchone() or conn.execute(
+                """SELECT 1 FROM tenant_catalog_products
+                   WHERE tenant_id=? AND marketplace_code=? AND active=1 LIMIT 1""",
+                (int(tenant_id), platform),
+            ).fetchone()
+        finally:
+            conn.close()
+        if exists:
+            return None
+        # Preserve collector-only details solely for an unmigrated legacy
+        # marketplace which has no tenant projection at all.
+        result = self.product(code, user_id)
+        if result is not None:
+            result["lookup_strategy"] = "legacy_fallback"
+        return result
 
     @staticmethod
     def _ozon_specifications(row: dict[str, Any]) -> list[dict[str, str]]:

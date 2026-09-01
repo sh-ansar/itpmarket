@@ -15,7 +15,7 @@ from billing_service import (
     OPERATOR_LEGAL_FIELDS,
     OPERATOR_LEGAL_PROFILE,
 )
-from legal_documents import LEGAL_DOCUMENTS
+from legal_documents import LEGAL_DOCUMENTS, LEGAL_DOCUMENT_TYPE_TITLES
 from storage.postgres_compat import (
     PostgresConnection,
     configure_connection,
@@ -23,7 +23,7 @@ from storage.postgres_compat import (
 )
 
 
-LEGAL_TYPES = {"offer", "privacy"}
+LEGAL_TYPES = frozenset(LEGAL_DOCUMENT_TYPE_TITLES)
 
 
 def now_iso() -> str:
@@ -503,6 +503,8 @@ class LegalDocumentService:
                 conn
             )
 
+            self._seed_document_types(conn)
+
             self._link_legacy_acceptances(
                 conn
             )
@@ -705,6 +707,19 @@ class LegalDocumentService:
                 conn,
                 document_id,
                 definition.version,
+            )
+
+    @staticmethod
+    def _seed_document_types(conn: Any) -> None:
+        """Register lifecycle types without inventing unpublished legal text."""
+        stamp = now_iso()
+        for document_type, title in LEGAL_DOCUMENT_TYPE_TITLES.items():
+            conn.execute(
+                """INSERT INTO legal_documents(
+                       document_type,document_number,title,created_at,updated_at
+                   ) VALUES(?,?,?,?,?)
+                   ON CONFLICT(document_type) DO NOTHING""",
+                (document_type, "", title, stamp, stamp),
             )
 
     def _link_legacy_acceptances(
@@ -978,10 +993,7 @@ class LegalDocumentService:
             dict[str, Any]
         ] = []
 
-        for document_type in (
-            "offer",
-            "privacy",
-        ):
+        for document_type in LEGAL_TYPES:
             item = self.get_version(
                 document_type
             )
@@ -992,6 +1004,13 @@ class LegalDocumentService:
                 )
 
         return result
+
+    @staticmethod
+    def document_types() -> list[dict[str, str]]:
+        return [
+            {"type": document_type, "title": title}
+            for document_type, title in LEGAL_DOCUMENT_TYPE_TITLES.items()
+        ]
 
     def acceptance_records(
         self,
@@ -1286,7 +1305,7 @@ class LegalDocumentService:
                     and document["version"]
                     == "1.0"
                     and document["type"]
-                    in LEGAL_TYPES
+                    in {"offer", "privacy"}
                 ):
                     continue
 

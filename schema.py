@@ -394,7 +394,7 @@ CREATE TABLE IF NOT EXISTS legal_acceptances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     tenant_id INTEGER NOT NULL,
-    document_type TEXT NOT NULL CHECK(document_type IN ('offer','privacy')),
+    document_type TEXT NOT NULL CHECK(document_type IN ('offer','terms','privacy','cookies','personal_data_consent')),
     document_number TEXT NOT NULL,
     document_version TEXT NOT NULL,
     document_sha256 TEXT NOT NULL,
@@ -603,6 +603,10 @@ CREATE INDEX IF NOT EXISTS idx_tenant_seller_products_visible
 ON tenant_seller_catalog_products(
     tenant_id,marketplace_code,tenant_seller_id,active,last_seen_at
 );
+CREATE INDEX IF NOT EXISTS idx_tenant_seller_products_page
+ON tenant_seller_catalog_products(
+    tenant_id,marketplace_code,active,title,source_product_code
+);
 
 CREATE TABLE IF NOT EXISTS tenant_seller_price_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -720,6 +724,10 @@ CREATE TABLE IF NOT EXISTS tenant_catalog_products (
 );
 CREATE INDEX IF NOT EXISTS idx_tenant_catalog_products_visible
 ON tenant_catalog_products(tenant_id,marketplace_code,active,last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_tenant_catalog_products_page
+ON tenant_catalog_products(
+    tenant_id,marketplace_code,active,title,source_product_code
+);
 
 CREATE TABLE IF NOT EXISTS tenant_catalog_import_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1497,6 +1505,10 @@ CREATE TABLE IF NOT EXISTS tenant_addon_orders (
     quantity INTEGER NOT NULL,
     unit_price REAL NOT NULL,
     total_price REAL NOT NULL,
+    subtotal_amount REAL NOT NULL DEFAULT 0,
+    vat_rate REAL NOT NULL DEFAULT 0,
+    vat_amount REAL NOT NULL DEFAULT 0,
+    total_amount REAL NOT NULL DEFAULT 0,
     currency TEXT NOT NULL DEFAULT 'KZT',
     valid_until TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'awaiting_payment'
@@ -1611,6 +1623,50 @@ def ensure_database(path: Path) -> None:
                 "ALTER TABLE legal_acceptances "
                 "ADD COLUMN legal_document_version_id INTEGER"
             )
+        acceptance_sql = str(conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='legal_acceptances'"
+        ).fetchone()[0] or "")
+        if "personal_data_consent" not in acceptance_sql:
+            # SQLite cannot widen a CHECK constraint in place.  This is a
+            # data-preserving table replacement; historical evidence is copied
+            # byte-for-byte and no acceptance rows are recalculated.
+            conn.execute(
+                """CREATE TABLE legal_acceptances_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    tenant_id INTEGER NOT NULL,
+                    document_type TEXT NOT NULL CHECK(document_type IN (
+                        'offer','terms','privacy','cookies','personal_data_consent')),
+                    document_number TEXT NOT NULL,
+                    document_version TEXT NOT NULL,
+                    document_sha256 TEXT NOT NULL,
+                    accepted_at TEXT NOT NULL,
+                    ip_address TEXT NOT NULL DEFAULT '',
+                    user_agent TEXT NOT NULL DEFAULT '',
+                    locale TEXT NOT NULL DEFAULT 'ru',
+                    acceptance_text TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'registration',
+                    created_at TEXT NOT NULL,
+                    legal_document_version_id INTEGER,
+                    UNIQUE(user_id,document_type,document_version)
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO legal_acceptances_v2(
+                       id,user_id,tenant_id,document_type,document_number,document_version,
+                       document_sha256,accepted_at,ip_address,user_agent,locale,
+                       acceptance_text,source,created_at,legal_document_version_id
+                   ) SELECT id,user_id,tenant_id,document_type,document_number,document_version,
+                       document_sha256,accepted_at,ip_address,user_agent,locale,
+                       acceptance_text,source,created_at,legal_document_version_id
+                   FROM legal_acceptances"""
+            )
+            conn.execute("DROP TABLE legal_acceptances")
+            conn.execute("ALTER TABLE legal_acceptances_v2 RENAME TO legal_acceptances")
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_legal_acceptances_tenant
+                   ON legal_acceptances(tenant_id,accepted_at DESC)"""
+            )
 
         legal_version_columns = _columns(
             conn,
@@ -1710,6 +1766,18 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE app_reports ADD COLUMN platforms_json TEXT NOT NULL DEFAULT '[]'")
         if "tenant_id" not in _columns(conn, "app_product_state"):
             conn.execute("ALTER TABLE app_product_state ADD COLUMN tenant_id INTEGER")
+        addon_invoice_columns = _columns(conn, "tenant_addon_invoices")
+        for column, declaration in (
+            ("subtotal_amount", "REAL NOT NULL DEFAULT 0"),
+            ("vat_rate", "REAL NOT NULL DEFAULT 0"),
+            ("vat_amount", "REAL NOT NULL DEFAULT 0"),
+            ("total_amount", "REAL NOT NULL DEFAULT 0"),
+        ):
+            if column not in addon_invoice_columns:
+                conn.execute(
+                    "ALTER TABLE tenant_addon_invoices "
+                    f"ADD COLUMN {column} {declaration}"
+                )
         if "last_seen_at" not in _columns(conn, "product_attribute_definitions"):
             conn.execute("ALTER TABLE product_attribute_definitions ADD COLUMN last_seen_at TEXT")
         integration_columns = _columns(conn, "tenant_integrations")

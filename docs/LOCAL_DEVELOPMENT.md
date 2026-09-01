@@ -155,6 +155,12 @@ source.
 New PostgreSQL migrations belong in migrations/ and use ordered
 YYYYMMDD_name.sql filenames.
 
+For V2 changes, include `tests/test_addon_billing_service.py`,
+`tests/test_legal_document_lifecycle.py`, and
+`tests/test_product_sql_pagination.py` in the targeted run. The last test
+uses 3,005 tenant products and asserts that the ordinary page path never calls
+the full-catalogue enrichment method.
+
 Safe automatic migrations must contain SPYON-AUTO-MIGRATION, start with BEGIN
 and end with COMMIT. Run tests/test_postgres_migrations.py before release.
 

@@ -105,6 +105,11 @@ class LegalDocumentsTests(unittest.TestCase):
             download.close()
         self.assertEqual(404, self.client.get("/legal/offer/../../app.py").status_code)
 
+    def test_unpublished_lifecycle_types_have_no_public_page(self) -> None:
+        for document_type in ("terms", "cookies", "personal_data_consent"):
+            self.assertEqual(404, self.client.get(f"/legal/{document_type}").status_code)
+            self.assertEqual(404, self.client.get(f"/legal/{document_type}/pdf").status_code)
+
     def test_registration_requires_each_document_and_preserves_final_step(self) -> None:
         without_offer = self.form("without-offer@example.com", "BIN-NO-OFFER")
         without_offer.pop("offer_acceptance")

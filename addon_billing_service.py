@@ -55,9 +55,14 @@ class AddonBillingService:
         value["buyer"] = self._json(value.pop("buyer_snapshot_json", "{}"), {})
         value["line_items"] = self._json(value.pop("line_items_json", "[]"), [])
         # InvoicePDFService uses the established subscription-invoice names.
-        value["subtotal_amount"] = float(value.get("total_price") or 0)
-        value["vat_amount"] = 0.0
-        value["total_amount"] = float(value.get("total_price") or 0)
+        # New add-on rows persist the same VAT-inclusive invoice model as
+        # subscriptions.  The fallbacks retain the original values of already
+        # issued rows instead of rewriting their historical meaning.
+        total = float(value.get("total_price") or 0)
+        value["subtotal_amount"] = float(value.get("subtotal_amount") or total)
+        value["vat_rate"] = float(value.get("vat_rate") or 0)
+        value["vat_amount"] = float(value.get("vat_amount") or 0)
+        value["total_amount"] = float(value.get("total_amount") or total)
         value["months_count"] = 1
         return value
 
@@ -91,6 +96,10 @@ class AddonBillingService:
         supplier = self.billing.supplier_settings()
         if not supplier.get("is_complete"):
             raise SubscriptionError("Не заполнены реквизиты поставщика для выставления счёта.")
+        # Match the subscription flow exactly: completeness diagnostics are
+        # runtime-only and must never become invoice snapshot fields.
+        supplier.pop("is_complete", None)
+        supplier.pop("missing_fields", None)
         return supplier
 
     @staticmethod
@@ -198,21 +207,29 @@ class AddonBillingService:
                 raise SubscriptionError("Add-on пакет недоступен.")
             unit_price = float(addon["price_amount"])
             total_price = unit_price * quantity_value
-            cursor = conn.execute(
-                """INSERT INTO tenant_addon_orders(
+            order_insert = """INSERT INTO tenant_addon_orders(
                        tenant_id,addon_id,addon_code,marketplace_code,positions,quantity,
                        unit_price,total_price,currency,valid_until,status,created_by,created_at,updated_at
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,'awaiting_payment',?,?,?)""",
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,'awaiting_payment',?,?,?)"""
+            order_params = (
                 (int(tenant_id), int(addon["id"]), code, marketplace,
                  int(addon["extra_positions"]), quantity_value, unit_price, total_price,
-                 str(addon["currency"]), str(subscription["ends_at"]), int(actor_user_id), stamp, stamp),
+                 str(addon["currency"]), str(subscription["ends_at"]), int(actor_user_id), stamp, stamp)
             )
-            order_id = int(cursor.lastrowid)
+            if isinstance(conn, PostgresConnection):
+                order_id = int(conn.execute(order_insert + " RETURNING id", order_params).fetchone()["id"])
+            else:
+                order_id = int(conn.execute(order_insert, order_params).lastrowid)
             due_days = int(supplier.get("invoice_due_days") or 5)
             due_at = (datetime.now().astimezone() + timedelta(days=due_days)).isoformat(timespec="seconds")
             invoice_number = self.billing._next_invoice_number(conn, datetime.now().astimezone())
             positions = int(addon["extra_positions"])
             total_positions = positions * quantity_value
+            vat_rate = float(supplier.get("vat_rate") or 0)
+            vat_amount = round(
+                total_price * vat_rate / (100 + vat_rate), 2
+            ) if vat_rate > 0 else 0.0
+            subtotal_amount = round(total_price - vat_amount, 2)
             description = (
                 f"Дополнительные позиции Spyon — {marketplace_label(marketplace)}, "
                 f"пакет +{positions} позиций"
@@ -226,18 +243,23 @@ class AddonBillingService:
                 "currency": str(addon["currency"]), "marketplace": marketplace,
                 "positions": positions, "total_positions": total_positions,
             }]
-            invoice_cursor = conn.execute(
-                """INSERT INTO tenant_addon_invoices(
+            invoice_insert = """INSERT INTO tenant_addon_invoices(
                        order_id,tenant_id,invoice_number,status,unit_price,total_price,currency,
+                       subtotal_amount,vat_rate,vat_amount,total_amount,
                        seller_snapshot_json,buyer_snapshot_json,line_items_json,issued_at,due_at,
                        created_by,created_at,updated_at
-                   ) VALUES(?,?,?,'issued',?,?,?,?,?,?,?,?,?,?,?)""",
-                (order_id, int(tenant_id), invoice_number, unit_price, total_price,
-                 str(addon["currency"]), json.dumps(supplier, ensure_ascii=False),
+                   ) VALUES(?,?,?,'issued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+            invoice_params = (order_id, int(tenant_id), invoice_number, unit_price, total_price,
+                 str(addon["currency"]), subtotal_amount, vat_rate, vat_amount, total_price,
+                 json.dumps(supplier, ensure_ascii=False),
                  json.dumps(self._buyer(tenant), ensure_ascii=False), json.dumps(lines, ensure_ascii=False),
-                 stamp, due_at, int(actor_user_id), stamp, stamp),
-            )
-            invoice_id = int(invoice_cursor.lastrowid)
+                 stamp, due_at, int(actor_user_id), stamp, stamp)
+            # PostgreSQL identity values are obtained from RETURNING, never
+            # cursor.lastrowid (which is not a BIGSERIAL contract).
+            if isinstance(conn, PostgresConnection):
+                invoice_id = int(conn.execute(invoice_insert + " RETURNING id", invoice_params).fetchone()["id"])
+            else:
+                invoice_id = int(conn.execute(invoice_insert, invoice_params).lastrowid)
             conn.commit()
             row = conn.execute("SELECT * FROM tenant_addon_orders WHERE id=?", (order_id,)).fetchone()
             result = self._order_dict(conn, row)

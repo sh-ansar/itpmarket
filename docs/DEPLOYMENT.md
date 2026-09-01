@@ -216,6 +216,12 @@ are rejected by the automatic deployment path.
 
 An already applied migration file must never be edited. A new migration must be
 created instead.
+
+The V2 release contains additive add-on VAT fields, legal acceptance type
+expansion, and tenant product-list indexes. Back up and rehearse these
+migrations on a disposable PostgreSQL database before approving a production
+fast-forward. Existing invoice snapshots remain historical evidence and must
+not be backfilled or recalculated.
 # Operation queue after restart
 
 `data/tasks_state.json` is operational state and must not be deleted during a
