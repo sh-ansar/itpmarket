@@ -139,6 +139,26 @@ class LegalUIContractTests(
             source,
         )
 
+    def test_platform_legal_documents_label_is_consistent(
+        self,
+    ) -> None:
+        template = (
+            ROOT
+            / "templates"
+            / "platform.html"
+        ).read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "{% elif platform_section == 'legal-documents' %}Юридические документы",
+            template,
+        )
+        self.assertIn(
+            ">Юридические документы</a>",
+            template,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

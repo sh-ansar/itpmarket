@@ -700,6 +700,19 @@ class TaskAndRuntimeIsolationTests(unittest.TestCase):
                 [statuses[str(task["id"])] for task in tasks],
             )
 
+            cleanup_deadline = time.monotonic() + 10
+            while time.monotonic() < cleanup_deadline:
+                if all(
+                    not manager.processes and not manager.log_handles
+                    for manager in (first, second)
+                ):
+                    break
+                threading.Event().wait(0.01)
+            self.assertFalse(first.processes)
+            self.assertFalse(second.processes)
+            self.assertFalse(first.log_handles)
+            self.assertFalse(second.log_handles)
+
     def test_http_remains_available_while_seller_job_runs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="http_during_job_") as folder:
             root = Path(folder)

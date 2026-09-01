@@ -1025,12 +1025,11 @@ class TaskManager:
                 task["message"] = RESULT_MESSAGES["collector_failed"]
             self._save(state)
             handle = self.log_handles.pop(task_id, None)
-            try:
-                if handle:
-                    handle.close()
-            finally:
-                self.processes.pop(task_id, None)
+            if handle:
+                handle.close()
         self._dispatch_queued()
+        with self.lock:
+            self.processes.pop(task_id, None)
 
     def stop(self, task_id: str) -> dict[str, Any]:
         with self._state_guard():

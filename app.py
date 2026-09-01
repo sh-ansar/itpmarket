@@ -2588,6 +2588,13 @@ def registration() -> Any:
             verification_required = bool(
                 email_service().settings.enabled
             )
+            legal_acceptances = (
+                legal_document_service().acceptance_records(
+                    ip_address=request.remote_addr or "",
+                    user_agent=request.headers.get("User-Agent", ""),
+                    locale=str(payload.get("locale") or "ru"),
+                )
+            )
             registration_conn = SAAS._connect()
             try:
                 if not is_postgres_connection(registration_conn):
@@ -2608,11 +2615,7 @@ def registration() -> Any:
                     None,
                     tenant_id=int(provision["tenant_id"]),
                     email_verified=not verification_required,
-                    legal_acceptances=legal_document_service().acceptance_records(
-                        ip_address=request.remote_addr or "",
-                        user_agent=request.headers.get("User-Agent", ""),
-                        locale=str(payload.get("locale") or "ru"),
-                    ),
+                    legal_acceptances=legal_acceptances,
                     conn=registration_conn,
                     commit=False,
                 )

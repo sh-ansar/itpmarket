@@ -1035,6 +1035,7 @@ class LegalDocumentService:
                      a.acceptance_text,
                      a.locale,
                      a.source,
+                     a.tenant_id,
                      v.title,
                      v.effective_at,
                      v.published_at
@@ -1175,7 +1176,11 @@ class LegalDocumentService:
                                 .is_file()
                             ),
                         "tenant_id":
-                            tenant_id,
+                            int(
+                                row[
+                                    "tenant_id"
+                                ]
+                            ),
                     }
                 )
 
@@ -1302,7 +1307,8 @@ class LegalDocumentService:
 
             stamp = now_iso()
 
-            conn.execute(
+            inserted = (
+                conn.execute(
                 """INSERT INTO legal_acceptances(
                      legal_document_version_id,
                      user_id,
@@ -1356,40 +1362,44 @@ class LegalDocumentService:
                     ],
                     "reaccept",
                     stamp,
-                ),
+                )
+                )
+                .rowcount
+                == 1
             )
 
-            self._audit(
-                conn,
-                int(
-                    user_id
-                ),
-                "legal_document_accepted",
-                str(
-                    document["id"]
-                ),
-                tenant_id=int(
-                    tenant_id
-                ),
-                details={
-                    "type":
-                        document[
-                            "type"
-                        ],
-                    "number":
-                        document[
-                            "number"
-                        ],
-                    "version":
-                        document[
-                            "version"
-                        ],
-                    "sha256":
-                        document[
-                            "sha256"
-                        ],
-                },
-            )
+            if inserted:
+                self._audit(
+                    conn,
+                    int(
+                        user_id
+                    ),
+                    "legal_document_accepted",
+                    str(
+                        document["id"]
+                    ),
+                    tenant_id=int(
+                        tenant_id
+                    ),
+                    details={
+                        "type":
+                            document[
+                                "type"
+                            ],
+                        "number":
+                            document[
+                                "number"
+                            ],
+                        "version":
+                            document[
+                                "version"
+                            ],
+                        "sha256":
+                            document[
+                                "sha256"
+                            ],
+                    },
+                )
 
             conn.commit()
 

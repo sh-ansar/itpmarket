@@ -502,11 +502,28 @@ class LegalDocumentLifecycleTests(
             locale="ru",
         )
 
+        self.service.accept(
+            self.user_id,
+            self.tenant_id,
+            "offer",
+            ip_address="127.0.0.1",
+            user_agent="unit-test",
+            locale="ru",
+        )
+
         self.assertEqual(
             [],
             self.service.required_for_user(
                 self.user_id,
                 second_tenant_id,
+            ),
+        )
+
+        self.assertEqual(
+            [],
+            self.service.required_for_user(
+                self.user_id,
+                self.tenant_id,
             ),
         )
 
@@ -539,6 +556,37 @@ class LegalDocumentLifecycleTests(
         self.assertEqual(
             [(self.tenant_id, "1.1", published["sha256"])],
             rows,
+        )
+
+        history = self.service.accepted_documents_for_user(
+            self.user_id,
+            second_tenant_id,
+        )
+        self.assertEqual(
+            self.tenant_id,
+            history[0]["tenant_id"],
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+        audit_count = conn.execute(
+            """SELECT COUNT(*)
+               FROM platform_audit_log
+               WHERE
+                 actor_user_id=?
+                 AND action='legal_document_accepted'
+                 AND entity_id=?""",
+            (
+                self.user_id,
+                str(published["id"]),
+            ),
+        ).fetchone()[0]
+        conn.close()
+
+        self.assertEqual(
+            1,
+            audit_count,
         )
 
     def test_future_version_does_not_become_current_early(

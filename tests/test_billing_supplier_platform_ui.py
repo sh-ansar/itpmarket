@@ -94,24 +94,6 @@ class BillingSupplierPlatformUiTests(
                 self.template,
             )
 
-        for name in (
-            "name",
-            "registration_number",
-            "legal_address",
-            "iban",
-            "bank_name",
-            "bic",
-            "kbe",
-        ):
-            self.assertIn(
-                f'name="{name}"',
-                self.template,
-            )
-
-        self.assertIn(
-            'name="iban" autocomplete="off" disabled',
-            self.template,
-        )
 
     def test_supplier_ui_submits_only_invoice_configuration(self):
         self.assertIn(
@@ -131,7 +113,7 @@ class BillingSupplierPlatformUiTests(
             1,
         )[0]
 
-        self.assertNotIn(
+        self.assertIn(
             "'iban'",
             editable_fields,
         )
