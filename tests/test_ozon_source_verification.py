@@ -54,20 +54,100 @@ class OzonSourceVerificationTests(unittest.TestCase):
                 page_text="alfa-tires-3381444",
             )
 
+    def test_seller_storefront_single_unscoped_grid_is_safe_fallback(self) -> None:
+        page = '''
+          <div id="state-tileGridDesktop-main" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;1&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/seller-product-1/&quot;},&quot;mainState&quot;:[]}]}" />
+        '''
+        scan: dict[str, object] = {}
+        products, _ = parse_catalog_html(
+            page,
+            "https://www.ozon.ru/seller/alfa-tires-3381444/?abt_att=1",
+            scan,
+        )
+
+        self.assertEqual(["1"], [item["article"] for item in products])
+        self.assertEqual(
+            {
+                "grids_total": 1,
+                "grids_recommendation_rejected": 0,
+                "grids_seller_matched": 0,
+                "grids_unscoped": 1,
+                "selected_strategy": "seller_single_unscoped_fallback",
+                "products_found": 1,
+            },
+            scan,
+        )
+
     def test_recommendation_grid_is_not_catalogue(self) -> None:
         page = '''
           <div id="state-tileGridDesktop-recommendations" data-state="{&quot;title&quot;:&quot;Рекомендуем&quot;,&quot;items&quot;:[{&quot;sku&quot;:&quot;1&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/recommended-1/&quot;},&quot;mainState&quot;:[]}]}" />
         '''
-        products, _ = parse_catalog_html(page, "https://ozon.kz/продавец/alfa-tires-3381444/")
+        scan: dict[str, object] = {}
+        products, _ = parse_catalog_html(
+            page,
+            "https://ozon.kz/продавец/alfa-tires-3381444/",
+            scan,
+        )
         self.assertEqual([], products)
+        self.assertEqual(1, scan["grids_recommendation_rejected"])
+        self.assertEqual("none", scan["selected_strategy"])
 
-    def test_seller_catalogue_requires_positive_seller_widget_context(self) -> None:
+    def test_seller_evidence_retains_strong_widget_match(self) -> None:
         page = '''
           <div id="state-tileGridDesktop-seller" data-state="{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,&quot;items&quot;:[{&quot;sku&quot;:&quot;10&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/seller-product-10/&quot;},&quot;mainState&quot;:[]}] }" />
           <div id="state-tileGridDesktop-other" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;20&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/other-product-20/&quot;},&quot;mainState&quot;:[]}] }" />
         '''
-        products, _ = parse_catalog_html(page, "https://ozon.kz/продавец/alfa-tires-3381444/")
+        scan: dict[str, object] = {}
+        products, _ = parse_catalog_html(
+            page,
+            "https://ozon.kz/продавец/alfa-tires-3381444/",
+            scan,
+        )
         self.assertEqual(["10"], [item["article"] for item in products])
+        self.assertEqual("seller_evidence", scan["selected_strategy"])
+        self.assertEqual(1, scan["grids_seller_matched"])
+
+    def test_non_seller_url_does_not_enter_seller_fallback(self) -> None:
+        page = '''
+          <div id="state-tileGridDesktop-search" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;30&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/search-product-30/&quot;},&quot;mainState&quot;:[]}]}" />
+        '''
+        scan: dict[str, object] = {}
+        products, _ = parse_catalog_html(
+            page,
+            "https://www.ozon.ru/search/?text=tyres",
+            scan,
+        )
+
+        self.assertEqual(["30"], [item["article"] for item in products])
+        self.assertEqual("none", scan["selected_strategy"])
+        self.assertEqual(0, scan["grids_unscoped"])
+
+    def test_multiple_unscoped_seller_grids_are_not_collected(self) -> None:
+        page = '''
+          <div id="state-tileGridDesktop-main" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;40&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/main-product-40/&quot;},&quot;mainState&quot;:[]}]}" />
+          <div id="state-tileGridDesktop-other" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;41&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/other-product-41/&quot;},&quot;mainState&quot;:[]}]}" />
+        '''
+        scan: dict[str, object] = {}
+        products, _ = parse_catalog_html(
+            page,
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            scan,
+        )
+
+        self.assertEqual([], products)
+        self.assertEqual(2, scan["grids_unscoped"])
+        self.assertEqual("none", scan["selected_strategy"])
+
+    def test_kz_storefront_uses_same_single_unscoped_fallback(self) -> None:
+        page = '''
+          <div id="state-tileGridDesktop-main" data-state="{&quot;items&quot;:[{&quot;sku&quot;:&quot;50&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/kz-product-50/&quot;},&quot;mainState&quot;:[]}]}" />
+        '''
+        products, _ = parse_catalog_html(
+            page,
+            "https://ozon.kz/продавец/alfa-tires-3381444/",
+        )
+
+        self.assertEqual(["50"], [item["article"] for item in products])
 
 
 if __name__ == "__main__":

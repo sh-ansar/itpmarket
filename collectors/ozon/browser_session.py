@@ -603,7 +603,13 @@ class BrowserSession:
                 # A page-wide anchor scan would include Ozon cross-sell and
                 # recommendation cards.  Only structured catalogue state is
                 # eligible for a seller snapshot.
-                state_products, next_page = parse_catalog_html(page_html, base_url)
+                grid_scan: dict[str, Any] = {}
+                state_products, next_page = parse_catalog_html(
+                    page_html,
+                    base_url,
+                    grid_scan,
+                )
+                events.append({"event": "catalog_grid_scan", **grid_scan})
                 products = state_products
                 for product in products:
                     article = str(product.get("article") or "")

@@ -158,6 +158,8 @@ It creates only `\Spyon\Spyon Ozon Browsers` with `InteractiveToken` / “Run on
 
 Ozon source approval attaches to that existing interactive browser only. A parsed URL is not enough: the runtime must verify the final same-marketplace seller URL, canonical link and seller identity. Both legacy `/seller/<slug>/` and current `/продавец/<slug>/` storefront paths are accepted; new connections normalize to the current path. Browser unavailability, a challenge, or `NO_CATALOG` from every seller source must leave the operation failed rather than successful, and deployment itself must not start Chrome from Session 0.
 
+Для seller storefront catalogue parser использует только structured `tileGridDesktop`: recommendation/cross-sell grids исключены. При отсутствии seller slug в widget state допустима ровно одна normal unscoped grid с валидными product actions; несколько неидентифицированных grids остаются `NO_CATALOG`. В trace коллектора событие `catalog_grid_scan` показывает причину выбора без раскрытия browser profile или секретов.
+
 Canonical Ozon URL contract: accept both seller path variants on input, but persist and issue all new Ozon.ru/Ozon.kz source URLs as `https://<host>/seller/<slug>/`.
 
 ## Post-deploy verification

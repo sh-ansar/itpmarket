@@ -166,7 +166,67 @@ def _seller_identifier_from_catalog_url(value: str) -> str:
     return match.group(1).casefold() if match else ""
 
 
-def parse_catalog_html(page_html: str, base_url: str) -> tuple[list[dict[str, Any]], str]:
+def _has_explicit_seller_metadata(grid: dict[str, Any]) -> bool:
+    """Whether widget state names a seller, even if it is not the expected one."""
+    seller_keys = {
+        "sellerid",
+        "seller_id",
+        "sellerslug",
+        "seller_slug",
+        "sellerurl",
+        "seller_url",
+    }
+
+    def walk(value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if str(key).casefold().replace("-", "") in seller_keys and child not in (None, ""):
+                    return True
+                if walk(child):
+                    return True
+        elif isinstance(value, list):
+            return any(walk(child) for child in value)
+        return False
+
+    return walk(grid)
+
+
+def _parse_catalogue_grid(grid: dict[str, Any], base_url: str) -> list[dict[str, Any]]:
+    """Parse only valid structured tile actions; never inspect page-wide links."""
+    items = grid.get("items")
+    if not isinstance(items, list) or not items:
+        return []
+
+    products: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        url = normalize_product_url(str(action.get("link") or ""), base_url)
+        article = str(item.get("sku") or item.get("id") or article_from_url(url))
+        if not article or not url:
+            continue
+
+        card_price, all_prices, price_style = _extract_tile_price(item)
+        products.append(
+            {
+                "article": article,
+                "name": _extract_text_from_main_state(item),
+                "catalog_card_price": card_price,
+                "catalog_all_prices": all_prices,
+                "catalog_price_style": price_style,
+                "image_url": _extract_tile_image(item),
+                "url": url,
+            }
+        )
+    return products
+
+
+def parse_catalog_html(
+    page_html: str,
+    base_url: str,
+    grid_scan: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
     products: list[dict[str, Any]] = []
     expected_seller_id = _seller_identifier_from_catalog_url(base_url)
     accepted_catalogue_grid = False
@@ -176,43 +236,64 @@ def parse_catalog_html(page_html: str, base_url: str) -> tuple[list[dict[str, An
         "возможно, вам понравится", "рекомендуем", "популярное",
         "с этим товаром покупают", "recommend", "popular",
     )
+    scan = {
+        "grids_total": len(grids),
+        "grids_recommendation_rejected": 0,
+        "grids_seller_matched": 0,
+        "grids_unscoped": 0,
+        "selected_strategy": "none",
+        "products_found": 0,
+    }
+    seller_matched: list[list[dict[str, Any]]] = []
+    seller_unscoped: list[list[dict[str, Any]]] = []
+    non_seller_grids: list[list[dict[str, Any]]] = []
+
     for grid in grids:
         # Widget state carries its own label/metadata.  A recommendation grid
         # is never a seller catalogue source, even if it contains valid Ozon
         # product URLs.
         grid_context = json.dumps(grid, ensure_ascii=False).casefold()
         if any(marker in grid_context for marker in recommendation_markers):
+            scan["grids_recommendation_rejected"] += 1
             continue
-        # Product grids are reused by Ozon for cross-sell widgets.  On a seller
-        # storefront, require affirmative evidence that the widget belongs to
-        # that seller; an unscoped tile grid is not safe catalogue evidence.
-        if expected_seller_id and expected_seller_id not in grid_context:
-            continue
-        items = grid.get("items")
-        if not isinstance(items, list):
-            continue
-        accepted_catalogue_grid = True
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            action = item.get("action") if isinstance(item.get("action"), dict) else {}
-            url = normalize_product_url(str(action.get("link") or ""), base_url)
-            article = str(item.get("sku") or item.get("id") or article_from_url(url))
-            if not article or not url:
-                continue
 
-            card_price, all_prices, price_style = _extract_tile_price(item)
-            products.append(
-                {
-                    "article": article,
-                    "name": _extract_text_from_main_state(item),
-                    "catalog_card_price": card_price,
-                    "catalog_all_prices": all_prices,
-                    "catalog_price_style": price_style,
-                    "image_url": _extract_tile_image(item),
-                    "url": url,
-                }
-            )
+        grid_products = _parse_catalogue_grid(grid, base_url)
+        # Empty grids and grids without valid Ozon product actions cannot prove
+        # that a seller catalogue has loaded.
+        if not grid_products:
+            continue
+
+        if not expected_seller_id:
+            # Search/category pages use the same structured state but are not
+            # seller storefronts.  They never enter the seller fallback path.
+            non_seller_grids.append(grid_products)
+        elif expected_seller_id in grid_context:
+            scan["grids_seller_matched"] += 1
+            seller_matched.append(grid_products)
+        elif not _has_explicit_seller_metadata(grid):
+            scan["grids_unscoped"] += 1
+            seller_unscoped.append(grid_products)
+
+    if expected_seller_id:
+        if seller_matched:
+            accepted_catalogue_grid = True
+            scan["selected_strategy"] = "seller_evidence"
+            products = [product for grid_products in seller_matched for product in grid_products]
+        elif len(seller_unscoped) == 1:
+            # Ozon's main storefront grid can omit its seller slug from widget
+            # state.  This is safe only for one unambiguous, normal tile grid.
+            accepted_catalogue_grid = True
+            scan["selected_strategy"] = "seller_single_unscoped_fallback"
+            products = seller_unscoped[0]
+    else:
+        # Preserve structured market/category parsing.  This is deliberately
+        # not the seller-storefront fallback and remains traceable as "none".
+        accepted_catalogue_grid = bool(non_seller_grids)
+        products = [product for grid_products in non_seller_grids for product in grid_products]
+
+    scan["products_found"] = len(products)
+    if grid_scan is not None:
+        grid_scan.update(scan)
 
     next_page = ""
     paginators = extract_state_divs(page_html, "infiniteVirtualPaginator")
