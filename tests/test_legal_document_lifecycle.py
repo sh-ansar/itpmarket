@@ -11,6 +11,67 @@ from legal_document_service import LegalDocumentService
 from schema import ensure_database
 
 
+class ZeroLastrowidCursor:
+    """Expose the PostgreSQL BIGSERIAL lastrowid failure mode."""
+
+    lastrowid = 0
+
+    def __init__(
+        self,
+        cursor: object,
+    ) -> None:
+        self._cursor = cursor
+
+    def __getattr__(
+        self,
+        name: str,
+    ) -> object:
+        return getattr(
+            self._cursor,
+            name,
+        )
+
+
+class ZeroLastrowidConnection:
+    def __init__(
+        self,
+        connection: object,
+    ) -> None:
+        self._connection = connection
+
+    def execute(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> ZeroLastrowidCursor:
+        return ZeroLastrowidCursor(
+            self._connection.execute(
+                *args,
+                **kwargs,
+            )
+        )
+
+    def __getattr__(
+        self,
+        name: str,
+    ) -> object:
+        return getattr(
+            self._connection,
+            name,
+        )
+
+
+class ZeroLastrowidLegalDocumentService(
+    LegalDocumentService
+):
+    def _connect(
+        self,
+    ) -> ZeroLastrowidConnection:
+        return ZeroLastrowidConnection(
+            super()._connect()
+        )
+
+
 class LegalDocumentLifecycleTests(
     unittest.TestCase
 ):
@@ -317,6 +378,141 @@ class LegalDocumentLifecycleTests(
                 int(
                     published["id"]
                 ),
+            )
+
+    def test_seed_and_draft_ignore_zero_cursor_lastrowid(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="spyon_legal_zero_lastrowid_"
+        ) as folder:
+            db_path = Path(folder) / "app.db"
+            ensure_database(db_path)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                actor_user_id = int(
+                    conn.execute(
+                        """INSERT INTO app_users(
+                             email,
+                             display_name,
+                             password_hash,
+                             recovery_hash,
+                             role,
+                             is_active,
+                             created_at,
+                             updated_at
+                           ) VALUES(
+                             ?,?,?,?,?,?,?,?
+                           )""",
+                        (
+                            "zero-lastrowid@example.com",
+                            "Zero Lastrowid",
+                            "x",
+                            "x",
+                            "admin",
+                            1,
+                            "2026-09-01T10:00:00+00:00",
+                            "2026-09-01T10:00:00+00:00",
+                        ),
+                    ).lastrowid
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            service = ZeroLastrowidLegalDocumentService(
+                db_path
+            )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                seeded = conn.execute(
+                    """SELECT
+                         d.id,
+                         v.document_id
+                       FROM legal_documents d
+                       JOIN legal_document_versions v
+                         ON v.document_id=d.id
+                       WHERE d.document_type IN ('offer','privacy')"""
+                ).fetchall()
+
+                self.assertTrue(seeded)
+                self.assertTrue(
+                    all(
+                        document_id > 0
+                        and document_id == version_document_id
+                        for document_id, version_document_id in seeded
+                    )
+                )
+
+                conn.execute(
+                    """DELETE FROM legal_document_versions
+                       WHERE document_id=(
+                         SELECT id
+                         FROM legal_documents
+                         WHERE document_type='offer'
+                       )"""
+                )
+                conn.execute(
+                    """DELETE FROM legal_documents
+                       WHERE document_type='offer'"""
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            draft = service.save_draft(
+                {
+                    "type":"offer",
+                    "number":"SPYON-OF-NEW",
+                    "version":"1.1",
+                    "title":"Offer 1.1",
+                    "body_text":"New terms.",
+                    "acceptance_text":"I accept.",
+                    "requires_acceptance":True,
+                },
+                actor_user_id,
+            )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                version_row = conn.execute(
+                    """SELECT
+                         d.id AS document_id,
+                         v.id AS version_id,
+                         v.document_id AS version_document_id
+                       FROM legal_documents d
+                       JOIN legal_document_versions v
+                         ON v.document_id=d.id
+                       WHERE
+                         d.document_type='offer'
+                         AND v.version='1.1'"""
+                ).fetchone()
+                audit = conn.execute(
+                    """SELECT entity_id
+                       FROM platform_audit_log
+                       WHERE
+                         action='legal_document_draft_created'
+                         AND actor_user_id=?""",
+                    (actor_user_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertIsNotNone(version_row)
+            self.assertGreater(version_row[0], 0)
+            self.assertEqual(
+                version_row[0],
+                version_row[2],
+            )
+            self.assertEqual(
+                int(draft["id"]),
+                version_row[1],
+            )
+            self.assertEqual(
+                str(draft["id"]),
+                audit[0],
             )
 
     def test_new_version_requires_acceptance_and_history_is_preserved(

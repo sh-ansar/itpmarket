@@ -512,6 +512,46 @@ class LegalDocumentService:
         finally:
             conn.close()
 
+    @staticmethod
+    def _document_id(
+        conn: Any,
+        document_type: str,
+    ) -> int:
+        row = conn.execute(
+            """SELECT id
+               FROM legal_documents
+               WHERE document_type=?""",
+            (document_type,),
+        ).fetchone()
+
+        if row is None:
+            raise RuntimeError(
+                "Не удалось определить ID юридического документа."
+            )
+
+        return int(row["id"])
+
+    @staticmethod
+    def _version_id(
+        conn: Any,
+        document_id: int,
+        version: str,
+    ) -> int:
+        row = conn.execute(
+            """SELECT id
+               FROM legal_document_versions
+               WHERE document_id=?
+                 AND version=?""",
+            (int(document_id), version),
+        ).fetchone()
+
+        if row is None:
+            raise RuntimeError(
+                "Не удалось определить ID версии юридического документа."
+            )
+
+        return int(row["id"])
+
     def _seed_legacy_versions(
         self,
         conn: Any,
@@ -538,7 +578,7 @@ class LegalDocumentService:
             ).fetchone()
 
             if parent is None:
-                cursor = conn.execute(
+                conn.execute(
                     """INSERT INTO legal_documents(
                          document_type,
                          document_number,
@@ -555,8 +595,9 @@ class LegalDocumentService:
                     ),
                 )
 
-                document_id = int(
-                    cursor.lastrowid
+                document_id = self._document_id(
+                    conn,
+                    definition.document_type,
                 )
 
             else:
@@ -659,6 +700,11 @@ class LegalDocumentService:
                     stamp,
                     stamp,
                 ),
+            )
+            self._version_id(
+                conn,
+                document_id,
+                definition.version,
             )
 
     def _link_legacy_acceptances(
@@ -1762,7 +1808,7 @@ class LegalDocumentService:
                 ).fetchone()
 
                 if parent is None:
-                    cursor = conn.execute(
+                    conn.execute(
                         """INSERT INTO legal_documents(
                              document_type,
                              document_number,
@@ -1779,8 +1825,9 @@ class LegalDocumentService:
                         ),
                     )
 
-                    document_id = int(
-                        cursor.lastrowid
+                    document_id = self._document_id(
+                        conn,
+                        document_type,
                     )
 
                 else:
@@ -1829,7 +1876,7 @@ class LegalDocumentService:
                     )
                 )
 
-                cursor = conn.execute(
+                conn.execute(
                     """INSERT INTO
                        legal_document_versions(
                          document_id,
@@ -1872,8 +1919,10 @@ class LegalDocumentService:
                     ),
                 )
 
-                entity_id = int(
-                    cursor.lastrowid
+                entity_id = self._version_id(
+                    conn,
+                    document_id,
+                    version,
                 )
 
                 action = (
