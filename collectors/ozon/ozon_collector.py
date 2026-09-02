@@ -95,8 +95,21 @@ def result_exit_code(result: dict[str, Any] | None) -> int:
 def has_hard_failure(result: dict[str, Any] | None) -> bool:
     """Whether a stage cannot safely continue to the next one."""
     return str((result or {}).get("status") or "PASSED").upper() in {
-        "BLOCKED", "FAILED", "INTERRUPTED",
+        "PARTIAL", "BLOCKED", "FAILED", "INTERRUPTED",
     }
+
+
+def own_offer_availability(item: dict[str, Any]) -> str:
+    """Normalize the seller's current PDP state for the RU own catalog.
+
+    The product API has an explicit out-of-stock widget.  For a successful
+    regular PDP response it exposes a current price but no separate
+    availability widget, which previously left a fresh own offer as UNKNOWN.
+    """
+    availability = str(item.get("availability_status") or "UNKNOWN").upper()
+    if availability != "UNKNOWN":
+        return availability
+    return "AVAILABLE" if item.get("success") else "UNKNOWN"
 
 
 def structured_result(result: dict[str, Any] | None, error: Exception | None = None) -> dict[str, Any]:
@@ -418,6 +431,7 @@ class Collector:
                     item["seller_match_status"] = seller_match_status(
                         item, self.settings.expected_seller
                     )
+                    item["availability_status"] = own_offer_availability(item)
                     normalized = normalize_marketplace_item(
                         item, now_iso(), run_id, self.settings.start_url
                     )
@@ -521,7 +535,8 @@ class Collector:
         return True
 
     def market_search(
-        self, limit: int | None = None, articles: set[str] | None = None
+        self, limit: int | None = None, articles: set[str] | None = None,
+        *, catalog_run_id: str = "", catalog_articles: set[str] | None = None,
     ) -> dict[str, Any]:
         mode = "market-search"
         run_id = run_id_for(mode)
@@ -529,11 +544,27 @@ class Collector:
         # market_search_batch_limit is a transport/concurrency batch size, not
         # a total full-sync cap.  An explicit CLI limit remains a total cap.
         batch_size = self.settings.market_search_batch_limit
-        total_limit = max(1, int(limit)) if limit is not None else 0
+        total_limit = max(1, int(limit)) if limit is not None and int(limit) > 0 else 0
+        catalog_run_id = str(
+            catalog_run_id or self.registry.current_published_catalog_run_id()
+        ).strip()
+        all_catalog_articles = self.registry.catalog_articles(catalog_run_id)
+        current_catalog_articles = (
+            set(catalog_articles)
+            if catalog_articles is not None
+            else set(all_catalog_articles)
+        )
+        all_catalog_articles |= current_catalog_articles
+        if articles is not None:
+            current_catalog_articles &= {str(article) for article in articles}
         owners = self.registry.client_products_for_market_search(
-            total_limit, allowed_articles=articles
+            total_limit, allowed_articles=current_catalog_articles,
+            catalog_run_id=catalog_run_id,
         )
         self.registry.begin_run(run_id, mode, self.settings.start_url)
+        self.registry.begin_market_analysis(
+            run_id, catalog_run_id, len(current_catalog_articles)
+        )
         browser = self.ensure_browser()
         started = time.monotonic()
         metrics = {
@@ -541,7 +572,7 @@ class Collector:
             "items_failed": 0, "items_blocked": 0, "candidates_found": 0,
             "exact_found": 0, "comparable_found": 0,
         }
-        status = "PASSED"
+        status = "PASSED" if catalog_run_id and len(owners) == len(current_catalog_articles) else "PARTIAL"
         print("=" * 78)
         print("OZON COLLECTOR 3.3.2 — ПОИСК РЫНОЧНЫХ ПРЕДЛОЖЕНИЙ")
         print("Основной уровень: бренд + модель + размер. Резервный: бренд + размер.")
@@ -562,8 +593,13 @@ class Collector:
                 print(f"\n[ПОЗИЦИЯ {owner_index}/{len(owners)}] {owner_article} — {owner.get('title','')}")
                 if not queries:
                     print("SKIP | недостаточно бренда или размера для поиска")
-                    self.registry.finish_market_search(owner_article, "", "", "SKIPPED", 0, 0, 0, run_id, "Недостаточно данных")
-                    metrics["items_failed"] += 1; status = "PARTIAL"; continue
+                    reason = "Нет безопасного identity для поиска"
+                    self.registry.finish_market_search(owner_article, "", "", "NO_SAFE_IDENTITY", 0, 0, 0, run_id, reason)
+                    self.registry.record_market_analysis_product(
+                        run_id, owner_article, "NO_SAFE_IDENTITY", "", "", 0, 0, 0, reason
+                    )
+                    metrics["items_success"] += 1
+                    continue
                 self.registry.begin_market_search(owner_article, run_id)
                 unique_candidates: dict[str, tuple[dict[str, Any], str, str, int]] = {}
                 exact_count = comparable_count = 0
@@ -596,7 +632,11 @@ class Collector:
                         metrics["pages_loaded"] += 1
                         for rank, item in enumerate(response.get("products") or [], start=1):
                             article = str(item.get("article") or "")
-                            if not article or article == owner_article or article in unique_candidates:
+                            if (
+                                not article or article == owner_article
+                                or article in all_catalog_articles
+                                or article in unique_candidates
+                            ):
                                 continue
                             self.registry.upsert_catalog_product(item, search_url, run_id, page_no, now_iso())
                             unique_candidates[article] = (item, query, search_url, rank)
@@ -619,10 +659,14 @@ class Collector:
                         if own_seller:
                             match = {"accepted": False, "level": "REJECTED", "score": 0, "method": "OWN_SELLER", "reason": "Собственный продавец", "reasons": []}
                         _, q, q_url, rank = unique_candidates[candidate_article]
-                        self.registry.save_market_candidate(owner_article, candidate_article, q, q_url, rank, match, run_id)
+                        self.registry.save_market_candidate(
+                            owner_article, candidate_article, q, q_url, rank, match, run_id,
+                            candidate=candidate, offer=offer,
+                        )
                     rows = self.registry.conn.execute(
-                        "SELECT match_level,COUNT(*) c FROM market_search_candidates WHERE client_article=? AND active=1 GROUP BY match_level",
-                        (owner_article,),
+                        """SELECT match_level,COUNT(*) c FROM market_analysis_candidates
+                           WHERE market_run_id=? AND client_article=? GROUP BY match_level""",
+                        (run_id, owner_article),
                     ).fetchall()
                     counts = {str(row[0]): int(row[1]) for row in rows}
                     exact_count = counts.get("EXACT",0)+counts.get("STRONG",0)
@@ -634,9 +678,22 @@ class Collector:
                 metrics["candidates_found"] += total_candidates
                 metrics["exact_found"] += exact_count
                 metrics["comparable_found"] += comparable_count
-                item_status = "COMPLETED" if exact_count or comparable_count else "NO_MATCH"
+                item_status = (
+                    "BLOCKED" if search_error.startswith("BLOCKED")
+                    else "FAILED" if search_error
+                    else "COMPLETED" if exact_count or comparable_count
+                    else "NO_MATCH"
+                )
+                if search_error:
+                    metrics["items_failed"] += 1
+                    status = "BLOCKED" if item_status == "BLOCKED" else "PARTIAL"
                 self.registry.finish_market_search(owner_article,last_query,last_url,item_status,total_candidates,exact_count,comparable_count,run_id,search_error)
-                metrics["items_success"] += 1
+                self.registry.record_market_analysis_product(
+                    run_id, owner_article, item_status, last_query, last_url,
+                    total_candidates, exact_count, comparable_count, search_error,
+                )
+                if not search_error:
+                    metrics["items_success"] += 1
                 print(f"  Результат: кандидатов {total_candidates}; точных/сильных {exact_count}; бренд+размер {comparable_count}")
                 sleep_range(self.settings.market_search_delay_seconds)
         except KeyboardInterrupt:
@@ -647,11 +704,15 @@ class Collector:
             raise
         finally:
             metrics["duration_seconds"] = round(time.monotonic() - started, 2)
+            status = self.registry.finish_market_analysis(run_id, status, metrics)
             self.registry.finish_run(run_id, status, metrics)
             (run_dir / "summary.json").write_text(json.dumps({"run_id":run_id,"mode":mode,"status":status,**metrics},ensure_ascii=False,indent=2),encoding="utf-8")
             self.generate_outputs()
         print(f"\nГотово: {metrics['items_success']}/{metrics['items_total']}; точных/сильных {metrics['exact_found']}; бренд+размер {metrics['comparable_found']}; время {metrics['duration_seconds']} сек.")
-        return {"run_id":run_id,"run_dir":str(run_dir),"status":status,**metrics}
+        return {
+            "run_id": run_id, "run_dir": str(run_dir), "status": status,
+            "catalog_run_id": catalog_run_id, **metrics,
+        }
 
     def sync_catalog(self, limit: int | None = None) -> dict[str, Any]:
         discovery = self.discover()
@@ -679,6 +740,15 @@ class Collector:
             0,
             catalog_run_id=str(discovery.get("run_id") or ""),
         )
+        expected_articles = int(discovery.get("items_total") or 0)
+        refreshed_articles = int(details.get("items_total") or 0)
+        if refreshed_articles != expected_articles:
+            details = {
+                **details,
+                "status": "PARTIAL",
+                "expected_catalog_articles": expected_articles,
+                "selected_catalog_articles": refreshed_articles,
+            }
         return {
             "status": combined_status(
                 discovery,
@@ -701,7 +771,10 @@ class Collector:
             }
         # Catalog synchronisation has already captured the seller's own
         # current price.  Full sync proceeds directly to market analysis.
-        market = self.market_search(limit)
+        market = self.market_search(
+            limit,
+            catalog_run_id=str((catalog.get("discovery") or {}).get("run_id") or ""),
+        )
 
         return {
             "status": combined_status(
@@ -733,6 +806,23 @@ def load_article_filter(path_value: str | None) -> set[str] | None:
         raise ValueError("Некорректный список товаров Ozon.ru.")
     result = {str(article).strip().removeprefix("ozon:") for article in raw if str(article).strip()}
     return result
+
+
+def current_tenant_ozon_articles(args: argparse.Namespace) -> set[str] | None:
+    """Use the active tenant seller catalogue as the market-search boundary."""
+    tenant_id = int(getattr(args, "tenant_id", 0) or 0)
+    app_db = str(getattr(args, "app_db", "") or "").strip()
+    if tenant_id <= 0 or not app_db:
+        return None
+    memberships = CatalogConfigurationService(Path(app_db)).catalog_memberships(
+        tenant_id,
+        {"ozon"},
+        tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
+    )
+    return {
+        str(article) for marketplace, article in memberships
+        if marketplace == "ozon" and str(article).strip()
+    }
 
 
 def settings_for_args(settings: Settings, args: argparse.Namespace) -> Settings:
@@ -790,6 +880,7 @@ def materialize_tenant_catalog(
     marketplace_code: str = "ozon",
     tenant_seller_id: int | None = None,
     catalog_run_id: str = "",
+    refresh_run_id: str = "",
 ) -> int:
     if int(tenant_id or 0) <= 0 or not str(app_db or "").strip():
         return 0
@@ -828,14 +919,42 @@ def materialize_tenant_catalog(
             )
         offers: dict[str, dict[str, Any]] = {}
         if offer_conditions:
-            offer_rows = conn.execute(
-                "SELECT o.* FROM offers o WHERE o.active=1 AND ("
-                + " OR ".join(offer_conditions)
-                + ") ORDER BY o.article,o.last_checked_at DESC",
-                offer_params,
-            ).fetchall()
+            if marketplace_code == "ozon" and str(refresh_run_id).strip():
+                offer_rows = conn.execute(
+                    """SELECT o.*,
+                              ph.card_price AS fresh_card_price,
+                              ph.regular_price AS fresh_regular_price,
+                              ph.original_price AS fresh_original_price,
+                              ph.catalog_price AS fresh_catalog_price,
+                              ph.availability_status AS fresh_availability_status,
+                              ph.currency AS fresh_currency,
+                              ph.collected_at AS fresh_collected_at
+                       FROM price_history ph
+                       JOIN offers o ON o.article=ph.article AND o.seller_key=ph.seller_key
+                       WHERE ph.run_id=? AND o.active=1 AND ("""
+                    + " OR ".join(offer_conditions)
+                    + ") ORDER BY o.article,o.last_checked_at DESC",
+                    [str(refresh_run_id).strip(), *offer_params],
+                ).fetchall()
+            else:
+                offer_rows = conn.execute(
+                    "SELECT o.* FROM offers o WHERE o.active=1 AND ("
+                    + " OR ".join(offer_conditions)
+                    + ") ORDER BY o.article,o.last_checked_at DESC",
+                    offer_params,
+                ).fetchall()
             for row in offer_rows:
                 offers.setdefault(str(row["article"]), dict(row))
+        if marketplace_code == "ozon" and str(catalog_run_id).strip():
+            if not str(refresh_run_id).strip():
+                raise RuntimeError("Ozon.ru publication requires a passed refresh run.")
+            expected_articles = {str(row["article"]) for row in rows}
+            missing_fresh_offers = sorted(expected_articles - set(offers))
+            if missing_fresh_offers:
+                raise RuntimeError(
+                    "Ozon.ru publication refused: fresh own offer is missing for "
+                    f"{len(missing_fresh_offers)} discovered article(s)."
+                )
     finally:
         conn.close()
     products: list[dict[str, Any]] = []
@@ -843,6 +962,7 @@ def materialize_tenant_catalog(
     for raw in rows:
         value = dict(raw)
         own = offers.get(str(value.get("article") or ""), {})
+        fresh_own = marketplace_code == "ozon" and str(refresh_run_id).strip()
         attributes = [
             {"name": label, "value": value.get(key)}
             for key, label in (
@@ -859,17 +979,25 @@ def materialize_tenant_catalog(
             "url": value.get("canonical_url") or "",
             "image_url": value.get("image_url") or "",
             "price": (
-                own.get("card_price") or own.get("regular_price")
-                or value.get("catalog_price") or None
+                own.get("fresh_card_price") or own.get("fresh_regular_price")
+                if fresh_own else own.get("card_price") or own.get("regular_price")
+            ) or (
+                None if fresh_own else value.get("catalog_price") or None
             ),
             "currency": (
                 "KZT" if marketplace_code == "ozon_kz"
-                else own.get("currency") or currency
+                else own.get("fresh_currency") if fresh_own else own.get("currency") or currency
             ),
-            "availability": own.get("availability_status") or "",
+            "availability": (
+                own.get("fresh_availability_status") if fresh_own
+                else own.get("availability_status") or ""
+            ),
             "category": "",
             "attributes": attributes,
-            "updated_at": value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at"),
+            "updated_at": (
+                own.get("fresh_collected_at") if fresh_own
+                else value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at")
+            ),
         })
     return CatalogConfigurationService(Path(app_db)).replace_catalog_products(
         int(tenant_id), marketplace_code, products,
@@ -936,7 +1064,10 @@ def main() -> int:
         elif args.command in {"enrich-new", "refresh-prices", "refresh-stale", "retry-failed", "stress-test"}:
             result = collector.process(args.command, args.limit, article_filter)
         elif args.command == "market-search":
-            result = collector.market_search(args.limit, article_filter)
+            result = collector.market_search(
+                args.limit, article_filter,
+                catalog_articles=current_tenant_ozon_articles(args),
+            )
         elif args.command == "full-sync":
             result = collector.full_sync(args.limit)
         elif args.command == "report":
@@ -962,7 +1093,14 @@ def main() -> int:
                 catalog_run_id=str(
                     (catalog_result.get("discovery") or {}).get("run_id") or ""
                 ),
+                refresh_run_id=str(
+                    (catalog_result.get("details") or {}).get("run_id") or ""
+                ),
             )
+            if int(args.tenant_id or 0) > 0 and str(args.app_db or "").strip():
+                collector.registry.mark_catalog_published(str(
+                    (catalog_result.get("discovery") or {}).get("run_id") or ""
+                ))
         return result_exit_code(result)
     except Exception as exc:
         print(f"Collector error: {exc}", file=sys.stderr)

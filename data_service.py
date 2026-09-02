@@ -871,6 +871,187 @@ class DataService:
         return "stale", "Устарело"
 
 
+    def _current_ozon_rows(
+        self, conn: Any, expected_name: str, seller_ids: set[str]
+    ) -> list[dict[str, Any]]:
+        """Build Ozon analytics from one published market snapshot only."""
+        catalog = conn.execute(
+            """SELECT cp.catalog_run_id AS run_id FROM catalog_publications cp
+               JOIN runs r ON r.run_id=cp.catalog_run_id
+               WHERE r.mode='discover' AND r.status='PASSED'
+                 AND EXISTS(SELECT 1 FROM catalog_snapshots cs WHERE cs.run_id=cp.catalog_run_id)
+               ORDER BY cp.published_at DESC LIMIT 1"""
+        ).fetchone()
+        if not catalog:
+            return []
+        catalog_run_id = str(catalog["run_id"])
+        current = conn.execute(
+            """SELECT mac.market_run_id FROM market_analysis_current mac
+               JOIN market_analysis_runs mar ON mar.run_id=mac.market_run_id
+               WHERE mac.catalog_run_id=? AND mar.status='PASSED'""",
+            (catalog_run_id,),
+        ).fetchone()
+        market_run_id = str(current["market_run_id"]) if current else ""
+        products = {
+            str(row["article"]): dict(row)
+            for row in conn.execute(
+                """SELECT p.* FROM catalog_snapshots cs JOIN products p ON p.article=cs.article
+                   WHERE cs.run_id=? ORDER BY p.article""",
+                (catalog_run_id,),
+            ).fetchall()
+        }
+        offers_by_article: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in conn.execute(
+            """SELECT * FROM offers WHERE active=1
+               ORDER BY article,CASE WHEN card_price>0 THEN 0 ELSE 1 END,card_price,last_checked_at DESC"""
+        ).fetchall():
+            offers_by_article[str(row["article"])].append(dict(row))
+        product_state: dict[str, dict[str, Any]] = {}
+        candidates: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        if market_run_id:
+            product_state = {
+                str(row["client_article"]): dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM market_analysis_products WHERE market_run_id=?",
+                    (market_run_id,),
+                ).fetchall()
+            }
+            for row in conn.execute(
+                """SELECT * FROM market_analysis_candidates
+                   WHERE market_run_id=? AND match_level IN ('EXACT','STRONG','COMPARABLE')
+                   ORDER BY match_score DESC,catalog_rank""",
+                (market_run_id,),
+            ).fetchall():
+                candidates[str(row["client_article"])].append(dict(row))
+
+        result: list[dict[str, Any]] = []
+        for article, value in products.items():
+            article_offers = offers_by_article.get(article, [])
+            own_offer = next((
+                offer for offer in article_offers
+                if self._is_own_ozon_offer(offer, expected_name, seller_ids)
+            ), None)
+            own_price = self._ozon_effective_price(own_offer, value.get("catalog_price"))
+            accepted: dict[tuple[str, str], dict[str, Any]] = {}
+            for row in candidates.get(article, []):
+                offer = dict(row)
+                if self._is_own_ozon_offer(offer, expected_name, seller_ids):
+                    continue
+                price = self._ozon_effective_price(offer)
+                seller_key = str(offer.get("seller_id") or offer.get("seller_name") or "").strip()
+                if price <= 0 or not seller_key:
+                    continue
+                level = str(offer.get("match_level") or "")
+                priority = {"EXACT": 3, "STRONG": 2, "COMPARABLE": 1}.get(level, 0)
+                key = (str(offer.get("candidate_article") or ""), seller_key.casefold())
+                if key in accepted and accepted[key]["_priority"] >= priority:
+                    continue
+                label = {
+                    "OZON_SAME_ARTICLE": "Та же карточка Ozon.ru",
+                    "OZON_MANUFACTURER_ARTICLE": "Совпадение по артикулу производителя",
+                    "OZON_STRICT_FINGERPRINT": "Строгое совпадение характеристик",
+                }.get(str(offer.get("match_method") or ""), "Результат поиска Ozon.ru")
+                accepted[key] = {
+                    "article": str(offer.get("candidate_article") or ""),
+                    "merchant_id": offer.get("seller_id") or "",
+                    "merchant_name": offer.get("seller_name") or "Продавец Ozon.ru",
+                    "merchant_rating": offer.get("seller_rating"),
+                    "price_rub": price,
+                    "currency": offer.get("currency") or "RUB",
+                    "product_url": offer.get("product_url") or "",
+                    "product_title": offer.get("product_title") or "",
+                    "captured_at": offer.get("collected_at") or "",
+                    "match_method": offer.get("match_method") or "",
+                    "match_method_label": label,
+                    "match_level": level,
+                    "match_score": float(offer.get("match_score") or 0),
+                    "match_reason": offer.get("match_reason") or "",
+                    "is_own": False,
+                    "_priority": priority,
+                }
+            exact_candidates = [
+                {key: value for key, value in item.items() if key != "_priority"}
+                for item in accepted.values() if item["match_level"] in {"EXACT", "STRONG"}
+            ]
+            comparable_candidates = [
+                {key: value for key, value in item.items() if key != "_priority"}
+                for item in accepted.values() if item["match_level"] == "COMPARABLE"
+            ]
+            pool = exact_candidates if exact_candidates else comparable_candidates
+            basis = "EXACT" if exact_candidates else "COMPARABLE" if comparable_candidates else "NONE"
+            prices = sorted(int(item["price_rub"]) for item in pool if int(item.get("price_rub") or 0) > 0)
+            market_min = min(prices) if prices else None
+            market_max = max(prices) if prices else None
+            market_median = float(statistics.median(prices)) if prices else None
+            difference_pct = round((own_price - market_median) / market_median * 100, 2) if own_price and market_median else None
+            state = product_state.get(article, {})
+            state_status = str(state.get("status") or "")
+            if not market_run_id or state_status == "NO_SAFE_IDENTITY":
+                status = "NOT_ANALYZED"
+            elif value.get("detail_status") != "COMPLETE":
+                status = "DATA_ERROR" if value.get("last_error") else "NOT_ANALYZED"
+            elif not prices:
+                status = "NO_OTHER_SELLERS"
+            elif basis == "EXACT":
+                status = "EXACT_LOWEST" if own_price < market_min else "EXACT_TIED_LOWEST" if own_price == market_min else "EXACT_HIGHEST" if own_price > market_max else "EXACT_TIED_HIGHEST" if own_price == market_max else "EXACT_IN_MARKET" if abs(float(difference_pct or 0)) <= 2 else "EXACT_BELOW" if float(difference_pct or 0) < 0 else "EXACT_ABOVE"
+            else:
+                status = "COMPARABLE_LOWEST" if own_price <= market_min else "COMPARABLE_HIGHEST" if own_price >= market_max else "COMPARABLE_IN_MARKET" if abs(float(difference_pct or 0)) <= 2 else "COMPARABLE_BELOW" if float(difference_pct or 0) < 0 else "COMPARABLE_ABOVE"
+            info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+            own_updated = (own_offer or {}).get("last_checked_at") or value.get("last_price_at") or value.get("last_detail_at") or value.get("last_seen_at") or ""
+            freshness_status, freshness_label = self._freshness(own_updated)
+            characteristics = self._characteristics(
+                value.get("title") or "", value.get("specs_json") or [], value.get("brand") or "",
+                {
+                    "size": value.get("tire_size") or "", "product_type": self._ozon_product_type(value.get("title")),
+                    "model": value.get("model") or "", "load_index": value.get("load_index") or "",
+                    "speed_index": value.get("speed_index") or "", "season": value.get("season") or "",
+                    "studded": value.get("studded"), "runflat": value.get("runflat"),
+                },
+            )
+            result.append({
+                **characteristics,
+                "product_code": f"ozon:{article}", "source_product_code": article,
+                "platform": "ozon", "platform_label": "Ozon.ru", "source_type": "CURRENT_CATALOG",
+                "title": value.get("title") or "", "brand": value.get("brand") or "", "model": value.get("model") or "",
+                "size": characteristics.get("size") or value.get("tire_size") or "",
+                "product_type": characteristics.get("product_type") or self._ozon_product_type(value.get("title")),
+                "strict_identity_eligible": bool(value.get("brand") and value.get("tire_size")),
+                "product_url": value.get("canonical_url") or "", "image_url": value.get("image_url") or "",
+                "own_price_kzt": None, "market_price_kzt": None, "price_original": own_price,
+                "currency_original": (own_offer or {}).get("currency") or "RUB",
+                "regular_price_original": (own_offer or {}).get("regular_price") or 0,
+                "market_min_price_original": market_min, "market_max_price_original": market_max,
+                "market_median_price_original": market_median,
+                "seller_id": (own_offer or {}).get("seller_id") or next(iter(seller_ids), ""),
+                "seller_name": (own_offer or {}).get("seller_name") or ("Alfa Tires" if expected_name else ""),
+                "seller_url": (own_offer or {}).get("seller_url") or "", "seller_rating": (own_offer or {}).get("seller_rating"),
+                "catalog_rating": (own_offer or {}).get("product_rating"), "catalog_reviews": (own_offer or {}).get("review_count"),
+                "availability_status": (own_offer or {}).get("availability_status") or "UNKNOWN",
+                "price_status": status, "status_label": info["label"], "status_tone": info["tone"],
+                "identity_completeness_percent": value.get("identity_completeness_percent") or 0,
+                "manufacturer_article": value.get("manufacturer_article") or "", "load_index": characteristics.get("load_index") or value.get("load_index") or "",
+                "speed_index": characteristics.get("speed_index") or value.get("speed_index") or "", "season": characteristics.get("season") or "UNKNOWN",
+                "studded": characteristics.get("studded") or "UNKNOWN", "xl": bool(value.get("xl")), "runflat": bool(characteristics.get("runflat")),
+                "watched": False, "priority": "normal", "note": "", "candidate_count": len(pool), "reference_count": len(pool),
+                "exact_candidate_count": len(exact_candidates), "comparable_candidate_count": len(comparable_candidates),
+                "reference_type": "OZON_EXACT_PRODUCT" if basis == "EXACT" else "OZON_BRAND_SIZE" if basis == "COMPARABLE" else "",
+                "market_basis": basis, "match_method": pool[0]["match_method"] if pool else "",
+                "match_method_label": pool[0]["match_method_label"] if pool else "", "exact_candidates": exact_candidates,
+                "comparable_candidates": comparable_candidates, "difference_pct": difference_pct,
+                "price_rank": (1 + sum(price < own_price for price in prices)) if prices and own_price else None,
+                "price_rank_total": len(prices) + 1 if prices and own_price else None,
+                "price_rank_tie_count": (1 + sum(price == own_price for price in prices)) if prices and own_price else 0,
+                "is_lowest": status in {"EXACT_LOWEST", "EXACT_TIED_LOWEST", "COMPARABLE_LOWEST"}, "is_unique_lowest": status == "EXACT_LOWEST",
+                "is_highest": status in {"EXACT_HIGHEST", "EXACT_TIED_HIGHEST", "COMPARABLE_HIGHEST"}, "is_unique_highest": status == "EXACT_HIGHEST",
+                "lowest_product_url": min(pool, key=lambda item: item["price_rub"])["product_url"] if pool else "",
+                "highest_product_url": max(pool, key=lambda item: item["price_rub"])["product_url"] if pool else "",
+                "updated_at": own_updated, "freshness_status": freshness_status, "freshness_label": freshness_label,
+                "market_run_id": market_run_id, "_price_sort": float(own_price or 0),
+                "_delta_sort": float(difference_pct or 0), "_updated_sort": own_updated,
+            })
+        return result
+
+
     def _ozon_rows(self) -> list[dict[str, Any]]:
         path = self.ozon_db_path
         if not path or not path.exists():
@@ -879,7 +1060,16 @@ class DataService:
         try:
             conn = self._connect_path(path)
             expected_name, seller_ids = self._ozon_owner_config()
-            self._ensure_ozon_source_schema(conn, expected_name, seller_ids)
+            if not all(table_exists(conn, table) for table in (
+                "catalog_snapshots", "market_analysis_runs",
+                "market_analysis_products", "market_analysis_candidates",
+                "market_analysis_current", "catalog_publications",
+            )):
+                # A legacy active-row registry cannot prove one completed,
+                # catalog-bound market state.  Hiding it is safer than
+                # presenting a mixed partial run as current analytics.
+                return []
+            return self._current_ozon_rows(conn, expected_name, seller_ids)
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS market_search_candidates (
                     client_article TEXT NOT NULL,candidate_article TEXT NOT NULL,

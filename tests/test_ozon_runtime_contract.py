@@ -20,6 +20,9 @@ from browser_session import BrowserSession
 from ozon_collector import (
     Collector,
     combined_status,
+    has_hard_failure,
+    materialize_tenant_catalog,
+    own_offer_availability,
     result_exit_code,
     structured_result as collector_structured_result,
 )
@@ -27,6 +30,7 @@ from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import
 from registry import Registry
 from collectors.ozon_kz.ozon_kz_collector import require_complete
+from data_service import DataService
 from storage.postgres_compat import _schema_for_path
 from task_manager import RESULT_MESSAGES, structured_result
 
@@ -258,6 +262,11 @@ class OzonRuntimeContractTests(unittest.TestCase):
             collector.registry.client_products_for_market_search.return_value = [
                 {"article": f"owner-{number}"} for number in range(31)
             ]
+            collector.registry.current_published_catalog_run_id.return_value = "catalog-run"
+            collector.registry.catalog_articles.return_value = {
+                f"owner-{number}" for number in range(31)
+            }
+            collector.registry.finish_market_analysis.return_value = "PASSED"
             collector._run_dir = MagicMock(return_value=Path(folder))
             collector.ensure_browser = MagicMock()
             collector.generate_outputs = MagicMock()
@@ -266,11 +275,13 @@ class OzonRuntimeContractTests(unittest.TestCase):
                 result = collector.market_search()
 
         collector.registry.client_products_for_market_search.assert_called_once_with(
-            0, allowed_articles=None
+            0,
+            allowed_articles={f"owner-{number}" for number in range(31)},
+            catalog_run_id="catalog-run",
         )
         self.assertEqual(31, result["items_total"])
         self.assertEqual(31, collector.registry.finish_market_search.call_count)
-        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual("PASSED", result["status"])
 
     def test_catalog_details_cover_every_product_from_this_discovery(self) -> None:
         collector = Collector.__new__(Collector)
@@ -285,6 +296,135 @@ class OzonRuntimeContractTests(unittest.TestCase):
             "refresh-prices", 0, catalog_run_id="catalog-run"
         )
         self.assertEqual("PASSED", result["status"])
+
+    def test_partial_or_failed_discovery_never_starts_own_price_refresh(self) -> None:
+        for status in ("PARTIAL", "FAILED", "BLOCKED", "INTERRUPTED"):
+            collector = Collector.__new__(Collector)
+            collector.discover = MagicMock(return_value={"status": status})
+            collector.process = MagicMock()
+
+            result = collector.sync_catalog()
+
+            self.assertTrue(has_hard_failure({"status": status}))
+            collector.process.assert_not_called()
+            self.assertEqual(status, result["status"])
+
+    def test_catalog_details_must_select_every_article_from_discovery_run(self) -> None:
+        collector = Collector.__new__(Collector)
+        collector.discover = MagicMock(return_value={
+            "status": "PASSED", "run_id": "catalog-run", "items_total": 24,
+        })
+        collector.process = MagicMock(return_value={
+            "status": "PASSED", "run_id": "refresh-run", "items_total": 23,
+        })
+
+        result = collector.sync_catalog()
+
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual(24, result["details"]["expected_catalog_articles"])
+        self.assertEqual(23, result["details"]["selected_catalog_articles"])
+
+    @staticmethod
+    def _own_catalog_item(article: str, price: int, availability: str = "AVAILABLE") -> tuple[dict[str, object], dict[str, object]]:
+        product_url = f"https://www.ozon.ru/product/{article}/"
+        return (
+            {
+                "article": article,
+                "seller_id": "3381444",
+                "seller_name": "Alfa Tires",
+                "seller_link": "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            },
+            {
+                "source_url": product_url,
+                "title": f"Tyre {article}",
+                "image_url": "",
+                "price": price,
+                "catalog_price": price,
+                "regular_price": price,
+                "original_price": price,
+                "currency": "RUB",
+                "availability_status": availability,
+                "identity_completeness_percent": 0,
+            },
+        )
+
+    @staticmethod
+    def _own_catalog_settings(registry_path: Path) -> SimpleNamespace:
+        source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+        return SimpleNamespace(
+            start_url=source,
+            start_urls=(source,),
+            expected_seller="Alfa Tires",
+            database_path=registry_path,
+        )
+
+    def test_current_refresh_snapshot_replaces_old_own_price(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_fresh_own_price_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                article = "A"
+                registry.upsert_catalog_product(
+                    {"article": article, "name": "Old", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 100},
+                    source, "old-discovery", 1, "2026-09-02T12:00:00",
+                )
+                item, normalized = self._own_catalog_item(article, 100)
+                registry.update_from_detail(item, normalized, "old-refresh", "2026-09-02T12:01:00")
+                registry.upsert_catalog_product(
+                    {"article": article, "name": "New", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 120},
+                    source, "new-discovery", 1, "2026-09-02T13:00:00",
+                )
+                item, normalized = self._own_catalog_item(article, 120, "OUT_OF_STOCK")
+                registry.update_from_detail(item, normalized, "new-refresh", "2026-09-02T13:01:00")
+                settings = self._own_catalog_settings(registry.path)
+                with patch("ozon_collector.CatalogConfigurationService") as service:
+                    service.return_value.replace_catalog_products.return_value = 1
+                    self.assertEqual(1, materialize_tenant_catalog(
+                        settings, 1, str(Path(folder) / "app.db"), "ozon",
+                        catalog_run_id="new-discovery", refresh_run_id="new-refresh",
+                    ))
+                    products = service.return_value.replace_catalog_products.call_args.args[2]
+                self.assertEqual(120, products[0]["price"])
+                self.assertEqual("OUT_OF_STOCK", products[0]["availability"])
+                self.assertEqual("2026-09-02T13:01:00", products[0]["updated_at"])
+            finally:
+                registry.close()
+
+    def test_failed_current_refresh_cannot_publish_stale_own_price(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_stale_own_price_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                article = "A"
+                registry.upsert_catalog_product(
+                    {"article": article, "name": "Old", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 100},
+                    source, "old-discovery", 1, "2026-09-02T12:00:00",
+                )
+                item, normalized = self._own_catalog_item(article, 100)
+                registry.update_from_detail(item, normalized, "old-refresh", "2026-09-02T12:01:00")
+                settings = self._own_catalog_settings(registry.path)
+                published: list[list[dict[str, object]]] = []
+                with patch("ozon_collector.CatalogConfigurationService") as service:
+                    service.return_value.replace_catalog_products.side_effect = (
+                        lambda _tenant, _marketplace, rows, **_kwargs: published.append(rows) or len(rows)
+                    )
+                    materialize_tenant_catalog(
+                        settings, 1, str(Path(folder) / "app.db"), "ozon",
+                        catalog_run_id="old-discovery", refresh_run_id="old-refresh",
+                    )
+                    registry.upsert_catalog_product(
+                        {"article": article, "name": "Current", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 120},
+                        source, "new-discovery", 1, "2026-09-02T13:00:00",
+                    )
+                    with self.assertRaisesRegex(RuntimeError, "fresh own offer is missing"):
+                        materialize_tenant_catalog(
+                            settings, 1, str(Path(folder) / "app.db"), "ozon",
+                            catalog_run_id="new-discovery", refresh_run_id="failed-refresh",
+                        )
+                self.assertEqual(1, len(published))
+                self.assertEqual(100, published[0][0]["price"])
+            finally:
+                registry.close()
 
     def test_catalog_run_filter_excludes_old_source_membership(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_catalog_run_") as folder:
@@ -350,6 +490,16 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual(36824, normalized["price"])
         self.assertEqual("OUT_OF_STOCK", normalized["availability_status"])
 
+    def test_successful_own_pdp_without_out_of_stock_widget_is_available(self) -> None:
+        self.assertEqual(
+            "AVAILABLE",
+            own_offer_availability({"success": True, "availability_status": "UNKNOWN"}),
+        )
+        self.assertEqual(
+            "OUT_OF_STOCK",
+            own_offer_availability({"success": True, "availability_status": "OUT_OF_STOCK"}),
+        )
+
     def test_price_queue_is_limited_to_the_selected_seller_source(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_source_queue_") as folder:
             registry = Registry(Path(folder) / "registry.db")
@@ -388,6 +538,176 @@ class OzonRuntimeContractTests(unittest.TestCase):
                         "refresh-prices", 100, allowed_articles=allowed
                     ),
                 )
+            finally:
+                registry.close()
+
+    def test_refresh_limit_zero_selects_every_article_from_catalog_run(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_limit_zero_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                for number in range(24):
+                    registry.upsert_catalog_product(
+                        {
+                            "article": f"article-{number}",
+                            "name": f"Article {number}",
+                            "url": f"https://www.ozon.ru/product/article-{number}/",
+                            "catalog_card_price": 100,
+                        },
+                        source, "catalog-run", 1, "2026-09-02T12:00:00",
+                    )
+                allowed = registry.articles_for_sources([source], catalog_run_id="catalog-run")
+                selected = registry.select_articles(
+                    "refresh-prices", 0, allowed_articles=allowed
+                )
+                self.assertEqual(24, len(allowed))
+                self.assertEqual(24, len(selected))
+                self.assertEqual(set(selected), allowed)
+            finally:
+                registry.close()
+
+    def test_market_queue_is_current_catalog_scoped_without_a_tire_size_cap(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_queue_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                for article, run_id in (("removed", "old-catalog"), ("tube", "current-catalog")):
+                    registry.upsert_catalog_product(
+                        {"article": article, "name": article, "url": f"https://www.ozon.ru/product/{article}/", "catalog_card_price": 100},
+                        source, run_id, 1, "2026-09-02T12:00:00",
+                    )
+                    item, normalized = self._own_catalog_item(article, 100)
+                    normalized["brand"] = "Michelin"
+                    registry.update_from_detail(item, normalized, f"refresh-{article}", "2026-09-02T12:01:00")
+                selected = registry.client_products_for_market_search(
+                    0, catalog_run_id="current-catalog"
+                )
+                self.assertEqual(["tube"], [row["article"] for row in selected])
+            finally:
+                registry.close()
+
+    @staticmethod
+    def _market_fixture_registry(folder: str) -> tuple[Registry, Path]:
+        root = Path(folder) / "collectors" / "ozon"
+        data_dir = root / "data"
+        data_dir.mkdir(parents=True)
+        (root / "EXPECTED_SELLER.txt").write_text("Alfa Tires\n", encoding="utf-8")
+        (root / "START_URLS.txt").write_text(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/\n", encoding="utf-8"
+        )
+        registry = Registry(data_dir / "registry.db")
+        source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+        registry.begin_run("catalog", "discover", source)
+        registry.upsert_catalog_product(
+            {"article": "A", "name": "Owner", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 1000},
+            source, "catalog", 1, "2026-09-02T12:00:00",
+        )
+        item, normalized = OzonRuntimeContractTests._own_catalog_item("A", 1000)
+        normalized.update({"brand": "Michelin", "model": "Pilot", "tire_size": "205/55R16"})
+        registry.update_from_detail(item, normalized, "own-refresh", "2026-09-02T12:01:00")
+        registry.finish_run("catalog", "PASSED", {"items_total": 1, "items_success": 1})
+        registry.mark_catalog_published("catalog")
+        registry.upsert_catalog_product(
+            {"article": "B", "name": "Foreign", "url": "https://www.ozon.ru/product/B/", "catalog_card_price": 1400},
+            "https://www.ozon.ru/search/?text=michelin", "candidate", 1, "2026-09-02T12:02:00",
+        )
+        return registry, registry.path
+
+    @staticmethod
+    def _publish_market_result(registry: Registry, run_id: str, price: int | None, status: str = "PASSED") -> str:
+        registry.begin_market_analysis(run_id, "catalog", 1)
+        if price is not None:
+            registry.save_market_candidate(
+                "A", "B", "Michelin Pilot", "https://www.ozon.ru/search/", 1,
+                {"level": "EXACT", "score": 100, "method": "OZON_SAME_ARTICLE", "reason": "same card", "reasons": []},
+                run_id,
+                candidate={"article": "B", "title": "Foreign", "canonical_url": "https://www.ozon.ru/product/B/"},
+                offer={"seller_id": "foreign", "seller_name": "Foreign", "seller_url": "https://www.ozon.ru/seller/foreign/", "card_price": price, "currency": "RUB", "availability_status": "AVAILABLE"},
+            )
+        registry.record_market_analysis_product(
+            run_id, "A", "COMPLETED" if price is not None else "NO_MATCH", "q", "u", 1 if price else 0, 1 if price else 0, 0
+        )
+        return registry.finish_market_analysis(run_id, status, {"items_success": 1 if status == "PASSED" else 0})
+
+    def test_completed_zero_competitor_snapshot_replaces_old_competitor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_current_") as folder:
+            registry, path = self._market_fixture_registry(folder)
+            try:
+                self.assertEqual("PASSED", self._publish_market_result(registry, "market-old", 1400))
+                service = DataService(Path(folder) / "app.db", "unused", path)
+                before = service._ozon_rows()[0]
+                self.assertEqual(1400, before["market_min_price_original"])
+                self.assertEqual(1, before["exact_candidate_count"])
+                self.assertEqual("OZON_SAME_ARTICLE", before["match_method"])
+                self.assertEqual("PASSED", self._publish_market_result(registry, "market-new", None))
+                after = service._ozon_rows()[0]
+                self.assertEqual(0, after["candidate_count"])
+                self.assertIsNone(after["market_min_price_original"])
+                self.assertEqual("NO_OTHER_SELLERS", after["price_status"])
+                self.assertEqual("market-new", after["market_run_id"])
+            finally:
+                registry.close()
+
+    def test_partial_market_run_keeps_previous_completed_snapshot_current(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_partial_") as folder:
+            registry, path = self._market_fixture_registry(folder)
+            try:
+                self.assertEqual("PASSED", self._publish_market_result(registry, "market-old", 100))
+                self.assertEqual("PARTIAL", self._publish_market_result(registry, "market-new", 120, "PARTIAL"))
+                row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
+                self.assertEqual(100, row["market_min_price_original"])
+                self.assertEqual("market-old", row["market_run_id"])
+            finally:
+                registry.close()
+
+    def test_failed_blocked_or_interrupted_market_run_never_publishes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_failed_") as folder:
+            registry, path = self._market_fixture_registry(folder)
+            try:
+                self.assertEqual("PASSED", self._publish_market_result(registry, "market-old", 100))
+                for status in ("FAILED", "BLOCKED", "INTERRUPTED"):
+                    self.assertEqual(status, self._publish_market_result(registry, f"market-{status}", 120, status))
+                    row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
+                    self.assertEqual(100, row["market_min_price_original"])
+                    self.assertEqual("market-old", row["market_run_id"])
+            finally:
+                registry.close()
+
+    def test_new_published_catalog_makes_old_market_snapshot_not_analyzed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_stale_") as folder:
+            registry, path = self._market_fixture_registry(folder)
+            try:
+                self.assertEqual("PASSED", self._publish_market_result(registry, "market-old", 100))
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                registry.begin_run("catalog-new", "discover", source)
+                registry.upsert_catalog_product(
+                    {"article": "A", "name": "Owner updated", "url": "https://www.ozon.ru/product/A/", "catalog_card_price": 1100},
+                    source, "catalog-new", 1, "2026-09-02T13:00:00",
+                )
+                registry.finish_run("catalog-new", "PASSED", {"items_total": 1, "items_success": 1})
+                registry.mark_catalog_published("catalog-new")
+                row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
+                self.assertEqual("NOT_ANALYZED", row["price_status"])
+                self.assertEqual("", row["market_run_id"])
+            finally:
+                registry.close()
+
+    def test_own_seller_is_excluded_from_current_market_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_own_") as folder:
+            registry, path = self._market_fixture_registry(folder)
+            try:
+                registry.begin_market_analysis("market-own", "catalog", 1)
+                registry.save_market_candidate(
+                    "A", "B", "q", "u", 1,
+                    {"level": "EXACT", "score": 100, "method": "OZON_SAME_ARTICLE", "reason": "same", "reasons": []},
+                    "market-own", candidate={"title": "Owner"},
+                    offer={"seller_id": "3381444", "seller_name": "Alfa Tires", "card_price": 900, "currency": "RUB"},
+                )
+                registry.record_market_analysis_product("market-own", "A", "COMPLETED", "q", "u", 1, 1, 0)
+                self.assertEqual("PASSED", registry.finish_market_analysis("market-own", "PASSED", {"items_success": 1}))
+                row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
+                self.assertEqual(0, row["candidate_count"])
+                self.assertEqual("NO_OTHER_SELLERS", row["price_status"])
             finally:
                 registry.close()
 
@@ -453,6 +773,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
             "sync_catalog",
             return_value={
                 "status": "PASSED",
+                "discovery": {"run_id": "catalog-run"},
                 "items_total": 100,
                 "items_success": 100,
                 "items_failed": 0,
@@ -465,7 +786,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
             result = collector.full_sync(100)
 
         sync_catalog.assert_called_once_with(100)
-        market_search.assert_called_once_with(100)
+        market_search.assert_called_once_with(100, catalog_run_id="catalog-run")
 
         self.assertEqual("PASSED", result["status"])
         self.assertNotIn("prices", result)

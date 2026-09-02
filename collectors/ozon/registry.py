@@ -176,6 +176,78 @@ CREATE TABLE IF NOT EXISTS market_search_candidates (
 CREATE INDEX IF NOT EXISTS idx_market_search_candidates_level
 ON market_search_candidates(client_article,active,match_level,match_score DESC);
 
+CREATE TABLE IF NOT EXISTS market_analysis_runs (
+    run_id TEXT PRIMARY KEY,
+    catalog_run_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'RUNNING',
+    items_total INTEGER NOT NULL DEFAULT 0,
+    items_success INTEGER NOT NULL DEFAULT 0,
+    items_failed INTEGER NOT NULL DEFAULT 0,
+    items_blocked INTEGER NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_market_analysis_runs_catalog
+ON market_analysis_runs(catalog_run_id,status,finished_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_analysis_products (
+    market_run_id TEXT NOT NULL,
+    client_article TEXT NOT NULL,
+    status TEXT NOT NULL,
+    query_text TEXT NOT NULL DEFAULT '',
+    query_url TEXT NOT NULL DEFAULT '',
+    candidates_found INTEGER NOT NULL DEFAULT 0,
+    exact_found INTEGER NOT NULL DEFAULT 0,
+    comparable_found INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY(market_run_id,client_article),
+    FOREIGN KEY(market_run_id) REFERENCES market_analysis_runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY(client_article) REFERENCES products(article) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS market_analysis_candidates (
+    market_run_id TEXT NOT NULL,
+    client_article TEXT NOT NULL,
+    candidate_article TEXT NOT NULL,
+    seller_key TEXT NOT NULL DEFAULT '',
+    seller_id TEXT NOT NULL DEFAULT '',
+    seller_name TEXT NOT NULL DEFAULT '',
+    seller_url TEXT NOT NULL DEFAULT '',
+    seller_rating REAL,
+    card_price INTEGER NOT NULL DEFAULT 0,
+    regular_price INTEGER NOT NULL DEFAULT 0,
+    original_price INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'RUB',
+    availability_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+    product_url TEXT NOT NULL DEFAULT '',
+    product_title TEXT NOT NULL DEFAULT '',
+    catalog_rank INTEGER NOT NULL DEFAULT 0,
+    match_level TEXT NOT NULL DEFAULT 'REJECTED',
+    match_score REAL NOT NULL DEFAULT 0,
+    match_method TEXT NOT NULL DEFAULT '',
+    match_reason TEXT NOT NULL DEFAULT '',
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    collected_at TEXT NOT NULL,
+    PRIMARY KEY(market_run_id,client_article,candidate_article,seller_key),
+    FOREIGN KEY(market_run_id) REFERENCES market_analysis_runs(run_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_market_analysis_candidates_current
+ON market_analysis_candidates(market_run_id,client_article,match_level,match_score DESC);
+
+CREATE TABLE IF NOT EXISTS market_analysis_current (
+    catalog_run_id TEXT PRIMARY KEY,
+    market_run_id TEXT NOT NULL UNIQUE,
+    published_at TEXT NOT NULL,
+    FOREIGN KEY(market_run_id) REFERENCES market_analysis_runs(run_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS catalog_publications (
+    catalog_run_id TEXT PRIMARY KEY,
+    published_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS crawl_queue (
     article TEXT NOT NULL,
     task_type TEXT NOT NULL,
@@ -699,28 +771,150 @@ class Registry:
 
 
     def client_products_for_market_search(
-        self, limit: int = 0, allowed_articles: set[str] | None = None
+        self, limit: int = 0, allowed_articles: set[str] | None = None,
+        *, catalog_run_id: str = "",
     ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        current_catalog_clause = ""
+        if str(catalog_run_id).strip():
+            current_catalog_clause = " AND EXISTS(SELECT 1 FROM catalog_snapshots cs WHERE cs.article=p.article AND cs.run_id=?)"
+            params.append(str(catalog_run_id).strip())
         sql = """
             SELECT p.*,j.last_search_at,j.exact_found,j.comparable_found
             FROM products p
             LEFT JOIN market_search_jobs j ON j.client_article=p.article
             WHERE p.active=1 AND p.detail_status='COMPLETE'
-              AND TRIM(p.brand)<>'' AND TRIM(p.tire_size)<>''
-              AND EXISTS(
-                  SELECT 1 FROM product_sources ps
-                  WHERE ps.article=p.article AND ps.source_type='CLIENT_CATALOG'
-              )
+        """ + current_catalog_clause + """
             ORDER BY CASE WHEN j.last_search_at IS NULL THEN 0 ELSE 1 END,
                      COALESCE(j.exact_found,0),COALESCE(j.comparable_found,0),
                      COALESCE(j.last_search_at,''),p.article
         """
-        values = [dict(row) for row in self.conn.execute(sql).fetchall()]
+        values = [dict(row) for row in self.conn.execute(sql, params).fetchall()]
         if allowed_articles is not None:
             values = [row for row in values if str(row.get("article") or "") in allowed_articles]
         if limit > 0:
             values = values[: int(limit)]
         return values
+
+    def current_catalog_run_id(self, source_urls: Iterable[Any]) -> str:
+        sources = {
+            canonical_source_url(value)
+            for value in source_urls
+            if canonical_source_url(value)
+        }
+        if not sources:
+            return ""
+        placeholders = ",".join("?" for _ in sources)
+        row = self.conn.execute(
+            f"""SELECT r.run_id
+                FROM runs r
+                WHERE r.mode='discover' AND r.status='PASSED'
+                  AND EXISTS(
+                      SELECT 1 FROM product_sources ps
+                      WHERE ps.last_run_id=r.run_id
+                        AND ps.source_url IN ({placeholders})
+                  )
+                ORDER BY COALESCE(r.finished_at,r.started_at) DESC
+                LIMIT 1""",
+            sorted(sources),
+        ).fetchone()
+        return str(row[0]) if row else ""
+
+    def current_published_catalog_run_id(self) -> str:
+        row = self.conn.execute(
+            """SELECT cp.catalog_run_id FROM catalog_publications cp
+               JOIN runs r ON r.run_id=cp.catalog_run_id
+               WHERE r.mode='discover' AND r.status='PASSED'
+               ORDER BY cp.published_at DESC LIMIT 1"""
+        ).fetchone()
+        return str(row[0]) if row else ""
+
+    def mark_catalog_published(self, catalog_run_id: str) -> None:
+        if not str(catalog_run_id).strip():
+            return
+        with self.conn:
+            self.conn.execute("DELETE FROM catalog_publications")
+            self.conn.execute(
+                """INSERT INTO catalog_publications(catalog_run_id,published_at)
+                   VALUES(?,?)
+                   ON CONFLICT(catalog_run_id) DO UPDATE SET published_at=excluded.published_at""",
+                (str(catalog_run_id).strip(), now_iso()),
+            )
+
+    def catalog_articles(self, catalog_run_id: str) -> set[str]:
+        if not str(catalog_run_id).strip():
+            return set()
+        return {
+            str(row[0])
+            for row in self.conn.execute(
+                "SELECT article FROM catalog_snapshots WHERE run_id=?",
+                (str(catalog_run_id).strip(),),
+            ).fetchall()
+        }
+
+    def begin_market_analysis(
+        self, run_id: str, catalog_run_id: str, items_total: int
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO market_analysis_runs(
+                       run_id,catalog_run_id,started_at,status,items_total
+                   ) VALUES(?,?,?,'RUNNING',?)""",
+                (str(run_id), str(catalog_run_id), now_iso(), int(items_total)),
+            )
+
+    def record_market_analysis_product(
+        self, run_id: str, article: str, status: str, query_text: str,
+        query_url: str, candidates: int, exact: int, comparable: int,
+        error: str = "",
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO market_analysis_products(
+                       market_run_id,client_article,status,query_text,query_url,
+                       candidates_found,exact_found,comparable_found,error,completed_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    str(run_id), str(article), str(status), str(query_text), str(query_url),
+                    int(candidates), int(exact), int(comparable), str(error)[:2000], now_iso(),
+                ),
+            )
+
+    def finish_market_analysis(self, run_id: str, status: str, metrics: dict[str, Any]) -> str:
+        final_status = str(status or "FAILED").upper()
+        with self.conn:
+            expected = self.conn.execute(
+                "SELECT catalog_run_id,items_total FROM market_analysis_runs WHERE run_id=?",
+                (str(run_id),),
+            ).fetchone()
+            if not expected:
+                return "FAILED"
+            completed = int(self.conn.execute(
+                "SELECT COUNT(*) FROM market_analysis_products WHERE market_run_id=?",
+                (str(run_id),),
+            ).fetchone()[0])
+            expected_count = int(expected["items_total"] or 0)
+            if final_status == "PASSED" and completed != expected_count:
+                final_status = "PARTIAL"
+            self.conn.execute(
+                """UPDATE market_analysis_runs
+                   SET finished_at=?,status=?,items_success=?,items_failed=?,items_blocked=?,notes=?
+                   WHERE run_id=?""",
+                (
+                    now_iso(), final_status, int(metrics.get("items_success") or 0),
+                    int(metrics.get("items_failed") or 0), int(metrics.get("items_blocked") or 0),
+                    str(metrics.get("notes") or ""), str(run_id),
+                ),
+            )
+            if final_status == "PASSED":
+                self.conn.execute(
+                    """INSERT INTO market_analysis_current(catalog_run_id,market_run_id,published_at)
+                       VALUES(?,?,?)
+                       ON CONFLICT(catalog_run_id) DO UPDATE SET
+                           market_run_id=excluded.market_run_id,published_at=excluded.published_at""",
+                    (str(expected["catalog_run_id"]), str(run_id), now_iso()),
+                )
+        return final_status
 
     def primary_offer(self, article: str) -> dict[str, Any]:
         row = self.conn.execute(
@@ -744,14 +938,11 @@ class Registry:
                     last_error=''
                 """, (str(client_article), stamp, run_id)
             )
-            self.conn.execute(
-                "UPDATE market_search_candidates SET active=0 WHERE client_article=?",
-                (str(client_article),)
-            )
 
     def save_market_candidate(
         self, client_article: str, candidate_article: str, query_text: str,
         query_url: str, catalog_rank: int, match: dict[str, Any], run_id: str,
+        candidate: dict[str, Any] | None = None, offer: dict[str, Any] | None = None,
     ) -> None:
         stamp = now_iso()
         with self.conn:
@@ -784,6 +975,32 @@ class Registry:
                     str(match.get('reason') or ''), json.dumps(match.get('reasons') or [], ensure_ascii=False),
                     stamp, stamp, stamp, run_id,
                 )
+            )
+            candidate_data = candidate or {}
+            offer_data = offer or {}
+            seller_key_value = str(
+                offer_data.get("seller_id") or offer_data.get("seller_name") or ""
+            ).strip()
+            self.conn.execute(
+                """INSERT OR REPLACE INTO market_analysis_candidates(
+                       market_run_id,client_article,candidate_article,seller_key,seller_id,
+                       seller_name,seller_url,seller_rating,card_price,regular_price,
+                       original_price,currency,availability_status,product_url,product_title,
+                       catalog_rank,match_level,match_score,match_method,match_reason,reasons_json,collected_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    str(run_id), str(client_article), str(candidate_article), seller_key_value,
+                    str(offer_data.get("seller_id") or ""), str(offer_data.get("seller_name") or ""),
+                    str(offer_data.get("seller_url") or ""), offer_data.get("seller_rating"),
+                    int(offer_data.get("card_price") or 0), int(offer_data.get("regular_price") or 0),
+                    int(offer_data.get("original_price") or 0), str(offer_data.get("currency") or "RUB"),
+                    str(offer_data.get("availability_status") or "UNKNOWN"),
+                    str(candidate_data.get("canonical_url") or candidate_data.get("url") or ""),
+                    str(candidate_data.get("title") or candidate_data.get("name") or ""), int(catalog_rank),
+                    str(match.get("level") or "REJECTED"), float(match.get("score") or 0),
+                    str(match.get("method") or ""), str(match.get("reason") or ""),
+                    json.dumps(match.get("reasons") or [], ensure_ascii=False), now_iso(),
+                ),
             )
 
     def finish_market_search(
