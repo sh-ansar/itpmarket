@@ -274,17 +274,9 @@ def save_success(
                 round(duration, 3), stamp,
             ),
         )
-        if own_price is not None:
-            db.conn.execute(
-                """UPDATE tenant_seller_catalog_products
-                   SET price_amount=?,currency='KZT',last_seen_at=?,source_updated_at=?
-                   WHERE tenant_id=? AND marketplace_code='kaspi'
-                     AND tenant_seller_id=? AND source_product_code=?""",
-                (
-                    own_price, stamp, stamp, int(tenant_id),
-                    int(tenant_seller_id), code,
-                ),
-            )
+        # A market scan may observe an own offer, but it is evidence only.
+        # The authoritative own price is published exclusively by catalog_sync
+        # through CatalogConfigurationService.replace_catalog_products().
     db.conn.commit()
     return len(valid_offers), len(competitors), (
         min(competitor_prices) if competitor_prices else None

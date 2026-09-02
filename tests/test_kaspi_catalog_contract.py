@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 from engine.catalog_sync import (
     complete_seller_snapshot,
     materialize_verified_tenant_snapshot,
+    reconciliation_summary,
     root_api_url,
 )
 
@@ -26,6 +27,25 @@ class KaspiCatalogContractTests(unittest.TestCase):
         self.assertFalse(complete_seller_snapshot(10, 9))
         self.assertFalse(complete_seller_snapshot(10, 11))
         self.assertTrue(complete_seller_snapshot(10, 10))
+
+    def test_final_total_allows_a_live_catalogue_growth(self) -> None:
+        self.assertTrue(complete_seller_snapshot(2187, 2188, 2188))
+        self.assertFalse(complete_seller_snapshot(2187, 2187, 2188))
+
+    def test_reconciliation_rejects_an_unexplained_extra_card(self) -> None:
+        result = reconciliation_summary(
+            1,
+            1,
+            {
+                "one": {"title": "One", "url": "https://kaspi.kz/shop/p/one", "brand": "MICHELIN"},
+                "two": {"title": "Two", "url": "https://kaspi.kz/shop/p/two", "brand": "MICHELIN"},
+            },
+            [{"name": "MICHELIN", "expected": 1}],
+            [{"name": "MICHELIN", "expected": 1}],
+        )
+
+        self.assertEqual(["two"], result["brands"]["MICHELIN"]["extra_product_ids"])
+        self.assertEqual(["two"], result["rejected"]["pagination_overlap_or_live_change"])
 
     def test_unverified_or_partial_snapshot_does_not_touch_active_catalog(self) -> None:
         args = SimpleNamespace(tenant_id=7, tenant_seller_id=11)

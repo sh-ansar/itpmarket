@@ -276,6 +276,12 @@ class Collector:
                             break
                     print(f"Найдено новых на странице: {page_new}; уникальных всего: {len(seen)}")
                     if stop_all:
+                        # A diagnostic cap is not proof that the seller
+                        # catalogue was collected to its real end.
+                        if limit:
+                            source_status = "PARTIAL"
+                            if status != "BLOCKED":
+                                status = "PARTIAL"
                         break
                     next_page = str(response.get("next_page") or "")
                     if not next_page:
@@ -340,7 +346,12 @@ class Collector:
         }[mode]
 
     def process(
-        self, mode: str, limit: int | None = None, articles: set[str] | None = None
+        self,
+        mode: str,
+        limit: int | None = None,
+        articles: set[str] | None = None,
+        *,
+        catalog_run_id: str = "",
     ) -> dict[str, Any]:
         run_id = run_id_for(mode)
         run_dir = self._run_dir(run_id)
@@ -348,7 +359,8 @@ class Collector:
         started = time.monotonic()
         batch_limit = self.settings.batch_limit if limit is None else max(0, limit)
         source_articles = self.registry.articles_for_sources(
-            self.settings.start_urls or (self.settings.start_url,)
+            self.settings.start_urls or (self.settings.start_url,),
+            catalog_run_id=catalog_run_id,
         )
         allowed_articles = (
             source_articles
@@ -660,29 +672,13 @@ class Collector:
                 "details": None,
             }
 
-        remaining = self.registry.select_articles(
-            "enrich-new",
-            limit or 0,
-            self.settings.stale_days,
-            self.settings.max_task_attempts,
+        # The snapshot must include fresh own price/availability for every
+        # product that this discovery actually observed.
+        details = self.process(
+            "refresh-prices",
+            0,
+            catalog_run_id=str(discovery.get("run_id") or ""),
         )
-
-        if not remaining:
-            print(
-                "Новых товаров для обогащения нет. "
-                "Актуализируем цены текущего каталога."
-            )
-
-            details = self.process(
-                "refresh-prices",
-                limit,
-            )
-        else:
-            details = self.process(
-                "enrich-new",
-                limit,
-            )
-
         return {
             "status": combined_status(
                 discovery,
@@ -695,41 +691,24 @@ class Collector:
     def full_sync(self, limit: int | None = None) -> dict[str, Any]:
         catalog = self.sync_catalog(limit)
 
-        if has_hard_failure(catalog):
+        if str(catalog.get("status") or "").upper() not in {"PASSED", "OK", "READY"}:
             return {
                 "status": str(
                     catalog.get("status") or "PARTIAL"
                 ).upper(),
                 "catalog": catalog,
-                "prices": None,
                 "market": None,
             }
-
-        prices = self.process(
-            "refresh-prices",
-            limit,
-        )
-
-        if has_hard_failure(prices):
-            return {
-                "status": str(
-                    prices.get("status") or "PARTIAL"
-                ).upper(),
-                "catalog": catalog,
-                "prices": prices,
-                "market": None,
-            }
-
+        # Catalog synchronisation has already captured the seller's own
+        # current price.  Full sync proceeds directly to market analysis.
         market = self.market_search(limit)
 
         return {
             "status": combined_status(
                 catalog,
-                prices,
                 market,
             ),
             "catalog": catalog,
-            "prices": prices,
             "market": market,
         }
 
@@ -810,6 +789,7 @@ def materialize_tenant_catalog(
     app_db: str,
     marketplace_code: str = "ozon",
     tenant_seller_id: int | None = None,
+    catalog_run_id: str = "",
 ) -> int:
     if int(tenant_id or 0) <= 0 or not str(app_db or "").strip():
         return 0
@@ -821,8 +801,11 @@ def materialize_tenant_catalog(
         where = "p.active=1"
         if source_urls:
             placeholders = ",".join("?" for _ in source_urls)
-            where += f" AND EXISTS(SELECT 1 FROM product_sources ps WHERE ps.article=p.article AND ps.source_url IN ({placeholders}))"
+            run_clause = " AND ps.last_run_id=?" if str(catalog_run_id).strip() else ""
+            where += f" AND EXISTS(SELECT 1 FROM product_sources ps WHERE ps.article=p.article AND ps.source_url IN ({placeholders}){run_clause})"
             params.extend(sorted(source_urls))
+            if run_clause:
+                params.append(str(catalog_run_id).strip())
         rows = conn.execute(
             f"""SELECT p.* FROM products p WHERE {where} ORDER BY p.article""",
             params,
@@ -964,13 +947,21 @@ def main() -> int:
             print(settings.exports_dir)
         elif args.command == "stats":
             print(json.dumps(collector.registry.counts(), ensure_ascii=False, indent=2))
+        catalog_result = (
+            result.get("catalog") if args.command == "full-sync" and result
+            else result
+        )
         if (
-            args.command not in {"open-browser", "stats"}
-            and not has_hard_failure(result)
+            args.command in {"sync-catalog", "full-sync"}
+            and isinstance(catalog_result, dict)
+            and str(catalog_result.get("status") or "").upper() == "PASSED"
         ):
             materialize_tenant_catalog(
                 settings, int(args.tenant_id or 0), str(args.app_db or ""), "ozon",
                 tenant_seller_id=int(args.tenant_seller_id or 0) or None,
+                catalog_run_id=str(
+                    (catalog_result.get("discovery") or {}).get("run_id") or ""
+                ),
             )
         return result_exit_code(result)
     except Exception as exc:

@@ -86,9 +86,70 @@ def root_api_url(seller_id: str, city_id: str) -> str:
     return API_TEMPLATE.format(q=quote(q, safe=""), city_id=quote(city_id, safe=""))
 
 
-def complete_seller_snapshot(reported_total: int, collected_unique: int) -> bool:
-    """Only an exact, positive seller total may replace an active snapshot."""
-    return int(reported_total) > 0 and int(collected_unique) == int(reported_total)
+def complete_seller_snapshot(
+    reported_total: int,
+    collected_unique: int,
+    final_reported_total: int | None = None,
+) -> bool:
+    """Only an exact final, positive seller total may replace an active snapshot.
+
+    A long seller crawl is allowed to observe a live catalogue mutation.  The
+    final root response, not a twenty-minute-old starting count, is the
+    publication authority.
+    """
+    authoritative_total = (
+        int(final_reported_total)
+        if final_reported_total is not None else int(reported_total)
+    )
+    return authoritative_total > 0 and int(collected_unique) == authoritative_total
+
+
+def reconciliation_summary(
+    initial_total: int,
+    final_total: int,
+    products: dict[str, dict[str, Any]],
+    initial_brands: list[dict[str, Any]],
+    final_brands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Describe a seller-only crawl without accepting unexplained extras."""
+    initial_expected = {
+        clean(item.get("name")): int(item.get("expected") or 0)
+        for item in initial_brands if clean(item.get("name"))
+    }
+    final_expected = {
+        clean(item.get("name")): int(item.get("expected") or 0)
+        for item in final_brands if clean(item.get("name"))
+    }
+    by_brand: dict[str, list[str]] = {}
+    rejected: dict[str, list[str]] = {}
+    for product_id, product in products.items():
+        brand = clean(product.get("brand")) or "(unclassified)"
+        if not clean(product.get("title")) or not clean(product.get("url")):
+            rejected.setdefault("invalid_dom_card", []).append(product_id)
+            continue
+        by_brand.setdefault(brand, []).append(product_id)
+    brands: dict[str, dict[str, Any]] = {}
+    for brand in sorted(set(initial_expected) | set(final_expected) | set(by_brand)):
+        collected = by_brand.get(brand, [])
+        expected = int(final_expected.get(brand, 0))
+        extras = collected[expected:] if expected and len(collected) > expected else []
+        if extras:
+            reason = "wrong_brand" if brand not in final_expected else "pagination_overlap_or_live_change"
+            rejected.setdefault(reason, []).extend(extras)
+        brands[brand] = {
+            "initial_expected": int(initial_expected.get(brand, 0)),
+            "final_expected": expected,
+            "collected": len(collected),
+            "extra_product_ids": extras,
+        }
+    return {
+        "initial_total": int(initial_total),
+        "final_total": int(final_total),
+        "collected": len(products),
+        "valid": len(products) - sum(len(items) for items in rejected.values()),
+        "rejected": rejected,
+        "brands": brands,
+    }
 
 
 def materialize_verified_tenant_snapshot(
@@ -688,6 +749,7 @@ async def run(args: argparse.Namespace) -> int:
     segment_success = 0
     global_index = 0
     reported_total = 0
+    final_reported_total = 0
 
     await core.ensure_playwright()
     async with core.async_playwright() as playwright:
@@ -830,7 +892,49 @@ async def run(args: argparse.Namespace) -> int:
                         f"[Каталог] ОШИБКА резервного прохода: {clean(exc)}"
                     )
 
-            full_enough = complete_seller_snapshot(reported_total, len(seen))
+            # The seller catalogue can mutate while its brand pages are being
+            # crawled.  Re-read the root payload before deciding whether the
+            # collected snapshot is authoritative.
+            final_root_payload = await fetch_root_payload(
+                page, seller_url, args.retries, args.timeout
+            )
+            final_reported_total = int(
+                final_root_payload.get("data", {}).get("total") or 0
+            )
+            reconciliation = reconciliation_summary(
+                reported_total,
+                final_reported_total,
+                collected_products,
+                available_brand_segments,
+                brand_rows(final_root_payload),
+            )
+            print(
+                "[RECONCILE] "
+                f"initial_total={reconciliation['initial_total']}; "
+                f"final_total={reconciliation['final_total']}; "
+                f"collected={reconciliation['collected']}; "
+                f"valid={reconciliation['valid']}; "
+                f"rejected={sum(len(items) for items in reconciliation['rejected'].values())}"
+            )
+            for brand, values in reconciliation["brands"].items():
+                print(
+                    f"[{brand}] initial_expected={values['initial_expected']}; "
+                    f"final_expected={values['final_expected']}; "
+                    f"collected={values['collected']}; "
+                    f"extra_product_ids={','.join(values['extra_product_ids']) or '-'}"
+                )
+            if reconciliation["rejected"]:
+                warnings.append(
+                    "reconciliation rejected: " + json.dumps(
+                        reconciliation["rejected"], ensure_ascii=False, separators=(",", ":")
+                    )
+                )
+            full_enough = (
+                not reconciliation["rejected"]
+                and complete_seller_snapshot(
+                    reported_total, len(seen), final_reported_total
+                )
+            )
             if full_enough:
                 placeholders = ",".join("?" for _ in seen)
                 # Shared legacy staging contains products collected for many
@@ -876,12 +980,12 @@ async def run(args: argparse.Namespace) -> int:
                 UPDATE catalog_sync_runs SET status=?,reported_total=?,collected_unique=?,
                     segments_total=?,segments_success=?,warning=?,finished_at=? WHERE id=?
                 """,
-                (status, reported_total, len(seen), len(segments), segment_success,
+                (status, final_reported_total or reported_total, len(seen), len(segments), segment_success,
                  warning, now_iso(), run_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO metadata(key,value) VALUES('catalog_reported_total',?)",
-                (json.dumps(reported_total),),
+                (json.dumps(final_reported_total or reported_total),),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO metadata(key,value) VALUES('catalog_last_sync_at',?)",

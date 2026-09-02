@@ -192,6 +192,13 @@ requires the exact seller profile, deterministic DevTools port, and an
 interactive Windows Chrome session. A challenge is reported as an
 action-required user message and leaves the existing marketplace snapshot intact.
 
+Ozon catalogue publication is run-scoped and atomic: only a completed seller
+discovery, followed by successful own-price/availability details for every
+article from that discovery, may replace the tenant seller snapshot. A partial,
+blocked, interrupted or capped run leaves the previous active snapshot intact.
+Market actualisation is a separate operation; it never republishes the own
+catalogue or changes its own price.
+
 ## Persistent operation queue
 
 The operations service accepts work when its parallel-worker limit is full and

@@ -164,6 +164,12 @@ Products uses a bounded PostgreSQL analytics read-model for ordinary catalogue p
 
 Canonical Ozon URL contract: accept both seller path variants on input, but persist and issue all new Ozon.ru/Ozon.kz source URLs as `https://<host>/seller/<slug>/`.
 
+Ozon catalogue publication is tied to the completed discovery run. Deployment
+and operators must treat a `PARTIAL`, `BLOCKED`, `FAILED` or interrupted
+catalogue run as non-publishing: the prior tenant seller snapshot remains
+active. Ozon price actualisation is market-only and must not be used to rewrite
+the authoritative own catalogue price.
+
 ## Post-deploy verification
 
 ```powershell

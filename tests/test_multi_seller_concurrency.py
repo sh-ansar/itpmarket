@@ -242,7 +242,7 @@ class MultiSellerDatabaseTests(unittest.TestCase):
         self.catalog.replace_catalog_products(
             self.tenant_id,
             "kaspi",
-            [{"product_id": "SKU-OFFERS", "title": "Scoped offers"}],
+            [{"product_id": "SKU-OFFERS", "title": "Scoped offers", "price": 150}],
             tenant_seller_id=self.seller_a,
         )
         database = KaspiDatabase(self.db_path)
@@ -288,10 +288,17 @@ class MultiSellerDatabaseTests(unittest.TestCase):
                      AND source_product_code='SKU-OFFERS'""",
                 (self.tenant_id, self.seller_a),
             ).fetchone()
+            own_price = conn.execute(
+                """SELECT price_amount FROM tenant_seller_catalog_products
+                   WHERE tenant_id=? AND marketplace_code='kaspi'
+                     AND tenant_seller_id=? AND source_product_code='SKU-OFFERS'""",
+                (self.tenant_id, self.seller_a),
+            ).fetchone()[0]
         finally:
             conn.close()
         self.assertEqual(2, snapshot_count)
         self.assertEqual(("ok", 2, 1), scan)
+        self.assertEqual(150, own_price)
 
     def test_capacity_check_is_atomic_across_two_sellers(self) -> None:
         subscription = SubscriptionService(self.db_path)

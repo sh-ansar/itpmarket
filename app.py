@@ -1638,26 +1638,26 @@ def build_action_command(
             "sync_catalog", [], user_id, "all", tenant_seller_id
         )
     if action == "kaspi_price_actualize":
-        return workflow_command([
-            ("Собственные цены Kaspi", build_action_command("update_own_prices", codes, user_id, scope, tenant_seller_id)),
-            ("Предложения продавцов Kaspi", build_action_command("scan_market", codes, user_id, scope, tenant_seller_id)),
-        ])
+        # Own price belongs to the authoritative catalogue snapshot.  A
+        # user-facing market refresh must never rewrite it behind the user's
+        # back through own_price_refresh.py.
+        return build_action_command(
+            "scan_market", codes, user_id, scope, tenant_seller_id
+        )
     if action == "kaspi_full_sync":
         return workflow_command([
             ("Каталог Kaspi", build_action_command("sync_catalog", [], user_id, "all", tenant_seller_id)),
-            ("Собственные цены Kaspi", build_action_command("update_own_prices", [], user_id, "all", tenant_seller_id)),
             ("Предложения продавцов Kaspi", build_action_command("scan_market", [], user_id, "all", tenant_seller_id)),
         ])
     if action == "ozon_price_actualize":
         selection_path = ozon_article_selection(codes) if codes else None
-        operation_limit = str(max(1, len(codes)) if codes else 100000)
-        refresh = command_option(build_action_command("ozon_refresh_prices", [], user_id, scope, tenant_seller_id), "--limit", operation_limit)
-        market = command_option(build_action_command("ozon_market_search", [], user_id, scope, tenant_seller_id), "--limit", operation_limit)
+        market = build_action_command(
+            "ozon_market_search", [], user_id, scope, tenant_seller_id
+        )
         if selection_path:
-            refresh += ["--articles-file", str(selection_path)]
             market += ["--articles-file", str(selection_path)]
         return workflow_command(
-            [("Цены Ozon.ru", refresh), ("Рыночные предложения Ozon.ru", market)],
+            [("Рыночные предложения Ozon.ru", market)],
             [selection_path] if selection_path else [],
         )
     if action == "ozon_kz_price_actualize":
@@ -1770,8 +1770,8 @@ def build_action_command(
                 "--profile-path", str(browser_profile),
                 "--debug-port", str(ozon_runtime.debug_port if ozon_runtime else 0),
             ]
-        if action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
-            command += ["--limit", str(30 if action == "ozon_market_search" else 100)]
+        if action in {"ozon_enrich", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
+            command += ["--limit", "100"]
         if codes and action in {"ozon_enrich", "ozon_market_search", "ozon_refresh_prices", "ozon_refresh_stale", "ozon_retry"}:
             selection_path = ozon_article_selection(codes)
             command += ["--articles-file", str(selection_path)]

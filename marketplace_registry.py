@@ -61,7 +61,7 @@ MARKETPLACES: tuple[MarketplaceDefinition, ...] = (
     ),
     MarketplaceDefinition(
         "wildberries", "Wildberries", "wb:", "wb_",
-        "Публичный каталог продавца Wildberries, остатки, рейтинг и цены в тенге.",
+        "Публичный каталог продавца Wildberries, остатки, рейтинг и цены в теңге.",
         seller_id_label="ID продавца",
         seller_url_placeholder="https://global.wildberries.ru/seller/250000260",
         supported_hosts=(

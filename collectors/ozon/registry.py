@@ -463,7 +463,9 @@ class Registry:
             "url": row.get("canonical_url", ""),
         }
 
-    def articles_for_sources(self, source_urls: Iterable[Any]) -> set[str]:
+    def articles_for_sources(
+        self, source_urls: Iterable[Any], *, catalog_run_id: str = ""
+    ) -> set[str]:
         sources = {
             canonical_source_url(value)
             for value in source_urls
@@ -472,13 +474,17 @@ class Registry:
         if not sources:
             return set()
         placeholders = ",".join("?" for _ in sources)
+        run_clause = " AND last_run_id=?" if str(catalog_run_id).strip() else ""
+        parameters: list[Any] = [*sorted(sources)]
+        if run_clause:
+            parameters.append(str(catalog_run_id).strip())
         return {
             str(row[0])
             for row in self.conn.execute(
                 f"""SELECT DISTINCT article
                     FROM product_sources
-                    WHERE source_url IN ({placeholders})""",
-                sorted(sources),
+                    WHERE source_url IN ({placeholders}){run_clause}""",
+                parameters,
             ).fetchall()
         }
 

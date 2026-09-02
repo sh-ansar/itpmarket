@@ -131,6 +131,13 @@ Ozon URL проходит два разных этапа: `parsed` означа�
 
 Canonical Ozon URL contract: accept both seller path variants on input and normalize every new/stored Ozon.ru and Ozon.kz source to `/seller/<slug>/`.
 
+For a live Ozon test, treat `sync-catalog`, `refresh-prices` (market-only), and
+`full-sync` as separate operations. `sync-catalog` publishes only after the
+whole seller discovery and details phase succeeds; an explicit diagnostic cap,
+partial result, challenge or interruption must retain the previous tenant
+snapshot. `full-sync` stops before market search unless that catalogue phase is
+complete. Never use a market-only command to refresh own catalogue prices.
+
 Marketplace settings display the complete registry even for a read-only user;
 the permission to view settings is separate from `manage_marketplaces`. A
 source replacement is immediate only after parsing and required Ozon browser

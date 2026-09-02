@@ -19,7 +19,6 @@ if str(OZON_RU_ROOT) not in sys.path:
 from collector_config import Settings, load_settings  # noqa: E402
 from ozon_collector import (  # noqa: E402
     Collector,
-    has_hard_failure,
     materialize_tenant_catalog,
     result_exit_code,
     structured_result,
@@ -96,19 +95,27 @@ def normalize_registry_currency(conn: Any) -> dict[str, int]:
     return {"offers": int(offers or 0), "price_history": int(history or 0)}
 
 
-def mirror_public_registry(settings: Settings) -> dict[str, int]:
+def mirror_public_registry(
+    settings: Settings, *, catalog_run_id: str = ""
+) -> dict[str, int]:
     ensure_schema(settings.database_path)
     conn = connect(settings.database_path)
     stamp = now_iso()
     try:
         normalize_registry_currency(conn)
+        run_clause = " AND ps.last_run_id=?" if str(catalog_run_id).strip() else ""
+        product_params: list[Any] = [settings.start_url]
+        if run_clause:
+            product_params.append(str(catalog_run_id).strip())
         products = conn.execute(
             """SELECT p.* FROM products p
                WHERE p.active=1 AND EXISTS(
                    SELECT 1 FROM product_sources ps
-                   WHERE ps.article=p.article AND ps.source_url=?
+                   WHERE ps.article=p.article AND ps.source_url=?"""
+            + run_clause
+            + """
                ) ORDER BY p.article""",
-            (settings.start_url,),
+            product_params,
         ).fetchall()
         offers = conn.execute(
             "SELECT * FROM offers WHERE active=1 ORDER BY article,last_checked_at DESC"
@@ -208,12 +215,22 @@ def parse_articles(value: str) -> set[str] | None:
 
 
 def require_success(result: dict[str, Any], operation: str) -> dict[str, Any]:
-    # PARTIAL is recoverable: keep its non-zero final process contract, but
-    # allow mirror/materialisation and later safe stages to use successful rows.
-    if has_hard_failure(result):
+    """Legacy stage gate: partial data is inspectable but never successful."""
+    if str(result.get("status") or "").upper() in {"BLOCKED", "FAILED", "INTERRUPTED"}:
         raise RuntimeError(
             f"Ozon.kz {operation} завершён со статусом "
             f"{str(result.get('status') or 'FAILED')}."
+        )
+    return result
+
+
+def require_complete(result: dict[str, Any], operation: str) -> dict[str, Any]:
+    """A partial operation is diagnostic data, never publication authority."""
+    require_success(result, operation)
+    if str(result.get("status") or "").upper() not in {"PASSED", "OK", "READY"}:
+        raise RuntimeError(
+            f"Ozon.kz {operation} завершён со статусом "
+            f"{str(result.get('status') or 'PARTIAL')}."
         )
     return result
 
@@ -248,31 +265,36 @@ def main() -> int:
     stages: list[dict[str, Any]] = []
     try:
         if args.action in {"sync-catalog", "full-sync"}:
-            discovered = collector.discover(limit, int(args.pages))
-            outcome = discovered
-            stages.append(discovered)
-            require_success(
-                discovered,
+            catalog = collector.sync_catalog(limit)
+            outcome = catalog
+            stages.append(catalog)
+            require_complete(
+                catalog,
                 "sync-catalog",
             )
-            if int(discovered.get("items_total") or 0) <= 0:
+            discovery = catalog.get("discovery") if isinstance(catalog, dict) else {}
+            if int((discovery or {}).get("items_total") or 0) <= 0:
                 raise RuntimeError(
                     "Ozon.kz не отдал карточки продавца. Проверьте открытую вкладку "
                     "Ozon.kz; если показана проверка доступа, пройдите её и повторите запуск."
                 )
-        if args.action == "full-sync":
-            enriched = collector.process("enrich-new", limit, None)
-            stages.append(enriched)
-            require_success(enriched, "enrich-new")
         if args.action in {"refresh-prices", "full-sync"}:
-            refreshed = collector.process("refresh-prices", limit, articles)
-            stages.append(refreshed)
-            require_success(refreshed, "refresh-prices")
-        mirrored = mirror_public_registry(settings)
-        tenant_count = materialize_tenant_catalog(
-            settings, int(args.tenant_id), str(getattr(args, "app_db", "") or args.db), "ozon_kz",
-            tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
-        )
+            market = collector.market_search(limit, articles)
+            stages.append(market)
+            require_complete(market, "market-search")
+        mirrored: dict[str, int] = {}
+        tenant_count = 0
+        # Market-only refresh has no right to replace the authoritative own
+        # catalogue.  A completed discovery is the only publication input.
+        if args.action in {"sync-catalog", "full-sync"}:
+            discovery = catalog.get("discovery") if isinstance(catalog, dict) else {}
+            catalog_run_id = str((discovery or {}).get("run_id") or "")
+            mirrored = mirror_public_registry(settings, catalog_run_id=catalog_run_id)
+            tenant_count = materialize_tenant_catalog(
+                settings, int(args.tenant_id), str(getattr(args, "app_db", "") or args.db), "ozon_kz",
+                tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
+                catalog_run_id=catalog_run_id,
+            )
         final_status = "PARTIAL" if any(
             str(stage.get("status") or "").upper() == "PARTIAL" for stage in stages
         ) else "PASSED"

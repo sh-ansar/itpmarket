@@ -26,6 +26,7 @@ from ozon_collector import (
 from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import
 from registry import Registry
+from collectors.ozon_kz.ozon_kz_collector import require_complete
 from storage.postgres_compat import _schema_for_path
 from task_manager import RESULT_MESSAGES, structured_result
 
@@ -120,6 +121,53 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual(31, result["items_total"])
         self.assertEqual(31, collector.registry.finish_market_search.call_count)
         self.assertEqual("PARTIAL", result["status"])
+
+    def test_catalog_details_cover_every_product_from_this_discovery(self) -> None:
+        collector = Collector.__new__(Collector)
+        collector.discover = MagicMock(return_value={
+            "status": "PASSED", "run_id": "catalog-run",
+        })
+        collector.process = MagicMock(return_value={"status": "PASSED"})
+
+        result = collector.sync_catalog(limit=7)
+
+        collector.process.assert_called_once_with(
+            "refresh-prices", 0, catalog_run_id="catalog-run"
+        )
+        self.assertEqual("PASSED", result["status"])
+
+    def test_catalog_run_filter_excludes_old_source_membership(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_catalog_run_") as folder:
+            registry = Registry(Path(folder) / "registry.db")
+            try:
+                source = "https://www.ozon.ru/seller/alfa-tires-3381444/"
+                for article, run_id in (("old", "old-run"), ("current", "new-run")):
+                    registry.upsert_catalog_product(
+                        {
+                            "article": article,
+                            "name": article,
+                            "url": f"https://www.ozon.ru/product/{article}-1/",
+                            "catalog_card_price": 100,
+                        },
+                        source,
+                        run_id,
+                        1,
+                        "2026-09-02T12:00:00",
+                    )
+                self.assertEqual(
+                    {"current"},
+                    registry.articles_for_sources([source], catalog_run_id="new-run"),
+                )
+            finally:
+                registry.close()
+
+    def test_kz_partial_stage_cannot_be_publication_authority(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "PARTIAL"):
+            require_complete({"status": "PARTIAL"}, "sync-catalog")
+        self.assertEqual(
+            {"status": "PASSED"},
+            require_complete({"status": "PASSED"}, "sync-catalog"),
+        )
 
     def test_out_of_stock_widget_is_a_valid_exact_product_response(self) -> None:
         article = "2946348346"
@@ -247,28 +295,19 @@ class OzonRuntimeContractTests(unittest.TestCase):
             RESULT_MESSAGES["partial_success"].casefold(),
         )
 
-    def test_full_sync_continues_after_partial_stage(self) -> None:
+    def test_full_sync_runs_market_only_after_complete_catalog(self) -> None:
         collector = Collector.__new__(Collector)
 
         with patch.object(
             collector,
             "sync_catalog",
             return_value={
-                "status": "PARTIAL",
+                "status": "PASSED",
                 "items_total": 100,
-                "items_success": 92,
-                "items_failed": 8,
+                "items_success": 100,
+                "items_failed": 0,
             },
         ) as sync_catalog, patch.object(
-            collector,
-            "process",
-            return_value={
-                "status": "PARTIAL",
-                "items_total": 100,
-                "items_success": 92,
-                "items_failed": 8,
-            },
-        ) as process, patch.object(
             collector,
             "market_search",
             return_value={"status": "PASSED"},
@@ -276,18 +315,22 @@ class OzonRuntimeContractTests(unittest.TestCase):
             result = collector.full_sync(100)
 
         sync_catalog.assert_called_once_with(100)
-        process.assert_called_once_with(
-            "refresh-prices",
-            100,
-        )
         market_search.assert_called_once_with(100)
 
-        self.assertEqual(
-            "PARTIAL",
-            result["status"],
-        )
-        self.assertIsNotNone(result["prices"])
+        self.assertEqual("PASSED", result["status"])
+        self.assertNotIn("prices", result)
         self.assertIsNotNone(result["market"])
+
+    def test_full_sync_does_not_start_market_after_partial_catalog(self) -> None:
+        collector = Collector.__new__(Collector)
+        with patch.object(
+            collector, "sync_catalog", return_value={"status": "PARTIAL"}
+        ), patch.object(collector, "market_search") as market_search:
+            result = collector.full_sync()
+
+        market_search.assert_not_called()
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertIsNone(result["market"])
 
     def test_empty_failed_seller_source_is_not_reported_as_partial_success(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_empty_source_") as folder:
