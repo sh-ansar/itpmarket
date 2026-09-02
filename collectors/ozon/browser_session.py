@@ -33,6 +33,10 @@ from ozon_browser_runtime import (
     running_chrome_processes,
 )
 
+SELLER_ROOT_BOOTSTRAP_STABLE_SECONDS = 15.0
+SELLER_ROOT_BOOTSTRAP_TIMEOUT_SECONDS = 45.0
+SELLER_ROOT_BOOTSTRAP_POLL_SECONDS = 2.0
+
 
 class BrowserSession:
     def __init__(
@@ -656,6 +660,103 @@ class BrowserSession:
                 return data, title, text, page_html
         return None, title, text, page_html
 
+    def _wait_for_seller_root_bootstrap(
+        self,
+        url: str,
+        events: list[dict[str, Any]],
+    ) -> None:
+        parsed_url = urlparse(url)
+        if not re.fullmatch(
+            r"/(?:seller|продавец)/[^/]+/?",
+            parsed_url.path or "",
+            flags=re.IGNORECASE,
+        ):
+            return
+
+        assert self.driver is not None
+        started = time.monotonic()
+        deadline = started + SELLER_ROOT_BOOTSTRAP_TIMEOUT_SECONDS
+        stable_since: float | None = None
+        ready_state = ""
+        structured_count = 0
+        dom_count = 0
+        events.append(
+            {
+                "event": "seller_root_bootstrap_wait",
+                "ready_state": ready_state,
+                "structured_count": structured_count,
+                "dom_count": dom_count,
+                "waited_seconds": 0.0,
+            }
+        )
+
+        while time.monotonic() < deadline:
+            ready_state = ""
+            structured_count = 0
+            dom_count = 0
+            try:
+                ready_state = str(
+                    self.driver.execute_script(
+                        "return document.readyState || '';"
+                    )
+                    or ""
+                )
+                _, _, page_html = self.snapshot()
+                grid_scan: dict[str, Any] = {}
+                structured_products, _ = parse_catalog_html(
+                    page_html,
+                    url,
+                    grid_scan,
+                )
+                dom_products = self.dom_catalog_products(url, grid_scan)
+                structured_count = len(structured_products)
+                dom_count = len(dom_products)
+            except Exception:
+                pass
+
+            observed_at = time.monotonic()
+            ready = (
+                ready_state == "complete"
+                and (structured_count > 0 or dom_count > 0)
+            )
+            if ready:
+                if stable_since is None:
+                    stable_since = observed_at
+                if (
+                    observed_at - stable_since
+                    >= SELLER_ROOT_BOOTSTRAP_STABLE_SECONDS
+                ):
+                    events.append(
+                        {
+                            "event": "seller_root_bootstrap_ready",
+                            "ready_state": ready_state,
+                            "structured_count": structured_count,
+                            "dom_count": dom_count,
+                            "waited_seconds": round(
+                                observed_at - started,
+                                1,
+                            ),
+                        }
+                    )
+                    return
+            else:
+                stable_since = None
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(SELLER_ROOT_BOOTSTRAP_POLL_SECONDS, remaining))
+
+        events.append(
+            {
+                "event": "seller_root_bootstrap_timeout",
+                "ready_state": ready_state,
+                "structured_count": structured_count,
+                "dom_count": dom_count,
+                "waited_seconds": round(time.monotonic() - started, 1),
+            }
+        )
+
     def _collect_catalog_snapshot(
         self,
         base_url: str,
@@ -1049,7 +1150,7 @@ class BrowserSession:
                 )
                 # Four normal stable cycles only identify a possible seller end.
                 # Require long unchanged confirmation windows before allowing a
-                # seller-root paginator URL or terminal return.
+                # seller-root terminal return.
                 if unique and stable_cycles >= 4:
                     if not seller_root:
                         break
@@ -1084,7 +1185,14 @@ class BrowserSession:
             # never expose a paginator URL as if the seller root were done.
             best_next_page = ""
 
-        return list(unique.values()), best_next_page, last_title, last_text, last_html, saw_block
+        return (
+            list(unique.values()),
+            "" if seller_root else best_next_page,
+            last_title,
+            last_text,
+            last_html,
+            saw_block,
+        )
 
     def load_catalog(
         self,
@@ -1101,6 +1209,7 @@ class BrowserSession:
         if navigate:
             try:
                 self.driver.get(url)
+                self._wait_for_seller_root_bootstrap(url, events)
             except Exception as exc:
                 events.append(
                     {
@@ -1170,6 +1279,7 @@ class BrowserSession:
                     )
 
                 time.sleep(8)
+                self._wait_for_seller_root_bootstrap(url, events)
 
         status = (
             "BLOCKED_AFTER_RETRIES"
