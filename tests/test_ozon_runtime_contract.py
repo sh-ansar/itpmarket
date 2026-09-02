@@ -37,6 +37,153 @@ from task_manager import RESULT_MESSAGES, structured_result
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
+    @staticmethod
+    def _catalog_articles(count: int, prefix: str = "article") -> set[str]:
+        return {f"{prefix}-{number}" for number in range(count)}
+
+    def _run_discovery_with_published_baseline(
+        self,
+        discovered_articles: set[str],
+        published_articles: set[str] | None = None,
+        product_limit: int | None = None,
+    ) -> tuple[dict[str, object], dict[str, object], MagicMock]:
+        with tempfile.TemporaryDirectory(prefix="ozon_catalog_shrink_guard_") as folder:
+            runtime = Path(folder)
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                start_urls=("https://www.ozon.ru/seller/alfa-tires-3381444/",),
+                start_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
+                catalog_product_limit=0,
+                catalog_max_pages=1,
+                catalog_wait_seconds=1,
+                page_reloads=0,
+                page_delay_seconds=(0, 0),
+                runs_dir=runtime / "runs",
+                reports_dir=runtime / "reports",
+                exports_dir=runtime / "exports",
+            )
+            registry = MagicMock()
+            published_run_id = "published-catalog" if published_articles is not None else ""
+            registry.current_published_catalog_run_id.return_value = published_run_id
+            registry.catalog_articles.return_value = set(published_articles or set())
+            registry.upsert_catalog_product.return_value = (True, False)
+            collector.registry = registry
+            browser = MagicMock()
+            browser.load_catalog.return_value = {
+                "ok": True,
+                "status": "CATALOG_OK",
+                "products": [
+                    {
+                        "article": article,
+                        "name": article,
+                        "url": f"https://www.ozon.ru/product/{article}/",
+                        "catalog_card_price": 100,
+                    }
+                    for article in sorted(discovered_articles)
+                ],
+                "next_page": "",
+            }
+            if product_limit is None:
+                result = None
+            else:
+                result = product_limit
+            with patch.object(collector, "ensure_browser", return_value=browser), patch.object(
+                collector, "generate_outputs"
+            ):
+                if result is None:
+                    discovery = collector.discover()
+                else:
+                    discovery = collector.discover(product_limit=result)
+            summary = json.loads(
+                (Path(discovery["run_dir"]) / "summary.json").read_text(encoding="utf-8")
+            )
+            return discovery, summary, registry
+
+    def test_catalog_shrink_guard_demotes_truncated_1152_snapshot(self) -> None:
+        published = self._catalog_articles(2086)
+        discovered = set(sorted(published)[:1151]) | {"new-article"}
+
+        result, summary, registry = self._run_discovery_with_published_baseline(
+            discovered, published
+        )
+
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual("CATALOG_SHRINK_GUARD", result["reason"])
+        guard = result["catalog_shrink_guard"]
+        self.assertEqual(2086, guard["previous_count"])
+        self.assertEqual(1152, guard["discovered_count"])
+        self.assertAlmostEqual(1152 / 2086, guard["retained_ratio"], delta=1e-6)
+        self.assertAlmostEqual(1151 / 1152, guard["overlap_ratio"], delta=1e-6)
+        self.assertEqual("CATALOG_SHRINK_GUARD", summary["reason"])
+        self.assertEqual("PARTIAL", summary["status"])
+        self.assertEqual("PARTIAL", registry.finish_run.call_args.args[1])
+        self.assertEqual("CATALOG_SHRINK_GUARD", registry.finish_run.call_args.args[2]["notes"])
+        registry.mark_catalog_published.assert_not_called()
+
+    def test_catalog_shrink_guard_demotes_80_product_subset(self) -> None:
+        published = self._catalog_articles(2086)
+        discovered = set(sorted(published)[:80])
+
+        result, summary, _registry = self._run_discovery_with_published_baseline(
+            discovered, published
+        )
+
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual("CATALOG_SHRINK_GUARD", result["reason"])
+        self.assertEqual(80, result["catalog_shrink_guard"]["discovered_count"])
+        self.assertEqual("CATALOG_SHRINK_GUARD", summary["catalog_shrink_guard"]["reason"])
+
+    def test_catalog_shrink_guard_allows_one_product_growth(self) -> None:
+        published = self._catalog_articles(2086)
+        result, _summary, _registry = self._run_discovery_with_published_baseline(
+            published | {"new-article"}, published
+        )
+
+        self.assertEqual("PASSED", result["status"])
+        self.assertNotIn("catalog_shrink_guard", result)
+
+    def test_catalog_shrink_guard_allows_1900_product_snapshot(self) -> None:
+        published = self._catalog_articles(2086)
+        result, _summary, _registry = self._run_discovery_with_published_baseline(
+            set(sorted(published)[:1900]), published
+        )
+
+        self.assertEqual("PASSED", result["status"])
+        self.assertNotIn("reason", result)
+
+    def test_catalog_shrink_guard_is_inactive_without_published_baseline(self) -> None:
+        result, _summary, registry = self._run_discovery_with_published_baseline(
+            self._catalog_articles(80)
+        )
+
+        self.assertEqual("PASSED", result["status"])
+        registry.current_published_catalog_run_id.assert_called_once_with()
+        registry.catalog_articles.assert_not_called()
+
+    def test_explicit_discovery_limit_keeps_existing_partial_behavior(self) -> None:
+        published = self._catalog_articles(2086)
+        result, _summary, registry = self._run_discovery_with_published_baseline(
+            set(sorted(published)[:80]), published, product_limit=80
+        )
+
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertNotIn("CATALOG_SHRINK_GUARD", result.get("reason", ""))
+        registry.current_published_catalog_run_id.assert_not_called()
+
+    def test_sync_catalog_does_not_refresh_after_shrink_guard_demotion(self) -> None:
+        collector = Collector.__new__(Collector)
+        collector.discover = MagicMock(return_value={
+            "status": "PARTIAL",
+            "reason": "CATALOG_SHRINK_GUARD",
+        })
+        collector.process = MagicMock()
+
+        result = collector.sync_catalog()
+
+        collector.process.assert_not_called()
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual("CATALOG_SHRINK_GUARD", result["discovery"]["reason"])
+
     def _run_catalog_snapshot_timeline(
         self,
         base_url: str,

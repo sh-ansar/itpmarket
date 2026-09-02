@@ -73,6 +73,10 @@ STATUS_PRIORITY = {
     "INTERRUPTED": 4,
 }
 
+CATALOG_SHRINK_GUARD_MIN_BASELINE_ARTICLES = 100
+CATALOG_SHRINK_GUARD_MAX_RETAINED_RATIO = 0.70
+CATALOG_SHRINK_GUARD_MIN_OVERLAP_RATIO = 0.90
+
 
 def combined_status(*results: dict[str, Any]) -> str:
     statuses = [
@@ -227,6 +231,7 @@ class Collector:
         browser = self.ensure_browser()
         source_summaries: list[dict[str, Any]] = []
         stop_all = False
+        result_metadata: dict[str, Any] = {}
         try:
             print("=" * 78)
             print("OZON COLLECTOR 3.1 — SCROLL-STABLE MULTI-SOURCE DISCOVERY")
@@ -317,9 +322,37 @@ class Collector:
             # an empty queue and make the job look successful in the UI.
             if not seen and metrics["sources_completed"] == 0 and status == "PARTIAL":
                 status = "FAILED"
+            diagnostic_limit_used = product_limit is not None or bool(limit)
+            if status == "PASSED" and not diagnostic_limit_used:
+                published_run_id = self.registry.current_published_catalog_run_id()
+                published_articles = self.registry.catalog_articles(published_run_id) if published_run_id else set()
+                previous_count = len(published_articles)
+                discovered_count = len(seen)
+                if previous_count >= CATALOG_SHRINK_GUARD_MIN_BASELINE_ARTICLES and discovered_count:
+                    retained_ratio = discovered_count / previous_count
+                    overlap_ratio = len(seen & published_articles) / discovered_count
+                    if (
+                        retained_ratio < CATALOG_SHRINK_GUARD_MAX_RETAINED_RATIO
+                        and overlap_ratio >= CATALOG_SHRINK_GUARD_MIN_OVERLAP_RATIO
+                    ):
+                        status = "PARTIAL"
+                        guard_details = {
+                            "reason": "CATALOG_SHRINK_GUARD",
+                            "previous_run_id": published_run_id,
+                            "previous_count": previous_count,
+                            "discovered_count": discovered_count,
+                            "retained_ratio": round(retained_ratio, 6),
+                            "overlap_ratio": round(overlap_ratio, 6),
+                        }
+                        result_metadata = {
+                            "reason": "CATALOG_SHRINK_GUARD",
+                            "catalog_shrink_guard": guard_details,
+                        }
+                        metrics["notes"] = "CATALOG_SHRINK_GUARD"
             summary = {
                 "run_id": run_id,
                 "mode": mode,
+                "status": status,
                 "start_url": self.settings.start_url,
                 "start_urls": source_urls,
                 "sources": source_summaries,
@@ -327,6 +360,7 @@ class Collector:
                 "new_products": new_count,
                 "catalog_price_changed": changed_count,
                 **metrics,
+                **result_metadata,
             }
             (run_dir / "summary.json").write_text(
                 json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -346,7 +380,13 @@ class Collector:
             f"\nDiscovery завершён: источников {metrics['sources_completed']}/{metrics['sources_total']}; "
             f"товаров {len(seen)}; новых {new_count}; изменили цену {changed_count}"
         )
-        return {"run_id": run_id, "run_dir": str(run_dir), "status": status, **metrics}
+        return {
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "status": status,
+            **metrics,
+            **result_metadata,
+        }
 
     @staticmethod
     def task_type_for_mode(mode: str) -> str:
