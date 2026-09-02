@@ -211,7 +211,8 @@ class Collector:
         run_id = run_id_for(mode)
         run_dir = self._run_dir(run_id)
         source_urls = list(self.settings.start_urls or (self.settings.start_url,))
-        self.registry.begin_run(run_id, mode, "\n".join(source_urls))
+        source_boundary = "\n".join(source_urls)
+        self.registry.begin_run(run_id, mode, source_boundary)
         started = time.monotonic()
         metrics = {
             "sources_total": len(source_urls),
@@ -325,12 +326,26 @@ class Collector:
             diagnostic_limit_used = product_limit is not None or bool(limit)
             if status == "PASSED" and not diagnostic_limit_used:
                 published_run_id = self.registry.current_published_catalog_run_id()
-                published_articles = self.registry.catalog_articles(published_run_id) if published_run_id else set()
-                previous_count = len(published_articles)
+                baseline_run_id = published_run_id
+                baseline_source = "published" if published_run_id else ""
+                if not baseline_run_id:
+                    baseline_run_id = (
+                        self.registry.strongest_previous_passed_discovery_run_id(
+                            source_boundary,
+                            run_id,
+                        )
+                    )
+                    if baseline_run_id:
+                        baseline_source = "previous_passed_discovery"
+                baseline_articles = (
+                    self.registry.catalog_articles(baseline_run_id)
+                    if baseline_run_id else set()
+                )
+                previous_count = len(baseline_articles)
                 discovered_count = len(seen)
                 if previous_count >= CATALOG_SHRINK_GUARD_MIN_BASELINE_ARTICLES and discovered_count:
                     retained_ratio = discovered_count / previous_count
-                    overlap_ratio = len(seen & published_articles) / discovered_count
+                    overlap_ratio = len(seen & baseline_articles) / discovered_count
                     if (
                         retained_ratio < CATALOG_SHRINK_GUARD_MAX_RETAINED_RATIO
                         and overlap_ratio >= CATALOG_SHRINK_GUARD_MIN_OVERLAP_RATIO
@@ -338,8 +353,11 @@ class Collector:
                         status = "PARTIAL"
                         guard_details = {
                             "reason": "CATALOG_SHRINK_GUARD",
-                            "previous_run_id": published_run_id,
+                            "previous_run_id": baseline_run_id,
                             "previous_count": previous_count,
+                            "baseline_source": baseline_source,
+                            "baseline_run_id": baseline_run_id,
+                            "baseline_count": previous_count,
                             "discovered_count": discovered_count,
                             "retained_ratio": round(retained_ratio, 6),
                             "overlap_ratio": round(overlap_ratio, 6),

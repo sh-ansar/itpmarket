@@ -829,6 +829,25 @@ class Registry:
         ).fetchone()
         return str(row[0]) if row else ""
 
+    def strongest_previous_passed_discovery_run_id(
+        self,
+        start_url: str,
+        current_run_id: str,
+    ) -> str:
+        row = self.conn.execute(
+            """SELECT r.run_id
+               FROM runs r
+               JOIN catalog_snapshots cs ON cs.run_id=r.run_id
+               WHERE r.mode='discover' AND r.status='PASSED'
+                 AND r.start_url=? AND r.run_id<>?
+               GROUP BY r.run_id,r.finished_at,r.started_at
+               ORDER BY COUNT(cs.article) DESC,
+                        COALESCE(r.finished_at,r.started_at) DESC
+               LIMIT 1""",
+            (str(start_url), str(current_run_id)),
+        ).fetchone()
+        return str(row[0]) if row else ""
+
     def mark_catalog_published(self, catalog_run_id: str) -> None:
         if not str(catalog_run_id).strip():
             return
