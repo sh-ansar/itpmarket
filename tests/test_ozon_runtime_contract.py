@@ -16,6 +16,7 @@ OZON_ROOT = ROOT / "collectors" / "ozon"
 if str(OZON_ROOT) not in sys.path:
     sys.path.insert(0, str(OZON_ROOT))
 
+import browser_session
 from browser_session import BrowserSession
 from ozon_collector import (
     Collector,
@@ -36,6 +37,132 @@ from task_manager import RESULT_MESSAGES, structured_result
 
 
 class OzonRuntimeContractTests(unittest.TestCase):
+    def _run_catalog_snapshot_timeline(
+        self,
+        base_url: str,
+        delayed_growth_at: float | None = None,
+        fail_confirmation: bool = False,
+    ) -> tuple[list[dict[str, object]], str, list[dict[str, object]], list[float]]:
+        clock = [0.0]
+
+        def catalogue_products() -> list[dict[str, object]]:
+            count = 3 if delayed_growth_at is not None and clock[0] >= delayed_growth_at else 2
+            return [
+                {
+                    "article": str(number),
+                    "name": f"Product {number}",
+                    "url": f"https://www.ozon.ru/product/product-{number}/",
+                    "catalog_card_price": number,
+                }
+                for number in range(1, count + 1)
+            ]
+
+        class FakeDriver:
+            def __init__(self) -> None:
+                self.bottom_calls = 0
+
+            def execute_script(self, script: str) -> object:
+                if script == "window.scrollTo(0, 0);":
+                    return None
+                if "root.scrollTo(0, root.scrollHeight)" in script:
+                    self.bottom_calls += 1
+                    if fail_confirmation and self.bottom_calls == 1:
+                        clock[0] = 10000.0
+                        raise RuntimeError("confirmation unavailable")
+                    height = 1200 if delayed_growth_at is not None and clock[0] >= delayed_growth_at else 1000
+                    return {
+                        "before": 0,
+                        "after": height,
+                        "heightBefore": height,
+                        "heightAfter": height,
+                        "height": height,
+                        "loading": False,
+                    }
+                height = 1200 if delayed_growth_at is not None and clock[0] >= delayed_growth_at else 1000
+                return {"top": 0, "height": height, "loading": False}
+
+        def fake_parse(_page_html: str, _base_url: str, scan: dict[str, object]) -> tuple[list[dict[str, object]], str]:
+            if "/seller/" in base_url:
+                scan.update(
+                    {
+                        "selected_strategy": "seller_evidence",
+                        "accepted_seller_grid_ids": ["seller-grid"],
+                        "accepted_seller_articles": [product["article"] for product in catalogue_products()],
+                    }
+                )
+            else:
+                scan.update({"selected_strategy": "market_catalog"})
+            return catalogue_products(), "https://www.ozon.ru/page/2/"
+
+        session = BrowserSession.__new__(BrowserSession)
+        session.driver = FakeDriver()
+        session.snapshot = lambda: ("Catalog", "Catalog", "<html></html>")
+        session.blocked_state = lambda *_args: False
+        session._safe_dom_text = lambda value: value
+        session.dom_catalog_products = lambda _base_url, _scan: []
+        events: list[dict[str, object]] = []
+
+        def monotonic() -> float:
+            return clock[0]
+
+        def sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        with patch.object(browser_session, "parse_catalog_html", side_effect=fake_parse), patch(
+            "browser_session.time.monotonic", side_effect=monotonic
+        ), patch("browser_session.time.sleep", side_effect=sleep):
+            products, next_page, _title, _text, _html, _blocked = session._collect_catalog_snapshot(
+                base_url, 60, events
+            )
+        return products, next_page, events, clock
+
+    def test_seller_terminal_confirmation_continues_after_transient_plateau(self) -> None:
+        products, next_page, events, _clock = self._run_catalog_snapshot_timeline(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            delayed_growth_at=15.0,
+        )
+
+        self.assertEqual({"1", "2", "3"}, {str(product["article"]) for product in products})
+        self.assertEqual("https://www.ozon.ru/page/2/", next_page)
+        self.assertEqual(
+            [1, 2, 3, 4],
+            [event["stable_cycles"] for event in events if event.get("event") == "scroll_cycle"][:4],
+        )
+        self.assertTrue(any(event.get("event") == "terminal_confirmation_cancelled" for event in events))
+        self.assertTrue(any(event.get("event") == "seller_terminal_confirmed" for event in events))
+
+    def test_seller_terminal_confirmation_ends_after_unchanged_windows(self) -> None:
+        products, next_page, events, _clock = self._run_catalog_snapshot_timeline(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+        )
+
+        self.assertEqual({"1", "2"}, {str(product["article"]) for product in products})
+        self.assertEqual("https://www.ozon.ru/page/2/", next_page)
+        windows = [event for event in events if event.get("event") == "terminal_confirmation_window"]
+        self.assertEqual([1, 2], [event["window"] for event in windows])
+        self.assertEqual(1, sum(event.get("event") == "seller_terminal_confirmed" for event in events))
+
+    def test_seller_paginator_is_unavailable_before_terminal_confirmation(self) -> None:
+        products, next_page, events, _clock = self._run_catalog_snapshot_timeline(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            fail_confirmation=True,
+        )
+
+        self.assertEqual({"1", "2"}, {str(product["article"]) for product in products})
+        self.assertEqual("", next_page)
+        self.assertTrue(any(event.get("next_page") for event in events if event.get("event") == "scroll_cycle"))
+        self.assertFalse(any(event.get("event") == "seller_terminal_confirmed" for event in events))
+        self.assertTrue(any(event.get("event") == "scroll_safety_deadline" for event in events))
+
+    def test_non_seller_catalog_still_returns_its_paginator(self) -> None:
+        products, next_page, events, _clock = self._run_catalog_snapshot_timeline(
+            "https://www.ozon.ru/category/tires/",
+        )
+
+        self.assertEqual({"1", "2"}, {str(product["article"]) for product in products})
+        self.assertEqual("https://www.ozon.ru/page/2/", next_page)
+        self.assertFalse(any(event.get("event", "").startswith("terminal_confirmation") for event in events))
+
     def test_ru_and_kz_catalogue_scroll_waits_for_delayed_virtual_grid_growth(self) -> None:
         def catalogue_html(count: int) -> str:
             items = ",".join(

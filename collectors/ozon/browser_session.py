@@ -671,14 +671,20 @@ class BrowserSession:
         ))
         settle_window_seconds = 3.2
         settle_poll_seconds = 0.4
+        terminal_confirmation_window_seconds = 15.0
+        terminal_confirmation_windows_required = 2
         # `catalog_wait_seconds` is suitable for ordinary paginated layouts,
         # but is too short to exhaust a seller root that keeps appending a
         # proven batch each bottom-scroll cycle.  Keep a finite hard deadline
         # while giving that one infinite-scroll layout enough time to reach
         # the required stable end instead of falling through to paginator URL.
-        # The four-window reserve is exactly the required stable-stop proof.
+        # Reserve the complete bounded terminal-confirmation phase.
         safety_seconds = (
-            max(wait_seconds, 300) + (4 * settle_window_seconds)
+            max(wait_seconds, 300)
+            + (
+                terminal_confirmation_window_seconds
+                * terminal_confirmation_windows_required
+            )
             if seller_root else wait_seconds
         )
         deadline = time.monotonic() + safety_seconds
@@ -687,6 +693,7 @@ class BrowserSession:
         last_title = last_text = last_html = ""
         saw_block = False
         stable_cycles = 0
+        seller_terminal_confirmed = not seller_root
         cycle = 0
         # A lazy seller root can add a batch only after its current bottom has
         # been reached.  This is deliberately a short polling window rather
@@ -751,6 +758,147 @@ class BrowserSession:
                 len(unique) - unique_before,
                 blocked,
             )
+
+        def confirm_seller_terminal(
+            structured_signature: str,
+            dom_signature: str,
+            scroll_height: int,
+            loading: bool,
+        ) -> tuple[bool, bool]:
+            """Require multiple unchanged long windows before seller exhaustion."""
+            nonlocal stable_cycles
+            for window in range(1, terminal_confirmation_windows_required + 1):
+                if time.monotonic() >= deadline:
+                    return False, False
+                window_deadline = min(
+                    deadline,
+                    time.monotonic() + terminal_confirmation_window_seconds,
+                )
+                window_unique_count = len(unique)
+                window_started = time.monotonic()
+                try:
+                    initial_scroll_state = self.driver.execute_script(
+                        """
+                        const root = document.scrollingElement || document.documentElement || document.body;
+                        if (root) root.scrollTo(0, root.scrollHeight);
+                        return {
+                          top: root ? root.scrollTop : 0,
+                          height: root ? root.scrollHeight : 0,
+                          loading: Boolean(document.querySelector('[aria-busy="true"], [data-testid*="loading" i], [class*="loading" i]'))
+                        };
+                        """
+                    )
+                    initial_height = int(
+                        (initial_scroll_state or {}).get("height") or scroll_height
+                    )
+                    initial_loading = bool(
+                        (initial_scroll_state or {}).get("loading")
+                    )
+                    if any((
+                        initial_height != scroll_height,
+                        initial_loading != loading,
+                        initial_loading,
+                        len(unique) > window_unique_count,
+                    )):
+                        events.append(
+                            {
+                                "event": "terminal_confirmation_cancelled",
+                                "window": window,
+                                "reason": "seller_state_changed",
+                                "unique_products": len(unique),
+                                "scroll_height": initial_height,
+                                "loading": initial_loading,
+                            }
+                        )
+                        stable_cycles = 0
+                        return False, False
+
+                    while time.monotonic() < window_deadline:
+                        time.sleep(settle_poll_seconds)
+                        (
+                            _structured_count,
+                            _dom_count,
+                            structured_signature_after,
+                            dom_signature_after,
+                            _new_unique,
+                            blocked_after,
+                        ) = collect_once()
+                        if blocked_after:
+                            events.append(
+                                {
+                                    "event": "blocked_detected",
+                                    "unique_products": len(unique),
+                                }
+                            )
+                            return False, True
+                        scroll_state = self.driver.execute_script(
+                            """
+                            const root = document.scrollingElement || document.documentElement || document.body;
+                            if (root) root.scrollTo(0, root.scrollHeight);
+                            return {
+                              top: root ? root.scrollTop : 0,
+                              height: root ? root.scrollHeight : 0,
+                              loading: Boolean(document.querySelector('[aria-busy="true"], [data-testid*="loading" i], [class*="loading" i]'))
+                            };
+                            """
+                        )
+                        current_height = int(
+                            (scroll_state or {}).get("height") or scroll_height
+                        )
+                        current_loading = bool(
+                            (scroll_state or {}).get("loading")
+                        )
+                        changed = any((
+                            len(unique) > window_unique_count,
+                            structured_signature_after != structured_signature,
+                            dom_signature_after != dom_signature,
+                            current_height != scroll_height,
+                            current_loading != loading,
+                            current_loading,
+                        ))
+                        if changed:
+                            events.append(
+                                {
+                                    "event": "terminal_confirmation_cancelled",
+                                    "window": window,
+                                    "reason": "seller_state_changed",
+                                    "unique_products": len(unique),
+                                    "scroll_height": current_height,
+                                    "loading": current_loading,
+                                }
+                            )
+                            stable_cycles = 0
+                            return False, False
+                    events.append(
+                        {
+                            "event": "terminal_confirmation_window",
+                            "window": window,
+                            "unchanged": True,
+                            "unique_products": len(unique),
+                            "scroll_height": scroll_height,
+                            "duration_seconds": round(
+                                time.monotonic() - window_started, 3
+                            ),
+                        }
+                    )
+                except Exception as exc:
+                    events.append(
+                        {
+                            "event": "terminal_confirmation_error",
+                            "window": window,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    stable_cycles = 0
+                    return False, False
+            events.append(
+                {
+                    "event": "seller_terminal_confirmed",
+                    "confirmation_windows": terminal_confirmation_windows_required,
+                    "unique_products": len(unique),
+                }
+            )
+            return True, False
 
         try:
             self.driver.execute_script("window.scrollTo(0, 0);")
@@ -899,15 +1047,28 @@ class BrowserSession:
                         "blocked": False,
                     }
                 )
-                # Paginator URLs are retained for layouts that need them, but
-                # only after seller-root lazy scrolling has demonstrably settled.
+                # Four normal stable cycles only identify a possible seller end.
+                # Require long unchanged confirmation windows before allowing a
+                # seller-root paginator URL or terminal return.
                 if unique and stable_cycles >= 4:
-                    break
+                    if not seller_root:
+                        break
+                    (
+                        seller_terminal_confirmed,
+                        confirmation_blocked,
+                    ) = confirm_seller_terminal(
+                        structured_signature_after,
+                        dom_signature_after,
+                        scroll_height_after,
+                        bool((scroll_state_after or {}).get("loading")),
+                    )
+                    if confirmation_blocked or seller_terminal_confirmed:
+                        break
             except Exception as exc:
                 events.append({"event": "scroll_cycle_error", "error": f"{type(exc).__name__}: {exc}"})
                 time.sleep(settle_poll_seconds)
 
-        if seller_root and stable_cycles < 4 and time.monotonic() >= deadline:
+        if seller_root and not seller_terminal_confirmed and time.monotonic() >= deadline:
             events.append(
                 {
                     "event": "scroll_safety_deadline",
@@ -917,6 +1078,10 @@ class BrowserSession:
             )
             # Do not treat a paginator URL as a continuation while the root's
             # own lazy catalogue is still changing.
+            best_next_page = ""
+        elif seller_root and not seller_terminal_confirmed:
+            # A blocked/error exit or any other incomplete confirmation must
+            # never expose a paginator URL as if the seller root were done.
             best_next_page = ""
 
         return list(unique.values()), best_next_page, last_title, last_text, last_html, saw_block
