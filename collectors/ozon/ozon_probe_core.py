@@ -242,10 +242,15 @@ def parse_catalog_html(
         "grids_seller_matched": 0,
         "grids_unscoped": 0,
         "selected_strategy": "none",
+        # BrowserSession uses only these accepted state IDs to resolve a DOM
+        # container.  They are evidence from this parser, never a selector
+        # guessed from arbitrary product links elsewhere on the page.
+        "accepted_seller_grid_ids": [],
+        "accepted_seller_articles": [],
         "products_found": 0,
     }
-    seller_matched: list[list[dict[str, Any]]] = []
-    seller_unscoped: list[list[dict[str, Any]]] = []
+    seller_matched: list[tuple[str, list[dict[str, Any]]]] = []
+    seller_unscoped: list[tuple[str, list[dict[str, Any]]]] = []
     non_seller_grids: list[list[dict[str, Any]]] = []
 
     for grid in grids:
@@ -262,6 +267,7 @@ def parse_catalog_html(
         # that a seller catalogue has loaded.
         if not grid_products:
             continue
+        grid_id = str(grid.get("_spyon_state_id") or "")
 
         if not expected_seller_id:
             # Search/category pages use the same structured state but are not
@@ -269,22 +275,30 @@ def parse_catalog_html(
             non_seller_grids.append(grid_products)
         elif expected_seller_id in grid_context:
             scan["grids_seller_matched"] += 1
-            seller_matched.append(grid_products)
+            seller_matched.append((grid_id, grid_products))
         elif not _has_explicit_seller_metadata(grid):
             scan["grids_unscoped"] += 1
-            seller_unscoped.append(grid_products)
+            seller_unscoped.append((grid_id, grid_products))
 
     if expected_seller_id:
         if seller_matched:
             accepted_catalogue_grid = True
             scan["selected_strategy"] = "seller_evidence"
-            products = [product for grid_products in seller_matched for product in grid_products]
+            scan["accepted_seller_grid_ids"] = [
+                grid_id for grid_id, _products in seller_matched if grid_id
+            ]
+            products = [
+                product
+                for _grid_id, grid_products in seller_matched
+                for product in grid_products
+            ]
         elif len(seller_unscoped) == 1:
             # Ozon's main storefront grid can omit its seller slug from widget
             # state.  This is safe only for one unambiguous, normal tile grid.
             accepted_catalogue_grid = True
             scan["selected_strategy"] = "seller_single_unscoped_fallback"
-            products = seller_unscoped[0]
+            grid_id, products = seller_unscoped[0]
+            scan["accepted_seller_grid_ids"] = [grid_id] if grid_id else []
     else:
         # Preserve structured market/category parsing.  This is deliberately
         # not the seller-storefront fallback and remains traceable as "none".
@@ -292,6 +306,12 @@ def parse_catalog_html(
         products = [product for grid_products in non_seller_grids for product in grid_products]
 
     scan["products_found"] = len(products)
+    if accepted_catalogue_grid:
+        scan["accepted_seller_articles"] = [
+            str(product.get("article") or "")
+            for product in products
+            if str(product.get("article") or "")
+        ]
     if grid_scan is not None:
         grid_scan.update(scan)
 

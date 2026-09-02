@@ -457,12 +457,91 @@ class BrowserSession:
             return ""
         return text
 
-    def dom_catalog_products(self, base_url: str) -> list[dict[str, Any]]:
+    def dom_catalog_products(
+        self, base_url: str, seller_grid_scan: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Read visible cards only from a parser-proven seller grid.
+
+        The structured parser supplies exact seller-grid state IDs and article
+        IDs.  The state node can be hydration-only, so exact accepted articles
+        first prove the narrowest DOM container that contains the whole seller
+        grid; only then are visible cards read inside that container.  If the
+        relationship is not provable, an empty result is safer than page-wide
+        recommendation/cross-sell leakage.
+        """
         assert self.driver is not None
+        state_ids = [
+            str(value)
+            for value in seller_grid_scan.get("accepted_seller_grid_ids") or []
+            if str(value)
+        ]
+        accepted_articles = [
+            str(value)
+            for value in seller_grid_scan.get("accepted_seller_articles") or []
+            if str(value)
+        ]
+        if str(seller_grid_scan.get("selected_strategy") or "") not in {
+            "seller_evidence",
+            "seller_single_unscoped_fallback",
+        } or not state_ids or not accepted_articles:
+            return []
         try:
             rows = self.driver.execute_script(
-                """
-                const anchors = [...document.querySelectorAll('a[href*="/product/"]')];
+                r"""
+                const acceptedStateIds = new Set(arguments[0] || []);
+                const acceptedArticles = new Set(arguments[1] || []);
+                if (![...acceptedStateIds].every((stateId) => document.getElementById(stateId))) return [];
+                const articleFromHref = (href) => {
+                  const value = String(href || '');
+                  const tail = value.match(/-(\d+)\/?(?:[?#].*)?$/);
+                  const direct = value.match(/\/product\/(\d+)\/?/);
+                  return (tail || direct || [])[1] || '';
+                };
+                const productAnchors = (node) => node
+                  ? [...node.querySelectorAll('a[href*="/product/"]')]
+                  : [];
+                // This page-wide pass is evidence-only and is restricted to
+                // exact IDs accepted by parse_catalog_html.  It never emits
+                // product rows; broad /product/ collection begins only after
+                // a proven container has been selected below.
+                const evidenceAnchors = [...document.querySelectorAll('a[href]')]
+                  .filter((anchor) => acceptedArticles.has(articleFromHref(anchor.href)));
+                const evidenceArticles = new Set(
+                  evidenceAnchors.map((anchor) => articleFromHref(anchor.href))
+                );
+                if (evidenceArticles.size !== acceptedArticles.size) return [];
+                const containsEveryAcceptedArticle = (node) => {
+                  const found = new Set(
+                    productAnchors(node).map((anchor) => articleFromHref(anchor.href))
+                  );
+                  return [...acceptedArticles].every((article) => found.has(article));
+                };
+                const candidates = new Set();
+                for (const anchor of evidenceAnchors) {
+                  for (let node = anchor.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+                    if (containsEveryAcceptedArticle(node)) candidates.add(node);
+                  }
+                }
+                // The narrowest evidence ancestor can be a single initial
+                // tile row.  For Ozon's lazy storefront, that row is nested
+                // in a named paginator boundary which receives later seller
+                // batches.  Prefer such a boundary only when it is already
+                // in the exact-article evidence chain; this is not a global
+                // paginator selector and cannot stand in for seller proof.
+                const paginationCandidates = [...candidates].filter((node) =>
+                  /paginator/i.test(String(node.id || ''))
+                );
+                const container = (paginationCandidates.length
+                  ? paginationCandidates
+                  : [...candidates]
+                ).sort((left, right) => {
+                  const count = productAnchors(left).length - productAnchors(right).length;
+                  if (count) return count;
+                  return right.contains(left) ? -1 : left.contains(right) ? 1 : 0;
+                })[0];
+                if (!container) return [];
+                const anchors = productAnchors(container);
+                const seen = new Set();
                 const rows = [];
                 for (const anchor of anchors) {
                   const href = anchor.href || anchor.getAttribute('href') || '';
@@ -476,7 +555,7 @@ class BrowserSession:
                   const imageFromSrcset = (value) => {
                     const parts = String(value || '').split(',').map(v => v.trim()).filter(Boolean);
                     if (!parts.length) return '';
-                    return parts[parts.length - 1].split(/\\s+/)[0] || '';
+                    return parts[parts.length - 1].split(/\s+/)[0] || '';
                   };
                   const absoluteImage = (value) => {
                     const raw = String(value || '').trim();
@@ -495,16 +574,16 @@ class BrowserSession:
                       const src = lazy.getAttribute('data-src') || lazy.getAttribute('data-original') || imageFromSrcset(lazy.getAttribute('srcset') || lazy.getAttribute('data-srcset'));
                       if (src) return absoluteImage(src);
                     }
-                    const styled = [...node.querySelectorAll('[style*="background"]')].find(el => /url\\(/i.test(el.getAttribute('style') || ''));
+                    const styled = [...node.querySelectorAll('[style*="background"]')].find(el => /url\(/i.test(el.getAttribute('style') || ''));
                     if (styled) {
-                      const match = String(styled.getAttribute('style') || '').match(/url\\((['"]?)(.*?)\\1\\)/i);
+                      const match = String(styled.getAttribute('style') || '').match(/url\((['"]?)(.*?)\1\)/i);
                       if (match && match[2]) return absoluteImage(match[2]);
                     }
                     return '';
                   };
                   const img = (card || anchor).querySelector('img');
                   const text = ((card || anchor).innerText || anchor.textContent || '').trim();
-                  const lines = text.split(/\\n+/).map(v => v.trim()).filter(Boolean);
+                  const lines = text.split(/\n+/).map(v => v.trim()).filter(Boolean);
                   const title = anchor.getAttribute('aria-label') || (img && (img.alt || img.title)) || lines.find(v => !/[₽₸]/.test(v)) || '';
                   const priceLines = lines.filter(v => /[₽₸]|руб/i.test(v));
                   const priceLine = priceLines.find(v => !/(?:×|x)\s*\d+\s*(?:мес|month)/i.test(v)) || priceLines[0] || '';
@@ -516,7 +595,9 @@ class BrowserSession:
                   });
                 }
                 return rows;
-                """
+                """,
+                state_ids,
+                accepted_articles,
             )
         except Exception:
             return []
@@ -582,19 +663,94 @@ class BrowserSession:
         events: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], str, str, str, str, bool]:
         assert self.driver is not None
-        deadline = time.monotonic() + wait_seconds
+        parsed_base = urlparse(base_url)
+        seller_root = bool(re.fullmatch(
+            r"/(?:seller|продавец)/[^/]+/?",
+            parsed_base.path or "",
+            flags=re.IGNORECASE,
+        ))
+        settle_window_seconds = 3.2
+        settle_poll_seconds = 0.4
+        # `catalog_wait_seconds` is suitable for ordinary paginated layouts,
+        # but is too short to exhaust a seller root that keeps appending a
+        # proven batch each bottom-scroll cycle.  Keep a finite hard deadline
+        # while giving that one infinite-scroll layout enough time to reach
+        # the required stable end instead of falling through to paginator URL.
+        # The four-window reserve is exactly the required stable-stop proof.
+        safety_seconds = (
+            max(wait_seconds, 300) + (4 * settle_window_seconds)
+            if seller_root else wait_seconds
+        )
+        deadline = time.monotonic() + safety_seconds
         unique: dict[str, dict[str, Any]] = {}
         best_next_page = ""
         last_title = last_text = last_html = ""
         saw_block = False
-        last_unique = -1
-        stable_ticks = 0
-        last_height = -1
-        # Ozon's virtual grid can append rows only after a delayed bottom
-        # settle.  Do not treat three no-growth polls as end-of-catalogue.
-        # A full settle cycle observes both product growth and document height.
-        last_product_growth_at = time.monotonic()
-        last_height_growth_at = last_product_growth_at
+        stable_cycles = 0
+        cycle = 0
+        # A lazy seller root can add a batch only after its current bottom has
+        # been reached.  This is deliberately a short polling window rather
+        # than one long sleep: a new batch starts the next bottom-scroll cycle
+        # immediately, while a quiet root must settle repeatedly before it is
+        # considered exhausted.
+        def collect_once() -> tuple[int, int, str, str, int, bool]:
+            nonlocal best_next_page, last_title, last_text, last_html, saw_block
+            title, text, page_html = self.snapshot()
+            last_title, last_text, last_html = title, text, page_html
+            grid_scan: dict[str, Any] = {}
+            state_products, next_page = parse_catalog_html(
+                page_html,
+                base_url,
+                grid_scan,
+            )
+            events.append({"event": "catalog_grid_scan", **grid_scan})
+            # Structured state proves the seller grid.  Visible cards are then
+            # read only from its proven DOM container; page-wide product links
+            # remain ineligible because they can be recommendations.
+            seller_dom_products = self.dom_catalog_products(base_url, grid_scan)
+            unique_before = len(unique)
+            for product in state_products:
+                article = str(product.get("article") or "")
+                if article:
+                    if product.get("name"):
+                        product = {
+                            **product,
+                            "name": self._safe_dom_text(product.get("name")),
+                        }
+                    unique[article] = product
+            # Virtualized cards can disappear from state and the DOM; retain
+            # every previously proven seller card in this accumulator.
+            for product in seller_dom_products:
+                article = str(product.get("article") or "")
+                if article and article not in unique:
+                    if product.get("name"):
+                        product = {
+                            **product,
+                            "name": self._safe_dom_text(product.get("name")),
+                        }
+                    unique[article] = product
+            if next_page:
+                best_next_page = next_page
+            blocked = self.blocked_state(title, text, page_html)
+            saw_block = saw_block or blocked
+            structured_signature = "|".join(sorted(
+                str(product.get("article") or "")
+                for product in state_products
+                if str(product.get("article") or "")
+            ))
+            dom_signature = "|".join(sorted(
+                str(product.get("article") or "")
+                for product in seller_dom_products
+                if str(product.get("article") or "")
+            ))
+            return (
+                len(state_products),
+                len(seller_dom_products),
+                structured_signature,
+                dom_signature,
+                len(unique) - unique_before,
+                blocked,
+            )
 
         try:
             self.driver.execute_script("window.scrollTo(0, 0);")
@@ -604,30 +760,15 @@ class BrowserSession:
 
         while time.monotonic() < deadline:
             try:
-                title, text, page_html = self.snapshot()
-                last_title, last_text, last_html = title, text, page_html
-                # A page-wide anchor scan would include Ozon cross-sell and
-                # recommendation cards.  Only structured catalogue state is
-                # eligible for a seller snapshot.
-                grid_scan: dict[str, Any] = {}
-                state_products, next_page = parse_catalog_html(
-                    page_html,
-                    base_url,
-                    grid_scan,
-                )
-                events.append({"event": "catalog_grid_scan", **grid_scan})
-                products = state_products
-                for product in products:
-                    article = str(product.get("article") or "")
-                    if article:
-                        if product.get("name"):
-                            product = {**product, "name": self._safe_dom_text(product.get("name"))}
-                        unique[article] = product
-                if next_page:
-                    best_next_page = next_page
-                blocked = self.blocked_state(title, text, page_html)
-                saw_block = saw_block or blocked
-
+                cycle += 1
+                (
+                    structured_before,
+                    dom_before,
+                    structured_signature_before,
+                    dom_signature_before,
+                    _initial_new_unique,
+                    blocked,
+                ) = collect_once()
                 if blocked:
                     events.append(
                         {
@@ -637,74 +778,146 @@ class BrowserSession:
                     )
                     break
 
-                scroll_state = self.driver.execute_script(
+                unique_count_before = len(unique)
+                scroll_state_before = self.driver.execute_script(
                     """
                     const root = document.scrollingElement || document.documentElement || document.body;
-                    const step = Math.max(700, Math.floor((window.innerHeight || 900) * 0.85));
                     const before = root ? root.scrollTop : 0;
                     const height = root ? root.scrollHeight : 0;
-                    if (root) root.scrollTo(0, Math.min(height, before + step));
+                    // Seller storefronts lazy-load only after a real trip to
+                    // the current document bottom.  A viewport-sized step can
+                    // leave the trigger far below the initial card batch.
+                    if (root) root.scrollTo(0, height);
                     const after = root ? root.scrollTop : 0;
                     return {
                       before,
                       after,
-                      height,
-                      inner: window.innerHeight || 0,
-                      nearBottom: root ? (after + (window.innerHeight || 0) >= height - 12) : true
+                      heightBefore: height,
+                      heightAfter: root ? root.scrollHeight : height,
+                      loading: Boolean(document.querySelector('[aria-busy="true"], [data-testid*="loading" i], [class*="loading" i]'))
                     };
                     """
                 )
-                count = len(unique)
-                height = int((scroll_state or {}).get("height") or 0)
-                moved = bool((scroll_state or {}).get("after") != (scroll_state or {}).get("before"))
-                product_grew = count > last_unique
-                height_grew = height > last_height
-                now = time.monotonic()
-                if product_grew:
-                    last_product_growth_at = now
-                if height_grew:
-                    last_height_growth_at = now
-                if product_grew or height_grew:
-                    stable_ticks = 0
+                scroll_top_before = int((scroll_state_before or {}).get("before") or 0)
+                scroll_height_before = int(
+                    (scroll_state_before or {}).get("heightBefore")
+                    or (scroll_state_before or {}).get("height")
+                    or 0
+                )
+                loading_before = bool((scroll_state_before or {}).get("loading"))
+                settle_deadline = min(
+                    deadline, time.monotonic() + settle_window_seconds
+                )
+                structured_after = structured_before
+                dom_after = dom_before
+                structured_signature_after = structured_signature_before
+                dom_signature_after = dom_signature_before
+                scroll_state_after = scroll_state_before
+                blocked_after = False
+                observed_change = False
+                while time.monotonic() < settle_deadline:
+                    time.sleep(settle_poll_seconds)
+                    (
+                        structured_after,
+                        dom_after,
+                        structured_signature_after,
+                        dom_signature_after,
+                        _polled_new_unique,
+                        blocked_after,
+                    ) = collect_once()
+                    scroll_state_after = self.driver.execute_script(
+                        """
+                        const root = document.scrollingElement || document.documentElement || document.body;
+                        return {
+                          top: root ? root.scrollTop : 0,
+                          height: root ? root.scrollHeight : 0,
+                          loading: Boolean(document.querySelector('[aria-busy="true"], [data-testid*="loading" i], [class*="loading" i]'))
+                        };
+                        """
+                    )
+                    if blocked_after:
+                        break
+                    height_changed = int((scroll_state_after or {}).get("height") or 0) > scroll_height_before
+                    observed_change = any((
+                        len(unique) > unique_count_before,
+                        height_changed,
+                        structured_signature_after != structured_signature_before,
+                        dom_signature_after != dom_signature_before,
+                        bool((scroll_state_after or {}).get("loading")) != loading_before,
+                    ))
+                    if observed_change:
+                        break
+
+                if blocked_after:
+                    events.append(
+                        {
+                            "event": "blocked_detected",
+                            "unique_products": len(unique),
+                        }
+                    )
+                    break
+
+                scroll_height_after = int(
+                    (scroll_state_after or {}).get("height")
+                    or (scroll_state_after or {}).get("heightAfter")
+                    or scroll_height_before
+                )
+                new_unique = len(unique) - unique_count_before
+                fully_stable = (
+                    not observed_change
+                    and new_unique == 0
+                    and scroll_height_after == scroll_height_before
+                    and dom_signature_after == dom_signature_before
+                    and structured_signature_after == structured_signature_before
+                )
+                if fully_stable:
+                    stable_cycles += 1
                 else:
-                    stable_ticks += 1
-                last_unique = count
-                last_height = max(last_height, height)
+                    stable_cycles = 0
                 events.append(
                     {
-                        "event": "scroll_poll",
-                        "visible_products": len(state_products),
-                        # Generic DOM anchors are intentionally not collected:
-                        # they also include recommendation and cross-sell cards.
-                        "dom_products": 0,
-                        "unique_products": count,
+                        "event": "scroll_cycle",
+                        "cycle": cycle,
+                        "scroll_top_before": scroll_top_before,
+                        "scroll_height_before": scroll_height_before,
+                        "structured_products": structured_before,
+                        "seller_dom_products": dom_before,
+                        "new_unique": new_unique,
+                        "total_unique": len(unique),
+                        "scroll_height_after": scroll_height_after,
+                        "stable_cycles": stable_cycles,
+                        "visible_products": structured_after,
+                        "dom_products": dom_after,
+                        "unique_products": len(unique),
                         "next_page": bool(best_next_page),
-                        "moved": moved,
-                        "scroll_height": height,
-                        "products_grew": product_grew,
-                        "height_grew": height_grew,
-                        "seconds_since_product_growth": round(now - last_product_growth_at, 2),
-                        "seconds_since_height_growth": round(now - last_height_growth_at, 2),
-                        "near_bottom": bool((scroll_state or {}).get("nearBottom")),
-                        "blocked": blocked,
+                        "moved": bool((scroll_state_before or {}).get("after") != scroll_top_before),
+                        "products_grew": new_unique > 0,
+                        "height_grew": scroll_height_after > scroll_height_before,
+                        "structured_changed": structured_signature_after != structured_signature_before,
+                        "seller_dom_changed": dom_signature_after != dom_signature_before,
+                        "loading_changed": bool((scroll_state_after or {}).get("loading")) != loading_before,
+                        "blocked": False,
                     }
                 )
-                # Six complete bottom-settle polls (roughly eight seconds) are
-                # required after *both* the grid and scrollHeight stop growing.
-                # This retains seller-scoped parser safety while accommodating
-                # lazy/virtual append work scheduled after reaching the bottom.
-                settled = (
-                    stable_ticks >= 6
-                    and now - last_product_growth_at >= 7.5
-                    and now - last_height_growth_at >= 7.5
-                )
-                if count and bool((scroll_state or {}).get("nearBottom")) and settled:
-                    break
-                if count and best_next_page and settled:
+                # Paginator URLs are retained for layouts that need them, but
+                # only after seller-root lazy scrolling has demonstrably settled.
+                if unique and stable_cycles >= 4:
                     break
             except Exception as exc:
-                events.append({"event": "scroll_poll_error", "error": f"{type(exc).__name__}: {exc}"})
-            time.sleep(1.4)
+                events.append({"event": "scroll_cycle_error", "error": f"{type(exc).__name__}: {exc}"})
+                time.sleep(settle_poll_seconds)
+
+        if seller_root and stable_cycles < 4 and time.monotonic() >= deadline:
+            events.append(
+                {
+                    "event": "scroll_safety_deadline",
+                    "unique_products": len(unique),
+                    "stable_cycles": stable_cycles,
+                }
+            )
+            # Do not treat a paginator URL as a continuation while the root's
+            # own lazy catalogue is still changing.
+            best_next_page = ""
 
         return list(unique.values()), best_next_page, last_title, last_text, last_html, saw_block
 

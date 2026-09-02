@@ -91,6 +91,8 @@ class OzonSourceVerificationTests(unittest.TestCase):
                 "grids_seller_matched": 0,
                 "grids_unscoped": 1,
                 "selected_strategy": "seller_single_unscoped_fallback",
+                "accepted_seller_grid_ids": ["state-tileGridDesktop-main"],
+                "accepted_seller_articles": ["1"],
                 "products_found": 1,
             },
             scan,

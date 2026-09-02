@@ -97,6 +97,156 @@ class OzonRuntimeContractTests(unittest.TestCase):
             self.assertTrue(any(event.get("height_grew") for event in events))
             self.assertTrue(any(event.get("unique_products") == 24 for event in events))
 
+    def test_virtualized_seller_dom_cards_accumulate_without_recommendations(self) -> None:
+        def catalogue_html() -> str:
+            seller_items = ",".join(
+                '{&quot;sku&quot;:&quot;%s&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/seller-%s/&quot;},&quot;mainState&quot;:[]}'
+                % (number, number)
+                for number in range(1, 9)
+            )
+            recommendation_items = (
+                '{&quot;sku&quot;:&quot;900&quot;,&quot;action&quot;:{&quot;link&quot;:&quot;/product/recommendation-900/&quot;},&quot;mainState&quot;:[]}'
+            )
+            return (
+                '<section id="seller-container">'
+                '<div id="state-tileGridDesktop-seller" '
+                'data-state="{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,&quot;items&quot;:[%s]}" />'
+                '</section>'
+                '<aside id="recommendations">'
+                '<div id="state-tileGridDesktop-recommendations" '
+                'data-state="{&quot;title&quot;:&quot;Рекомендуем&quot;,&quot;items&quot;:[%s]}" />'
+                '</aside>'
+            ) % (seller_items, recommendation_items)
+
+        visible_seller_cycles = [
+            list(range(1, 9)),
+            list(range(9, 17)),
+            list(range(17, 25)),
+            list(range(25, 33)),
+        ]
+        heights = [1000, 1800, 2600, 3400]
+
+        class FakeDriver:
+            def __init__(self) -> None:
+                self.batch = 0
+
+            def execute_script(self, script: str) -> object:
+                if script == "window.scrollTo(0, 0);":
+                    return None
+                index = self.batch
+                if "root.scrollTo(0, height)" in script:
+                    # The next virtualized seller batch appears only after the
+                    # collector reaches the current document bottom.
+                    if self.batch < len(visible_seller_cycles) - 1:
+                        self.batch += 1
+                    return {
+                        "before": heights[index] - 600,
+                        "after": heights[index],
+                        "heightBefore": heights[index],
+                        "heightAfter": heights[index],
+                        "loading": False,
+                    }
+                return {
+                    "top": heights[index] - 600,
+                    "height": heights[index],
+                    "loading": False,
+                }
+
+        session = BrowserSession.__new__(BrowserSession)
+        session.driver = FakeDriver()
+        session.snapshot = lambda: ("Alfa Tires", "Alfa Tires", catalogue_html())
+        session.blocked_state = lambda *_args: False
+        session._safe_dom_text = lambda value: value
+        dom_scans: list[dict[str, object]] = []
+
+        def seller_dom_products(_base_url: str, scan: dict[str, object]) -> list[dict[str, object]]:
+            dom_scans.append(dict(scan))
+            # The fake mirrors a scoped seller container.  Its sibling
+            # recommendation/cross-sell cards are intentionally absent.
+            index = session.driver.batch
+            return [
+                {
+                    "article": str(number),
+                    "name": f"Seller {number}",
+                    "url": f"https://www.ozon.ru/product/seller-{number}/",
+                    "catalog_card_price": number,
+                }
+                for number in visible_seller_cycles[index]
+            ]
+
+        session.dom_catalog_products = seller_dom_products
+        clock = [0.0]
+
+        def monotonic() -> float:
+            return clock[0]
+
+        def sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        events: list[dict[str, object]] = []
+        with patch("browser_session.time.monotonic", side_effect=monotonic), patch(
+            "browser_session.time.sleep", side_effect=sleep
+        ):
+            products, _next_page, _title, _text, _html, blocked = (
+                session._collect_catalog_snapshot(
+                    "https://www.ozon.ru/seller/alfa-tires-3381444/", 60, events
+                )
+            )
+
+        self.assertFalse(blocked)
+        self.assertEqual({str(number) for number in range(1, 33)}, {
+            str(product["article"]) for product in products
+        })
+        self.assertNotIn("900", {str(product["article"]) for product in products})
+        self.assertTrue(all(
+            scan["selected_strategy"] == "seller_evidence"
+            and scan["accepted_seller_grid_ids"] == ["state-tileGridDesktop-seller"]
+            for scan in dom_scans
+        ))
+        scroll_cycles = [event for event in events if event.get("event") == "scroll_cycle"]
+        self.assertEqual([8, 8, 8], [event["new_unique"] for event in scroll_cycles[:3]])
+        self.assertEqual([16, 24, 32], [event["total_unique"] for event in scroll_cycles[:3]])
+        self.assertTrue(all(event["structured_products"] == 8 for event in scroll_cycles))
+        self.assertTrue(all(event["seller_dom_products"] == 8 for event in scroll_cycles))
+        self.assertEqual(4, scroll_cycles[-1]["stable_cycles"])
+
+    def test_dom_fallback_requires_parser_proven_seller_grid(self) -> None:
+        class FakeDriver:
+            def __init__(self) -> None:
+                self.script = ""
+                self.arguments: tuple[object, ...] = ()
+
+            def execute_script(self, script: str, *arguments: object) -> object:
+                self.script = script
+                self.arguments = arguments
+                return [{
+                    "url": "https://www.ozon.ru/product/seller-1/",
+                    "name": "Seller product",
+                    "image_url": "",
+                    "price_text": "1 000 ₽",
+                }]
+
+        session = BrowserSession.__new__(BrowserSession)
+        session.driver = FakeDriver()
+        self.assertEqual([], session.dom_catalog_products(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/", {}
+        ))
+        products = session.dom_catalog_products(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            {
+                "selected_strategy": "seller_evidence",
+                "accepted_seller_grid_ids": ["state-tileGridDesktop-seller"],
+                "accepted_seller_articles": ["1"],
+            },
+        )
+        self.assertEqual(["1"], [product["article"] for product in products])
+        self.assertEqual(
+            (["state-tileGridDesktop-seller"], ["1"]),
+            session.driver.arguments,
+        )
+        self.assertIn("document.getElementById(stateId)", session.driver.script)
+        self.assertNotIn("document.querySelectorAll('a[href*=\"/product/\"]')", session.driver.script)
+
     def test_market_search_full_sync_is_not_total_capped_by_batch_size(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_market_search_") as folder:
             collector = Collector.__new__(Collector)
