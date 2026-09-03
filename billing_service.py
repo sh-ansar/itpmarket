@@ -58,8 +58,8 @@ OPERATOR_LEGAL_PROFILE = {
 
 DEFAULT_INVOICE_CONFIGURATION = {
     "payment_purpose_code": "",
-    "vat_enabled": False,
-    "vat_rate": 0.0,
+    "vat_enabled": True,
+    "vat_rate": 16.0,
     "invoice_due_days": 5,
     "invoice_prefix": "SPY",
     "service_name": (
@@ -511,7 +511,9 @@ class BillingService:
             ] = float(
                 value.get(
                     "vat_rate",
-                    0,
+                    DEFAULT_INVOICE_CONFIGURATION[
+                        "vat_rate"
+                    ],
                 )
                 or 0
             )
@@ -521,7 +523,11 @@ class BillingService:
         ):
             value[
                 "vat_rate"
-            ] = 0.0
+            ] = float(
+                DEFAULT_INVOICE_CONFIGURATION[
+                    "vat_rate"
+                ]
+            )
 
         try:
             value[
@@ -529,13 +535,19 @@ class BillingService:
             ] = _as_bool(
                 value.get(
                     "vat_enabled",
-                    False,
+                    DEFAULT_INVOICE_CONFIGURATION[
+                        "vat_enabled"
+                    ],
                 )
             )
         except SubscriptionError:
             value[
                 "vat_enabled"
-            ] = False
+            ] = bool(
+                DEFAULT_INVOICE_CONFIGURATION[
+                    "vat_enabled"
+                ]
+            )
 
         return self._supplier_status(
             value

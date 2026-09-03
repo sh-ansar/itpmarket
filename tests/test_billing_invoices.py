@@ -542,8 +542,12 @@ class BillingInvoiceTests(unittest.TestCase):
             ],
         )
 
+        self.assertTrue(
+            settings["vat_enabled"]
+        )
+
         self.assertEqual(
-            0.0,
+            16.0,
             settings["vat_rate"],
         )
 

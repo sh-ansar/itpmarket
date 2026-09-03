@@ -168,6 +168,52 @@ class SubscriptionService:
             "features": features,
             "marketplaces": limits,
         })
+
+        plan_code = str(
+            value.get("code")
+            or ""
+        ).strip().casefold()
+
+        if plan_code == "trial":
+            value[
+                "billing_period_unit"
+            ] = "day"
+
+            value[
+                "billing_period_count"
+            ] = int(
+                value.get("term_days")
+                or 3
+            )
+
+        elif plan_code in {
+            "starter",
+            "growth",
+            "business",
+        }:
+            value[
+                "billing_period_unit"
+            ] = "month"
+
+            value[
+                "billing_period_count"
+            ] = 1
+
+        else:
+            # Compatibility contract for legacy/custom plans.
+            # Commercial defaults above no longer expose
+            # "30 days" as their billing period.
+            value[
+                "billing_period_unit"
+            ] = "day"
+
+            value[
+                "billing_period_count"
+            ] = int(
+                value.get("term_days")
+                or 0
+            )
+
         return value
 
     def ensure_seed_data(self) -> None:
