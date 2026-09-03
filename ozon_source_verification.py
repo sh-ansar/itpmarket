@@ -66,12 +66,22 @@ def resolve_ozon_snapshot(
     code = str(marketplace_code or "").strip().casefold()
     final = _canonical_url(final_url, code)
     canonical_raw = _canonical_link(page_html, final_url)
-    if not canonical_raw:
-        raise OzonSourceVerificationError("Ozon storefront did not expose a canonical seller link.")
-    canonical = _canonical_url(canonical_raw, code)
-    if canonical != final:
-        raise OzonSourceVerificationError("Ozon final URL and canonical seller identity disagree.")
-    seller_id = re.search(r"/(?:seller|продавец)/([^/]+)/", canonical).group(1)  # validated above
+    canonical = final
+
+    # Ozon may omit <link rel="canonical"> in the interactive SPA snapshot.
+    # When present, canonical is additional evidence and must agree with the
+    # final seller URL. Its absence alone must not reject a valid storefront.
+    if canonical_raw:
+        canonical = _canonical_url(canonical_raw, code)
+        if canonical != final:
+            raise OzonSourceVerificationError(
+                "Ozon final URL and canonical seller identity disagree."
+            )
+
+    seller_id = re.search(
+        r"/(?:seller|продавец)/([^/]+)/",
+        final,
+    ).group(1)  # final is validated by _canonical_url above
     evidence = f"{page_title}\n{page_text}\n{page_html}".casefold()
     if seller_id.casefold() not in evidence:
         raise OzonSourceVerificationError("Ozon page has no seller-specific identity evidence.")

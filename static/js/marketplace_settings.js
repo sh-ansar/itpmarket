@@ -81,11 +81,38 @@
 
   async function load() {
     try {
-      const data = await request('/api/tenant?include_unavailable=1');
-      render(data.marketplace_access);
-    } catch (error) { host.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
-  }
+      const data = await request(
+        `/api/tenant?include_unavailable=1&_=${Date.now()}`,
+        {cache:'no-store'}
+      );
 
+      const access = Array.isArray(data.marketplace_access)
+        ? data.marketplace_access
+        : [];
+
+      const registry = Array.isArray(data.integration_catalog)
+        ? data.integration_catalog
+        : [];
+
+      if (!registry.length) {
+        render(access);
+        return;
+      }
+
+      const liveByCode = new Map(
+        access.map(item => [String(item.code || ''), item])
+      );
+
+      render(
+        registry.map(definition => ({
+          ...definition,
+          ...(liveByCode.get(String(definition.code || '')) || {})
+        }))
+      );
+    } catch (error) {
+      host.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+    }
+  }
   host.addEventListener('click', async event => {
     const button = event.target.closest('button');
     const cardNode = event.target.closest('[data-marketplace-code]');
@@ -113,7 +140,7 @@
       } else if (button.matches('[data-marketplace-connect]')) {
         const data = await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source, verification_proof:checked.get(code)?.verification_proof || ''}});
         checked.delete(code);
-        render(data.marketplace_access);
+        await load();
         notify(t('marketplace_connected','Магазин подключён.'));
       } else if (button.matches('[data-marketplace-replace]')) {
         const seller=(marketplace?.sellers||[]).find(item=>Number(item.id)===Number(button.dataset.sellerId));
@@ -155,7 +182,7 @@
       } else {
         const currentPassword = String(new FormData(form).get('current_password') || '');
         const data = await request(`/api/tenant/marketplaces/${encodeURIComponent(sourceAction.marketplace.code)}/${Number(sourceAction.seller.id)}/remove`, {method:'POST', body:{current_password:currentPassword}});
-        render(data.marketplace_access); closeSourceModal(); notify('Источник удалён. История операций и аудит сохранены.');
+        await load(); closeSourceModal(); notify('Источник удалён. История операций и аудит сохранены.');
       }
     } catch (error) { notify(error.message, true); }
     finally { if (submit.isConnected) submit.disabled = false; }
@@ -166,7 +193,7 @@
     button.disabled = true;
     try {
       const data = await request(`/api/tenant/marketplaces/${encodeURIComponent(sourceAction.marketplace.code)}/${Number(sourceAction.seller.id)}/replace`, {method:'POST', body:{source:sourceAction.verified.source}});
-      render(data.marketplace_access); closeSourceModal(); notify('Источник заменён после проверки.');
+      await load(); closeSourceModal(); notify('Источник заменён после проверки.');
     } catch (error) { notify(error.message, true); button.disabled = false; }
   });
 
