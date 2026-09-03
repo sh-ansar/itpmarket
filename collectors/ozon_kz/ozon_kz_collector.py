@@ -237,7 +237,15 @@ def require_complete(result: dict[str, Any], operation: str) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ozon.kz public storefront collector")
-    parser.add_argument("action", choices=("sync-catalog", "refresh-prices", "full-sync"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "sync-catalog",
+            "refresh-prices",
+            "market-search",
+            "full-sync",
+        ),
+    )
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--app-db", required=True)
     parser.add_argument("--tenant-id", type=int, required=True)
@@ -266,23 +274,42 @@ def main() -> int:
     try:
         catalog: dict[str, Any] | None = None
         if args.action == "full-sync":
-            full_sync = collector.full_sync(limit)
-            outcome = full_sync
-            catalog = full_sync.get("catalog") if isinstance(full_sync, dict) else None
-            if isinstance(catalog, dict):
-                stages.append(catalog)
-            market = full_sync.get("market") if isinstance(full_sync, dict) else None
-            if isinstance(market, dict):
-                stages.append(market)
+            catalog = collector.sync_catalog(limit)
+            outcome = {
+                "status": str(
+                    catalog.get("status") or "PARTIAL"
+                ).upper(),
+                "catalog": catalog,
+                "market": None,
+            }
+            stages.append(catalog)
         elif args.action == "sync-catalog":
             catalog = collector.sync_catalog(limit)
             outcome = catalog
             stages.append(catalog)
+        elif args.action == "market-search":
+            market = collector.market_search(
+                limit,
+                articles,
+            )
+            outcome = market
+            stages.append(market)
+            require_success(
+                market,
+                "market-search",
+            )
         else:
-            refresh = collector.process("refresh-prices", limit, articles)
+            refresh = collector.process(
+                "refresh-prices",
+                limit,
+                articles,
+            )
             outcome = refresh
             stages.append(refresh)
-            require_complete(refresh, "refresh-prices")
+            require_success(
+                refresh,
+                "refresh-prices",
+            )
 
         mirrored: dict[str, int] = {}
         tenant_count = 0
@@ -304,6 +331,21 @@ def main() -> int:
                 catalog_run_id=catalog_run_id,
             )
             collector.registry.mark_catalog_published(catalog_run_id)
+
+            if args.action == "full-sync":
+                market = collector.market_search(
+                    limit,
+                    catalog_run_id=catalog_run_id,
+                )
+                stages.append(market)
+                outcome = {
+                    "status": str(
+                        market.get("status") or "PARTIAL"
+                    ).upper(),
+                    "catalog": catalog,
+                    "market": market,
+                }
+
         final_status = str((outcome or {}).get("status") or "PASSED").upper()
         outcome = {"status": final_status, "stages": stages}
         print(json.dumps({"ok": final_status == "PASSED", **mirrored, "tenant_products": tenant_count, "status": final_status}, ensure_ascii=False))

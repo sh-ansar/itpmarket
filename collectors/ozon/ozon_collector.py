@@ -1135,7 +1135,14 @@ def main() -> int:
                 catalog_articles=current_tenant_ozon_articles(args),
             )
         elif args.command == "full-sync":
-            result = collector.full_sync(args.limit)
+            catalog_only = collector.sync_catalog(args.limit)
+            result = {
+                "status": str(
+                    catalog_only.get("status") or "PARTIAL"
+                ).upper(),
+                "catalog": catalog_only,
+                "market": None,
+            }
         elif args.command == "report":
             collector.generate_outputs()
             print(settings.reports_dir / "index.html")
@@ -1167,6 +1174,24 @@ def main() -> int:
                 collector.registry.mark_catalog_published(str(
                     (catalog_result.get("discovery") or {}).get("run_id") or ""
                 ))
+
+            if args.command == "full-sync":
+                market = collector.market_search(
+                    args.limit,
+                    catalog_run_id=str(
+                        (catalog_result.get("discovery") or {}).get("run_id")
+                        or ""
+                    ),
+                )
+                result = {
+                    "status": combined_status(
+                        catalog_result,
+                        market,
+                    ),
+                    "catalog": catalog_result,
+                    "market": market,
+                }
+
         return result_exit_code(result)
     except Exception as exc:
         print(f"Collector error: {exc}", file=sys.stderr)

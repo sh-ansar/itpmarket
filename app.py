@@ -1678,8 +1678,6 @@ def build_action_command(
             [("Рыночные предложения Ozon.ru", market)],
             [selection_path] if selection_path else [],
         )
-    if action == "ozon_kz_price_actualize":
-        return build_action_command("ozon_kz_refresh_prices", codes, user_id, scope, tenant_seller_id)
     if action == "halyk_catalog_collect":
         return build_action_command("halyk_sync_catalog", [], user_id, "all", tenant_seller_id)
     if action == "halyk_price_actualize":
@@ -1727,6 +1725,7 @@ def build_action_command(
         )
     ozon_kz_actions = {
         "ozon_kz_catalog_collect": "sync-catalog",
+        "ozon_kz_price_actualize": "market-search",
         "ozon_kz_refresh_prices": "refresh-prices",
         "ozon_kz_full_sync": "full-sync",
     }
@@ -1755,7 +1754,7 @@ def build_action_command(
                 "--profile-path", str(browser_profile),
                 "--debug-port", str(ozon_runtime.debug_port if ozon_runtime else 0),
             ]
-        if action == "ozon_kz_refresh_prices" and codes:
+        if action in {"ozon_kz_refresh_prices", "ozon_kz_price_actualize"} and codes:
             command += ["--articles", ",".join(
                 parse_product_code(code)[2]
                 for code in codes if marketplace_for_product_code(code) == "ozon_kz"

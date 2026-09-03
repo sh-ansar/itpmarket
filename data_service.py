@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import math
@@ -1006,9 +1006,17 @@ class DataService:
 
 
     def _current_ozon_rows(
-        self, conn: Any, expected_name: str, seller_ids: set[str]
+        self,
+        conn: Any,
+        expected_name: str,
+        seller_ids: set[str],
+        *,
+        platform: str = "ozon",
+        platform_label: str = "Ozon.ru",
+        currency: str = "RUB",
     ) -> list[dict[str, Any]]:
-        """Build Ozon analytics from one published market snapshot only."""
+        """Build Ozon analytics from one published catalog/market snapshot."""
+        is_kzt = platform == "ozon_kz"
         catalog = conn.execute(
             """SELECT cp.catalog_run_id AS run_id FROM catalog_publications cp
                JOIN runs r ON r.run_id=cp.catalog_run_id
@@ -1081,17 +1089,19 @@ class DataService:
                 if key in accepted and accepted[key]["_priority"] >= priority:
                     continue
                 label = {
-                    "OZON_SAME_ARTICLE": "Та же карточка Ozon.ru",
+                    "OZON_SAME_ARTICLE": f"Та же карточка {platform_label}",
                     "OZON_MANUFACTURER_ARTICLE": "Совпадение по артикулу производителя",
                     "OZON_STRICT_FINGERPRINT": "Строгое совпадение характеристик",
-                }.get(str(offer.get("match_method") or ""), "Результат поиска Ozon.ru")
+                }.get(str(offer.get("match_method") or ""), f"Результат поиска {platform_label}")
                 accepted[key] = {
                     "article": str(offer.get("candidate_article") or ""),
                     "merchant_id": offer.get("seller_id") or "",
-                    "merchant_name": offer.get("seller_name") or "Продавец Ozon.ru",
+                    "merchant_name": offer.get("seller_name") or f"Продавец {platform_label}",
                     "merchant_rating": offer.get("seller_rating"),
                     "price_rub": price,
-                    "currency": offer.get("currency") or "RUB",
+                    "price_kzt": price if is_kzt else None,
+                    "price_original": price,
+                    "currency": offer.get("currency") or currency,
                     "product_url": offer.get("product_url") or "",
                     "product_title": offer.get("product_title") or "",
                     "captured_at": offer.get("collected_at") or "",
@@ -1144,18 +1154,27 @@ class DataService:
             )
             result.append({
                 **characteristics,
-                "product_code": f"ozon:{article}", "source_product_code": article,
-                "platform": "ozon", "platform_label": "Ozon.ru", "source_type": "CURRENT_CATALOG",
+                "product_code": f"{'ozon_kz:' if is_kzt else 'ozon:'}{article}",
+                "source_product_code": article,
+                "platform": platform,
+                "platform_label": platform_label,
+                "source_type": "CURRENT_CATALOG",
                 "title": value.get("title") or "", "brand": value.get("brand") or "", "model": value.get("model") or "",
                 "size": characteristics.get("size") or value.get("tire_size") or "",
                 "product_type": characteristics.get("product_type") or self._ozon_product_type(value.get("title")),
                 "strict_identity_eligible": bool(value.get("brand") and value.get("tire_size")),
                 "product_url": value.get("canonical_url") or "", "image_url": value.get("image_url") or "",
-                "own_price_kzt": None, "market_price_kzt": None, "price_original": own_price,
-                "currency_original": (own_offer or {}).get("currency") or "RUB",
+                "own_price_kzt": own_price if is_kzt else None,
+                "market_price_kzt": market_median if is_kzt else None,
+                "price_original": own_price,
+                "currency_original": (own_offer or {}).get("currency") or currency,
                 "regular_price_original": (own_offer or {}).get("regular_price") or 0,
-                "market_min_price_original": market_min, "market_max_price_original": market_max,
+                "market_min_price_original": market_min,
+                "market_max_price_original": market_max,
                 "market_median_price_original": market_median,
+                "market_min_price_kzt": market_min if is_kzt else None,
+                "market_max_price_kzt": market_max if is_kzt else None,
+                "market_median_price_kzt": market_median if is_kzt else None,
                 "seller_id": (own_offer or {}).get("seller_id") or next(iter(seller_ids), ""),
                 "seller_name": (own_offer or {}).get("seller_name") or ("Alfa Tires" if expected_name else ""),
                 "seller_url": (own_offer or {}).get("seller_url") or "", "seller_rating": (own_offer or {}).get("seller_rating"),
@@ -1188,7 +1207,13 @@ class DataService:
 
     def _ozon_rows(self) -> list[dict[str, Any]]:
         path = self.ozon_db_path
-        if not path or not path.exists():
+        if not path:
+            return []
+        if (
+            DatabaseSettings.from_environment().backend
+            is DatabaseBackend.SQLITE
+            and not path.exists()
+        ):
             return []
         conn: Any | None = None
         try:
@@ -1351,10 +1376,40 @@ class DataService:
             if conn is not None: conn.close()
 
     def _ozon_kz_rows(self) -> list[dict[str, Any]]:
-        if not self.ozon_kz_db_path or not self.ozon_kz_db_path.exists():
+        if not self.ozon_kz_db_path:
+            return []
+        if (
+            DatabaseSettings.from_environment().backend
+            is DatabaseBackend.SQLITE
+            and not self.ozon_kz_db_path.exists()
+        ):
             return []
         conn = self._connect_path(self.ozon_kz_db_path)
         try:
+            generic_tables = (
+                "catalog_snapshots",
+                "market_analysis_runs",
+                "market_analysis_products",
+                "market_analysis_candidates",
+                "market_analysis_current",
+                "catalog_publications",
+            )
+            if all(
+                table_exists(conn, table)
+                for table in generic_tables
+            ):
+                current_rows = self._current_ozon_rows(
+                    conn,
+                    "",
+                    set(),
+                    platform="ozon_kz",
+                    platform_label="Ozon.kz",
+                    currency="KZT",
+                )
+                if current_rows:
+                    return current_rows
+
+            # Compatibility fallback for old SQLite/KZ registries.
             if not all(
                 table_exists(conn, table)
                 for table in ("ozon_kz_products", "ozon_kz_offers")
