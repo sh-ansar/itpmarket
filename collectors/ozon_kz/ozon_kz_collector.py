@@ -264,30 +264,38 @@ def main() -> int:
     failure: Exception | None = None
     stages: list[dict[str, Any]] = []
     try:
-        if args.action in {"sync-catalog", "full-sync"}:
+        catalog: dict[str, Any] | None = None
+        if args.action == "full-sync":
+            full_sync = collector.full_sync(limit)
+            outcome = full_sync
+            catalog = full_sync.get("catalog") if isinstance(full_sync, dict) else None
+            if isinstance(catalog, dict):
+                stages.append(catalog)
+            market = full_sync.get("market") if isinstance(full_sync, dict) else None
+            if isinstance(market, dict):
+                stages.append(market)
+        elif args.action == "sync-catalog":
             catalog = collector.sync_catalog(limit)
             outcome = catalog
             stages.append(catalog)
-            require_complete(
-                catalog,
-                "sync-catalog",
-            )
+        else:
+            refresh = collector.process("refresh-prices", limit, articles)
+            outcome = refresh
+            stages.append(refresh)
+            require_complete(refresh, "refresh-prices")
+
+        mirrored: dict[str, int] = {}
+        tenant_count = 0
+        if catalog is not None:
+            require_complete(catalog, "sync-catalog")
             discovery = catalog.get("discovery") if isinstance(catalog, dict) else {}
             if int((discovery or {}).get("items_total") or 0) <= 0:
                 raise RuntimeError(
                     "Ozon.kz не отдал карточки продавца. Проверьте открытую вкладку "
                     "Ozon.kz; если показана проверка доступа, пройдите её и повторите запуск."
                 )
-        if args.action in {"refresh-prices", "full-sync"}:
-            market = collector.market_search(limit, articles)
-            stages.append(market)
-            require_complete(market, "market-search")
-        mirrored: dict[str, int] = {}
-        tenant_count = 0
-        # Market-only refresh has no right to replace the authoritative own
-        # catalogue.  A completed discovery is the only publication input.
-        if args.action in {"sync-catalog", "full-sync"}:
-            discovery = catalog.get("discovery") if isinstance(catalog, dict) else {}
+            # A completed discovery is the only publication input. Market
+            # analysis cannot replace or block that authoritative catalogue.
             catalog_run_id = str((discovery or {}).get("run_id") or "")
             mirrored = mirror_public_registry(settings, catalog_run_id=catalog_run_id)
             tenant_count = materialize_tenant_catalog(
@@ -295,9 +303,8 @@ def main() -> int:
                 tenant_seller_id=int(getattr(args, "tenant_seller_id", 0) or 0) or None,
                 catalog_run_id=catalog_run_id,
             )
-        final_status = "PARTIAL" if any(
-            str(stage.get("status") or "").upper() == "PARTIAL" for stage in stages
-        ) else "PASSED"
+            collector.registry.mark_catalog_published(catalog_run_id)
+        final_status = str((outcome or {}).get("status") or "PASSED").upper()
         outcome = {"status": final_status, "stages": stages}
         print(json.dumps({"ok": final_status == "PASSED", **mirrored, "tenant_products": tenant_count, "status": final_status}, ensure_ascii=False))
         return result_exit_code(outcome)

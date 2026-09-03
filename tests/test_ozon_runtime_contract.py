@@ -30,6 +30,7 @@ from ozon_collector import (
 from ozon_probe_core import parse_product_json
 from ozon_validation_core import normalize_for_import
 from registry import Registry
+from collectors.ozon_kz import ozon_kz_collector
 from collectors.ozon_kz.ozon_kz_collector import require_complete
 from data_service import DataService
 from storage.postgres_compat import _schema_for_path
@@ -591,6 +592,82 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual(31, collector.registry.finish_market_search.call_count)
         self.assertEqual("PASSED", result["status"])
 
+    def test_kz_market_search_uses_current_24_item_catalog_without_publication(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_kz_current_catalog_") as folder:
+            articles = {f"kz-{number}" for number in range(24)}
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                market_search_batch_limit=30,
+                start_url="https://ozon.kz/seller/alfa-tires-3381444/",
+            )
+            collector.registry = MagicMock()
+            collector.registry.current_published_catalog_run_id.return_value = ""
+            collector.registry.catalog_articles.return_value = set(articles)
+            collector.registry.client_products_for_market_search.return_value = [
+                {"article": article} for article in sorted(articles)
+            ]
+            collector.registry.finish_market_analysis.return_value = "PASSED"
+            collector._run_dir = MagicMock(return_value=Path(folder))
+            collector.ensure_browser = MagicMock()
+            collector.generate_outputs = MagicMock()
+
+            with patch("ozon_collector.build_search_queries", return_value=[]):
+                result = collector.market_search(
+                    catalog_run_id="current-kz-discovery",
+                )
+
+        collector.registry.current_published_catalog_run_id.assert_not_called()
+        collector.registry.client_products_for_market_search.assert_called_once_with(
+            0,
+            allowed_articles=articles,
+            catalog_run_id="current-kz-discovery",
+        )
+        self.assertEqual(24, result["items_total"])
+        self.assertEqual("PASSED", result["status"])
+
+    def test_market_search_uses_ru_or_kz_host_from_start_url(self) -> None:
+        for start_url, expected_origin in (
+            ("https://www.ozon.ru/seller/example/", "https://www.ozon.ru/search/"),
+            ("https://ozon.kz/seller/example/", "https://ozon.kz/search/"),
+        ):
+            with self.subTest(start_url=start_url), tempfile.TemporaryDirectory(
+                prefix="ozon_market_host_"
+            ) as folder:
+                collector = Collector.__new__(Collector)
+                collector.settings = SimpleNamespace(
+                    market_search_batch_limit=30,
+                    market_search_max_pages=1,
+                    market_search_candidate_limit=10,
+                    market_search_detail_limit=10,
+                    market_search_delay_seconds=(0, 0),
+                    catalog_wait_seconds=1,
+                    page_reloads=0,
+                    start_url=start_url,
+                )
+                collector.registry = MagicMock()
+                collector.registry.catalog_articles.return_value = {"owner"}
+                collector.registry.client_products_for_market_search.return_value = [
+                    {"article": "owner", "title": "Test"}
+                ]
+                collector.registry.finish_market_analysis.return_value = "PASSED"
+                collector._run_dir = MagicMock(return_value=Path(folder))
+                browser = MagicMock()
+                browser.load_catalog.return_value = {
+                    "ok": True,
+                    "products": [],
+                    "next_page": "",
+                }
+                collector.ensure_browser = MagicMock(return_value=browser)
+                collector.generate_outputs = MagicMock()
+
+                with patch(
+                    "ozon_collector.build_search_queries", return_value=["test tire"]
+                ), patch("ozon_collector.sleep_range"):
+                    collector.market_search(catalog_run_id="catalog-run")
+
+                search_url = browser.load_catalog.call_args.args[0]
+                self.assertTrue(search_url.startswith(expected_origin), search_url)
+
     def test_catalog_details_cover_every_product_from_this_discovery(self) -> None:
         collector = Collector.__new__(Collector)
         collector.discover = MagicMock(return_value={
@@ -1099,6 +1176,135 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual("PASSED", result["status"])
         self.assertNotIn("prices", result)
         self.assertIsNotNone(result["market"])
+
+    def test_kz_full_sync_passes_current_discovery_run_to_market_search(self) -> None:
+        collector = Collector.__new__(Collector)
+        collector.settings = SimpleNamespace(
+            start_url="https://ozon.kz/seller/alfa-tires-3381444/"
+        )
+
+        with patch.object(
+            collector,
+            "sync_catalog",
+            return_value={
+                "status": "PASSED",
+                "discovery": {
+                    "run_id": "current-kz-discovery",
+                    "items_total": 24,
+                },
+                "details": {"status": "PASSED", "items_total": 24},
+            },
+        ), patch.object(
+            collector,
+            "market_search",
+            return_value={"status": "PASSED", "items_total": 24},
+        ) as market_search:
+            result = collector.full_sync()
+
+        market_search.assert_called_once_with(
+            None,
+            catalog_run_id="current-kz-discovery",
+        )
+        self.assertEqual("PASSED", result["status"])
+        self.assertEqual(24, result["market"]["items_total"])
+
+    def test_kz_refresh_prices_uses_own_price_refresh_not_market_search(self) -> None:
+        args = SimpleNamespace(
+            action="refresh-prices",
+            limit=0,
+            articles="kz-1,kz-2",
+            tenant_id=3,
+            tenant_seller_id=11,
+            app_db="app.db",
+            db="kz.db",
+        )
+        settings = SimpleNamespace(database_path=Path("kz.db"))
+        collector = MagicMock()
+        collector.process.return_value = {"status": "PASSED"}
+
+        with patch.object(
+            ozon_kz_collector, "build_parser"
+        ) as parser, patch.object(
+            ozon_kz_collector, "build_settings", return_value=settings
+        ), patch.object(
+            ozon_kz_collector, "ensure_schema"
+        ), patch.object(
+            ozon_kz_collector, "Collector", return_value=collector
+        ), patch("builtins.print"):
+            parser.return_value.parse_args.return_value = args
+            exit_code = ozon_kz_collector.main()
+
+        self.assertEqual(0, exit_code)
+        collector.process.assert_called_once_with(
+            "refresh-prices", None, {"kz-1", "kz-2"}
+        )
+        collector.market_search.assert_not_called()
+        collector.registry.mark_catalog_published.assert_not_called()
+
+    def test_kz_catalog_publication_marks_only_complete_current_run(self) -> None:
+        args = SimpleNamespace(
+            action="sync-catalog",
+            limit=0,
+            articles="",
+            tenant_id=3,
+            tenant_seller_id=11,
+            app_db="app.db",
+            db="kz.db",
+        )
+        settings = SimpleNamespace(
+            database_path=Path("kz.db"),
+            start_url="https://ozon.kz/seller/alfa-tires-3381444/",
+        )
+
+        for status, expected_exit_code in (("PASSED", 0), ("PARTIAL", 1)):
+            with self.subTest(status=status):
+                collector = MagicMock()
+                collector.sync_catalog.return_value = {
+                    "status": status,
+                    "discovery": {
+                        "run_id": "current-kz-discovery",
+                        "items_total": 24,
+                    },
+                }
+                error_connection = MagicMock()
+                with patch.object(
+                    ozon_kz_collector, "build_parser"
+                ) as parser, patch.object(
+                    ozon_kz_collector, "build_settings", return_value=settings
+                ), patch.object(
+                    ozon_kz_collector, "ensure_schema"
+                ), patch.object(
+                    ozon_kz_collector, "Collector", return_value=collector
+                ), patch.object(
+                    ozon_kz_collector,
+                    "mirror_public_registry",
+                    return_value={"products": 24, "offers": 24},
+                ) as mirror, patch.object(
+                    ozon_kz_collector,
+                    "materialize_tenant_catalog",
+                    return_value=24,
+                ) as materialize, patch.object(
+                    ozon_kz_collector, "connect", return_value=error_connection
+                ), patch("builtins.print"):
+                    parser.return_value.parse_args.return_value = args
+                    exit_code = ozon_kz_collector.main()
+
+                self.assertEqual(expected_exit_code, exit_code)
+                if status == "PASSED":
+                    mirror.assert_called_once_with(
+                        settings, catalog_run_id="current-kz-discovery"
+                    )
+                    self.assertEqual(
+                        "current-kz-discovery",
+                        materialize.call_args.kwargs["catalog_run_id"],
+                    )
+                    collector.registry.mark_catalog_published.assert_called_once_with(
+                        "current-kz-discovery"
+                    )
+                else:
+                    mirror.assert_not_called()
+                    materialize.assert_not_called()
+                    collector.registry.mark_catalog_published.assert_not_called()
 
     def test_full_sync_does_not_start_market_after_partial_catalog(self) -> None:
         collector = Collector.__new__(Collector)

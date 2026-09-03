@@ -624,6 +624,14 @@ class Collector:
             run_id, catalog_run_id, len(current_catalog_articles)
         )
         browser = self.ensure_browser()
+        marketplace_host = str(
+            urlparse(str(self.settings.start_url or "")).hostname or ""
+        ).casefold()
+        search_origin = (
+            "https://ozon.kz"
+            if marketplace_host in {"ozon.kz", "www.ozon.kz"}
+            else "https://www.ozon.ru"
+        )
         started = time.monotonic()
         metrics = {
             "pages_loaded": 0, "items_total": len(owners), "items_success": 0,
@@ -667,7 +675,7 @@ class Collector:
                     # Manufacturer/article and model searches are primary. Brand+size is fallback.
                     if query_index > 1 and exact_count > 0:
                         break
-                    search_url = f"https://www.ozon.ru/search/?text={quote_plus(query)}&from_global=true"
+                    search_url = f"{search_origin}/search/?text={quote_plus(query)}&from_global=true"
                     last_query, last_url = query, search_url
                     print(f"  Поиск {query_index}/{len(queries)}: {query}")
                     current_url = search_url
