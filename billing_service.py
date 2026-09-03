@@ -2639,6 +2639,8 @@ class BillingService:
     def _add_calendar_months(
         value: Any,
         months_count: int,
+        *,
+        anchor_day: int | None = None,
     ) -> Any:
         from calendar import monthrange
 
@@ -2662,8 +2664,19 @@ class BillingService:
             + 1
         )
 
+        target_day = (
+            int(anchor_day)
+            if anchor_day is not None
+            else int(value.day)
+        )
+
+        if not 1 <= target_day <= 31:
+            raise SubscriptionError(
+                "Billing anchor day must be between 1 and 31."
+            )
+
         day = min(
-            value.day,
+            target_day,
             monthrange(
                 year,
                 month,
@@ -3254,6 +3267,7 @@ class BillingService:
 
                        s.status AS subscription_status,
                        s.starts_at AS subscription_starts_at,
+                       s.billing_anchor_day AS subscription_billing_anchor_day,
 
                        p.code AS plan_code,
                        p.name AS plan_name,
@@ -3454,10 +3468,32 @@ class BillingService:
 
             latest_existing_end = None
 
+            billing_anchor_day = None
+
+            try:
+                requested_anchor = int(
+                    row[
+                        "subscription_billing_anchor_day"
+                    ]
+                    or 0
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                requested_anchor = 0
+
+            if 1 <= requested_anchor <= 31:
+                billing_anchor_day = (
+                    requested_anchor
+                )
+
             current_rows = conn.execute(
                 """SELECT
                        s.id,
+                       s.starts_at,
                        s.ends_at,
+                       s.billing_anchor_day,
                        p.code AS plan_code
                    FROM tenant_subscriptions s
                    JOIN subscription_plans p
@@ -3510,6 +3546,49 @@ class BillingService:
                     latest_existing_end = (
                         current_end
                     )
+
+                    if billing_anchor_day is None:
+                        try:
+                            inherited_anchor = int(
+                                current[
+                                    "billing_anchor_day"
+                                ]
+                                or 0
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            inherited_anchor = 0
+
+                        if not (
+                            1
+                            <= inherited_anchor
+                            <= 31
+                        ):
+                            current_start = (
+                                self._billing_datetime(
+                                    current[
+                                        "starts_at"
+                                    ]
+                                )
+                            )
+
+                            inherited_anchor = (
+                                int(current_start.day)
+                                if current_start
+                                else 0
+                            )
+
+                        if (
+                            1
+                            <= inherited_anchor
+                            <= 31
+                        ):
+                            billing_anchor_day = (
+                                inherited_anchor
+                            )
+
                     break
 
             start_dt = now
@@ -3532,10 +3611,16 @@ class BillingService:
                     latest_existing_end
                 )
 
+            if billing_anchor_day is None:
+                billing_anchor_day = int(
+                    start_dt.day
+                )
+
             end_dt = (
                 self._add_calendar_months(
                     start_dt,
                     months,
+                    anchor_day=billing_anchor_day,
                 )
             )
 
@@ -3580,6 +3665,7 @@ class BillingService:
                        starts_at=?,
                        ends_at=?,
                        term_days=?,
+                       billing_anchor_day=?,
                        updated_at=?
                    WHERE id=?
                      AND status IN(
@@ -3592,6 +3678,7 @@ class BillingService:
                     starts,
                     ends,
                     term_days,
+                    billing_anchor_day,
                     stamp,
                     int(
                         row[

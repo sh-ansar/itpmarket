@@ -1333,6 +1333,7 @@ CREATE TABLE IF NOT EXISTS tenant_subscriptions (
     price_amount REAL NOT NULL,
     currency TEXT NOT NULL,
     term_days INTEGER NOT NULL,
+    billing_anchor_day INTEGER,
     plan_snapshot_json TEXT NOT NULL DEFAULT '{}',
     review_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -1730,6 +1731,8 @@ def ensure_database(path: Path) -> None:
             conn.execute("ALTER TABLE tenants ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
         if "workspace_profile_json" not in _columns(conn, "registration_requests"):
             conn.execute("ALTER TABLE registration_requests ADD COLUMN workspace_profile_json TEXT NOT NULL DEFAULT '{}'")
+        if "billing_anchor_day" not in _columns(conn, "tenant_subscriptions"):
+            conn.execute("ALTER TABLE tenant_subscriptions ADD COLUMN billing_anchor_day INTEGER")
         if "legal_address" not in _columns(conn, "tenants"):
             conn.execute("ALTER TABLE tenants ADD COLUMN legal_address TEXT NOT NULL DEFAULT ''")
         if "actual_address" not in _columns(conn, "tenants"):
