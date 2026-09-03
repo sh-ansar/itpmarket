@@ -406,7 +406,13 @@
                 </span>
 
                 <small>
-                  {{ plan.term_days }} days
+                  {% if plan.billing_period_unit == 'day' %}
+                    {{ plan.billing_period_count }} {% if plan.billing_period_count == 1 %}день{% else %}дня{% endif %}
+                  {% elif plan.billing_period_unit == 'month' %}
+                    {{ plan.billing_period_count }} {% if plan.billing_period_count == 1 %}месяц{% else %}месяца{% endif %}
+                  {% else %}
+                    {{ plan.billing_period_count }} {{ plan.billing_period_unit }}
+                  {% endif %}
                   &middot;
                   {% if plan.position_limit is none %}
                     unlimited positions
@@ -418,6 +424,9 @@
                     unlimited runs
                   {% else %}
                     {{ plan.daily_operation_limit }} runs per day
+                  {% endif %}
+                  {% if plan.price_amount > 0 %}
+                    &middot; с учётом НДС 16% Казахстан
                   {% endif %}
                 </small>
               </span>

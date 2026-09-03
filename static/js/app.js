@@ -821,8 +821,24 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       </article>`
     ).join('');
 
-    const plans=(data.plans||[]).map(plan=>
-      `<option value="${esc(plan.code)}">${esc(plan.name)} \u00b7 ${number(plan.price_amount)} ${esc(plan.currency)} / ${number(plan.term_days)} \u0434\u043d.</option>`
+    const planCatalog=data.plans||[];
+    const planByCode=code=>planCatalog.find(
+      plan=>String(plan.code||'')===String(code||'')
+    )||{};
+    const billingPeriod=plan=>{
+      const count=Number(plan.billing_period_count||0);
+      const unit=String(plan.billing_period_unit||'');
+      if(!count||!unit)return '';
+      if(unit==='month')return `${count} мес.`;
+      if(unit==='day')return `${count} дн.`;
+      return `${count} ${unit}`.trim();
+    };
+    const vatIncluded=price=>Number(price||0)>0
+      ?' · с учётом НДС 16% Казахстан'
+      :'';
+
+    const plans=planCatalog.map(plan=>
+      `<option value="${esc(plan.code)}">${esc(plan.name)} \u00b7 ${number(plan.price_amount)} ${esc(plan.currency)} / ${billingPeriod(plan)}${vatIncluded(plan.price_amount)}</option>`
     ).join('');
 
     const addons=(data.addons||[]).map(addon=>
@@ -1027,7 +1043,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
           <div class="subscription-invoice-grid">
             <article>
               <small>\u041f\u0430\u043a\u0435\u0442</small>
-              <b>${esc(billingSub.plan_name||billingSub.plan_code||'Spyon')}</b>
+              <b>${esc(billingSub.plan_name||billingSub.plan_code||'Spyon')} ${billingPeriod(planByCode(billingSub.plan_code))}</b>
             </article>
 
             <article>
@@ -1038,6 +1054,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
             <article>
               <small>\u0418\u0442\u043e\u0433\u043e</small>
               <b>${money(invoice.total_amount)}</b>
+              <small>\u0441 \u0443\u0447\u0451\u0442\u043e\u043c \u041d\u0414\u0421 16% \u041a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d</small>
             </article>
 
             <article>
@@ -1109,7 +1126,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
                 ${esc(billingSub.plan_name||billingSub.plan_code||'Spyon')}
               </h4>
               <span>
-                ${money(unitPrice)} / \u043c\u0435\u0441\u044f\u0446
+                ${money(unitPrice)} / ${billingPeriod(planByCode(billingSub.plan_code))}${vatIncluded(unitPrice)}
               </span>
             </div>
             <strong class="subscription-billing-status ready">
@@ -1169,7 +1186,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         <div>
           <small>\u0422\u0435\u043a\u0443\u0449\u0438\u0439 \u043f\u0430\u043a\u0435\u0442</small>
           <b>${esc(active?current.plan_name||current.plan_code:'\u041d\u0435\u0442 \u0430\u043a\u0442\u0438\u0432\u043d\u043e\u0433\u043e \u043f\u0430\u043a\u0435\u0442\u0430')}</b>
-          <span>${active?`${number(current.price_amount)} ${esc(current.currency)} \u00b7 \u0434\u043e ${esc(String(current.ends_at||'\u2014'))}`:esc(ent.message||'\u041e\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044f \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435')}</span>
+          <span>${active?`${number(current.price_amount)} ${esc(current.currency)} / ${billingPeriod(planByCode(current.plan_code))}${vatIncluded(current.price_amount)} \u00b7 \u0434\u043e ${esc(String(current.ends_at||'\u2014'))}`:esc(ent.message||'\u041e\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044f \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435')}</span>
         </div>
 
         ${pending?
@@ -1654,7 +1671,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const marketplaces=Object.entries(state.settings?.subscription?.entitlement?.marketplaces||{}).filter(([,value])=>value?.enabled).map(([code])=>code);
       host.innerHTML=`<div class="subscription-billing-head"><div><small>ADD-ON BILLING</small><h4>Купить дополнительные позиции</h4><span>Счёт формируется сразу, оплата проверяется бухгалтером.</span></div></div>${can('manage_company')?`<div class="subscription-actions addon-billing-form"><label>Площадка<select id="addonBillingMarketplace">${marketplaces.map(code=>`<option value="${esc(code)}">${esc(marketplaceLabel(code))}</option>`).join('')}</select></label><label>Пакет<select id="addonBillingPackage">${addons.map(item=>`<option value="${esc(item.code)}" data-positions="${Number(item.extra_positions||0)}" data-price="${Number(item.price_amount||0)}">${esc(item.name||item.code)}</option>`).join('')}</select></label><label>Количество пакетов<input id="addonBillingQuantity" type="number" min="1" max="100" value="1"></label><div class="subscription-billing-total"><div><small id="addonBillingDetails"></small><b id="addonBillingTotal"></b></div><button type="button" class="primary" id="createAddonBillingOrder">Сформировать счёт</button></div></div>`:''}<div id="addonBillingOrders">${orders.map(addonOrderHtml).join('')||'<div class="empty compact">Счетов за дополнительные позиции пока нет.</div>'}</div>`;
       const packageSelect=$('#addonBillingPackage',host),quantity=$('#addonBillingQuantity',host);
-      const updatePreview=()=>{const selected=packageSelect?.selectedOptions?.[0],count=Math.max(1,Number(quantity?.value||1)),positions=Number(selected?.dataset.positions||0),price=Number(selected?.dataset.price||0);$('#addonBillingDetails',host).textContent=`${number(positions)} позиций в пакете · всего ${number(positions*count)} позиций · ${money(price)} / пакет`;$('#addonBillingTotal',host).textContent=money(price*count);};
+      const updatePreview=()=>{const selected=packageSelect?.selectedOptions?.[0],count=Math.max(1,Number(quantity?.value||1)),positions=Number(selected?.dataset.positions||0),price=Number(selected?.dataset.price||0);$('#addonBillingDetails',host).textContent=`${number(positions)} позиций в пакете · всего ${number(positions*count)} позиций · ${money(price)} / пакет${vatIncluded(price)}`;$('#addonBillingTotal',host).textContent=money(price*count);};
       packageSelect?.addEventListener('change',updatePreview);quantity?.addEventListener('input',updatePreview);updatePreview();
       $('#createAddonBillingOrder',host)?.addEventListener('click',async event=>{const button=event.currentTarget;try{button.disabled=true;await api('/api/addon-billing/orders',{method:'POST',body:{marketplace:$('#addonBillingMarketplace',host)?.value,addon_code:packageSelect?.value,quantity:Number(quantity?.value||0)}});toast('Счёт сформирован');await loadAddonBilling();}catch(error){button.disabled=false;toast(error.message,true);}});
       $$('.addonBillingProof',host).forEach(input=>input.addEventListener('change',()=>{const file=input.files?.[0],button=$(`[data-upload-order="${input.dataset.orderId}"]`,host),name=$(`[data-proof-name="${input.dataset.orderId}"]`,host);if(button)button.disabled=!file;if(name)name.textContent=file?file.name:'Выбрать файл';}));
@@ -1668,7 +1685,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     const title=invoice.number?`Счёт №${invoice.number}`:`Счёт №${order.id}`;
     const marketplace=marketplaceLabel(order.marketplace);
     const positions=number(order.total_extra_positions||Number(order.positions||0)*Number(order.quantity||0));
-    return `<article class="subscription-billing-card"><div class="subscription-billing-head"><div><small>ADD-ON INVOICE</small><h4>${esc(title)}</h4><span>${esc(marketplace)} · +${positions} позиций</span></div><strong class="subscription-billing-status ${esc(status)}">${esc(addonOrderStatus(status))}</strong></div><div class="subscription-invoice-grid"><article><small>Пакет</small><b>+${number(order.positions)} позиций</b></article><article><small>Количество</small><b>${number(order.quantity)} пак.</b></article><article><small>Итого</small><b>${money(order.total_price)} ${esc(order.currency||'KZT')}</b></article></div><div class="subscription-billing-total">${invoice.download_url?`<a class="secondary" href="${esc(invoice.download_url)}">Скачать PDF</a>`:''}${(['awaiting_payment','payment_rejected'].includes(status)&&can('manage_company'))?`<button type="button" class="secondary" data-reissue-order="${Number(order.id)}">Перевыставить счёт</button>`:''}</div>${status==='payment_rejected'?`<div class="subscription-billing-warning"><b>Причина отклонения:</b> ${esc(proof.review_note||'Загрузите новый платёжный документ.')}</div>`:''}${canProof&&can('manage_company')?`<div class="subscription-proof-upload"><div class="subscription-proof-upload-copy"><small>PAYMENT CONFIRMATION</small><b>Платёжный документ</b></div><label class="subscription-proof-file"><input class="addonBillingProof" data-proof-input="${Number(order.id)}" data-order-id="${Number(order.id)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><span data-proof-name="${Number(order.id)}">Выбрать файл</span></label><button type="button" class="secondary" data-upload-order="${Number(order.id)}" disabled>Отправить на проверку</button></div>`:''}</article>`;
+    return `<article class="subscription-billing-card"><div class="subscription-billing-head"><div><small>ADD-ON INVOICE</small><h4>${esc(title)}</h4><span>${esc(marketplace)} · +${positions} позиций</span></div><strong class="subscription-billing-status ${esc(status)}">${esc(addonOrderStatus(status))}</strong></div><div class="subscription-invoice-grid"><article><small>Пакет</small><b>+${number(order.positions)} позиций</b></article><article><small>Количество</small><b>${number(order.quantity)} пак.</b></article><article><small>Итого</small><b>${money(order.total_price)} ${esc(order.currency||'KZT')}</b><small>с учётом НДС 16% Казахстан</small></article></div><div class="subscription-billing-total">${invoice.download_url?`<a class="secondary" href="${esc(invoice.download_url)}">Скачать PDF</a>`:''}${(['awaiting_payment','payment_rejected'].includes(status)&&can('manage_company'))?`<button type="button" class="secondary" data-reissue-order="${Number(order.id)}">Перевыставить счёт</button>`:''}</div>${status==='payment_rejected'?`<div class="subscription-billing-warning"><b>Причина отклонения:</b> ${esc(proof.review_note||'Загрузите новый платёжный документ.')}</div>`:''}${canProof&&can('manage_company')?`<div class="subscription-proof-upload"><div class="subscription-proof-upload-copy"><small>PAYMENT CONFIRMATION</small><b>Платёжный документ</b></div><label class="subscription-proof-file"><input class="addonBillingProof" data-proof-input="${Number(order.id)}" data-order-id="${Number(order.id)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><span data-proof-name="${Number(order.id)}">Выбрать файл</span></label><button type="button" class="secondary" data-upload-order="${Number(order.id)}" disabled>Отправить на проверку</button></div>`:''}</article>`;
     return `<article class="subscription-billing-card"><div class="subscription-billing-head"><div><h4>${esc(invoice.number||`Счёт #${order.id}`)}</h4><span>${esc(order.marketplace)} · ${esc(order.addon)} · ${number(order.total_extra_positions)} позиций</span></div><strong class="subscription-billing-status ${esc(status)}">${esc(addonOrderStatus(status))}</strong></div><div class="subscription-billing-total"><div><small>${esc(order.quantity)} пак. · ${esc(order.currency||'KZT')}</small><b>${money(order.total_price)}</b></div>${invoice.download_url?`<a class="secondary" href="${esc(invoice.download_url)}">Скачать счёт</a>`:''}${(['awaiting_payment','payment_rejected'].includes(status)&&can('manage_company'))?`<button type="button" class="secondary" data-reissue-order="${Number(order.id)}">Перевыставить</button>`:''}</div>${status==='payment_rejected'?`<div class="subscription-billing-warning">${esc(proof.review_note||'Оплата отклонена. Загрузите новый платёжный документ.')}</div>`:''}${canProof&&can('manage_company')?`<div class="subscription-actions"><input class="addonBillingProof" data-proof-input="${Number(order.id)}" data-order-id="${Number(order.id)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><button type="button" class="secondary" data-upload-order="${Number(order.id)}" disabled>Загрузить платёжный документ</button></div>`:''}</article>`;
   }
   function renderSubscriptionStatusBanner(snapshot){
