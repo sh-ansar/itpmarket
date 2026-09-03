@@ -46,6 +46,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
         discovered_articles: set[str],
         published_articles: set[str] | None = None,
         product_limit: int | None = None,
+        previous_passed_articles: set[str] | None = None,
     ) -> tuple[dict[str, object], dict[str, object], MagicMock]:
         with tempfile.TemporaryDirectory(prefix="ozon_catalog_shrink_guard_") as folder:
             runtime = Path(folder)
@@ -65,7 +66,14 @@ class OzonRuntimeContractTests(unittest.TestCase):
             registry = MagicMock()
             published_run_id = "published-catalog" if published_articles is not None else ""
             registry.current_published_catalog_run_id.return_value = published_run_id
-            registry.catalog_articles.return_value = set(published_articles or set())
+            registry.strongest_previous_passed_discovery_run_id.return_value = ""
+            if previous_passed_articles is not None:
+                registry.strongest_previous_passed_discovery_run_id.return_value = (
+                    "previous-passed-discovery"
+                )
+            registry.catalog_articles.return_value = set(
+                published_articles or previous_passed_articles or set()
+            )
             registry.upsert_catalog_product.return_value = (True, False)
             collector.registry = registry
             browser = MagicMock()
@@ -119,6 +127,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual("PARTIAL", registry.finish_run.call_args.args[1])
         self.assertEqual("CATALOG_SHRINK_GUARD", registry.finish_run.call_args.args[2]["notes"])
         registry.mark_catalog_published.assert_not_called()
+        registry.strongest_previous_passed_discovery_run_id.assert_not_called()
 
     def test_catalog_shrink_guard_demotes_80_product_subset(self) -> None:
         published = self._catalog_articles(2086)
@@ -151,14 +160,38 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual("PASSED", result["status"])
         self.assertNotIn("reason", result)
 
-    def test_catalog_shrink_guard_is_inactive_without_published_baseline(self) -> None:
+    def test_catalog_shrink_guard_is_inactive_without_any_safe_baseline(self) -> None:
         result, _summary, registry = self._run_discovery_with_published_baseline(
             self._catalog_articles(80)
         )
 
         self.assertEqual("PASSED", result["status"])
         registry.current_published_catalog_run_id.assert_called_once_with()
+        registry.strongest_previous_passed_discovery_run_id.assert_called_once_with(
+            "https://www.ozon.ru/seller/alfa-tires-3381444/",
+            result["run_id"],
+        )
         registry.catalog_articles.assert_not_called()
+
+    def test_catalog_shrink_guard_uses_previous_passed_discovery_before_first_publication(self) -> None:
+        previous = self._catalog_articles(1152)
+        discovered = set(sorted(previous)[:48])
+
+        result, _summary, registry = self._run_discovery_with_published_baseline(
+            discovered,
+            previous_passed_articles=previous,
+        )
+
+        self.assertEqual("PARTIAL", result["status"])
+        self.assertEqual("CATALOG_SHRINK_GUARD", result["reason"])
+        guard = result["catalog_shrink_guard"]
+        self.assertEqual("previous_passed_discovery", guard["baseline_source"])
+        self.assertEqual("previous-passed-discovery", guard["baseline_run_id"])
+        self.assertEqual(1152, guard["baseline_count"])
+        self.assertEqual(48, guard["discovered_count"])
+        self.assertAlmostEqual(48 / 1152, guard["retained_ratio"], delta=1e-6)
+        self.assertEqual(1.0, guard["overlap_ratio"])
+        registry.catalog_articles.assert_called_once_with("previous-passed-discovery")
 
     def test_explicit_discovery_limit_keeps_existing_partial_behavior(self) -> None:
         published = self._catalog_articles(2086)
@@ -169,6 +202,7 @@ class OzonRuntimeContractTests(unittest.TestCase):
         self.assertEqual("PARTIAL", result["status"])
         self.assertNotIn("CATALOG_SHRINK_GUARD", result.get("reason", ""))
         registry.current_published_catalog_run_id.assert_not_called()
+        registry.strongest_previous_passed_discovery_run_id.assert_not_called()
 
     def test_sync_catalog_does_not_refresh_after_shrink_guard_demotion(self) -> None:
         collector = Collector.__new__(Collector)
