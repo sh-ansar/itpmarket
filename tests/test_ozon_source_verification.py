@@ -70,7 +70,16 @@ class OzonSourceVerificationTests(unittest.TestCase):
                 return self
 
             def snapshot(self):
-                return "Store", "store-101", '<h1>Store</h1>'
+                return (
+                    "Store",
+                    "",
+                    '<div id="state-tileGridDesktop-main" '
+                    'data-state="{&quot;items&quot;:['
+                    '{&quot;sku&quot;:&quot;101&quot;,'
+                    '&quot;action&quot;:{&quot;link&quot;:'
+                    '&quot;/product/store-product-101/&quot;},'
+                    '&quot;mainState&quot;:[]}]}"/>'
+                )
 
         return driver, FakeSession
 
@@ -129,33 +138,109 @@ class OzonSourceVerificationTests(unittest.TestCase):
         self.assertEqual(24, len(seen))
 
     def test_kz_canonical_identity_requires_agreeing_browser_evidence(self) -> None:
+        page_html = (
+            '<link rel="canonical" '
+            'href="https://ozon.kz/\u043f\u0440\u043e\u0434\u0430\u0432\u0435\u0446/alfa-tires-3381444/">'
+            '<div id="state-tileGridDesktop-seller" '
+            'data-state="{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,'
+            '&quot;items&quot;:[{&quot;sku&quot;:&quot;2868562113&quot;,'
+            '&quot;action&quot;:{&quot;link&quot;:&quot;/product/michelin-2868562113/&quot;},'
+            '&quot;mainState&quot;:[]}]}"/>'
+        )
+
         result = resolve_ozon_snapshot(
             "ozon_kz",
-            final_url="https://ozon.kz/продавец/alfa-tires-3381444/",
-            page_html=(
-                '<link rel="canonical" href="https://ozon.kz/продавец/alfa-tires-3381444/">'
-                '<h1>Alfa Tires</h1><script>{"sellerId":"alfa-tires-3381444"}</script>'
+            final_url=(
+                "https://ozon.kz/"
+                "\u043f\u0440\u043e\u0434\u0430\u0432\u0435\u0446/"
+                "alfa-tires-3381444/"
             ),
-            page_text="Alfa Tires alfa-tires-3381444",
+            page_html=page_html,
+            page_text="",
         )
+
         self.assertEqual("verified", result["verification_state"])
-        self.assertEqual("alfa-tires-3381444", result["canonical_seller_id"])
-        self.assertEqual("https://ozon.kz/seller/alfa-tires-3381444/", result["canonical_seller_url"])
+        self.assertEqual(
+            "alfa-tires-3381444",
+            result["canonical_seller_id"],
+        )
+        self.assertEqual(
+            "https://ozon.kz/seller/alfa-tires-3381444/",
+            result["canonical_seller_url"],
+        )
+        self.assertEqual(1, result["product_count"])
 
     def test_legacy_seller_path_is_normalized_to_current_storefront_path(self) -> None:
+        page_html = (
+            '<link rel="canonical" '
+            'href="https://www.ozon.ru/seller/alfa-tires-3381444/">'
+            '<div id="state-tileGridDesktop-seller" '
+            'data-state="{&quot;sellerId&quot;:&quot;alfa-tires-3381444&quot;,'
+            '&quot;items&quot;:[{&quot;sku&quot;:&quot;2868562113&quot;,'
+            '&quot;action&quot;:{&quot;link&quot;:&quot;/product/michelin-2868562113/&quot;},'
+            '&quot;mainState&quot;:[]}]}"/>'
+        )
+
         result = resolve_ozon_snapshot(
             "ozon",
-            final_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
-            page_html=(
-                '<link rel="canonical" href="https://www.ozon.ru/seller/alfa-tires-3381444/">'
-                '<h1>Alfa Tires</h1><script>{"sellerId":"alfa-tires-3381444"}</script>'
+            final_url=(
+                "https://www.ozon.ru/"
+                "seller/alfa-tires-3381444/"
             ),
-            page_text="Alfa Tires alfa-tires-3381444",
+            page_html=page_html,
+            page_text="",
         )
+
         self.assertEqual(
             "https://www.ozon.ru/seller/alfa-tires-3381444/",
             result["canonical_seller_url"],
         )
+        self.assertEqual(1, result["product_count"])
+
+    def test_kz_real_storefront_without_slug_in_dom_is_verified(self) -> None:
+        page_html = (
+            '<div id="state-tileGridDesktop-main" '
+            'data-state="{&quot;items&quot;:['
+            '{&quot;sku&quot;:&quot;2868562113&quot;,'
+            '&quot;action&quot;:{&quot;link&quot;:'
+            '&quot;/product/michelin-2868562113/&quot;},'
+            '&quot;mainState&quot;:[]}]}"/>'
+        )
+
+        result = resolve_ozon_snapshot(
+            "ozon_kz",
+            final_url=(
+                "https://ozon.kz/"
+                "seller/alfa-tires-3381444/"
+            ),
+            page_html=page_html,
+            page_text="",
+            page_title="",
+        )
+
+        self.assertEqual("verified", result["verification_state"])
+        self.assertEqual(1, result["product_count"])
+        self.assertFalse(result["catalogue_empty"])
+        self.assertEqual(
+            "alfa-tires-3381444",
+            result["seller_name"],
+        )
+
+    def test_seller_name_without_storefront_evidence_is_not_enough(self) -> None:
+        with self.assertRaisesRegex(
+            OzonSourceVerificationError,
+            "no verified catalogue products",
+        ):
+            resolve_ozon_snapshot(
+                "ozon_kz",
+                final_url=(
+                    "https://ozon.kz/"
+                    "seller/alfa-tires-3381444/"
+                ),
+                page_html="<h1>Alfa Tires</h1>",
+                page_text="Alfa Tires",
+                page_title="Alfa Tires",
+            )
 
     def test_short_ru_slug_is_not_a_verified_storefront(self) -> None:
         with self.assertRaises(OzonSourceVerificationError):

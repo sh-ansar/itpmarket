@@ -64,7 +64,7 @@
     const activeSellers=(item.sellers||[]).filter(seller=>seller.status==='active'&&seller.approval_status==='approved');
     const sellerBlocks=activeSellers.length ? `<div class="marketplace-source-list">${activeSellers.map(seller=>`<div class="marketplace-discovery-note"><strong>${esc(seller.display_name||seller.external_seller_id)}</strong><br><a href="${esc(seller.source_url)}" target="_blank" rel="noreferrer">${esc(seller.source_url)}</a>${canManage?`<div class="marketplace-source-actions"><button type="button" class="marketplace-source-action marketplace-source-action--replace" data-marketplace-replace data-seller-id="${Number(seller.id)}">Заменить источник</button><button type="button" class="marketplace-source-action marketplace-source-action--remove" data-marketplace-remove data-seller-id="${Number(seller.id)}">Удалить источник</button></div>`:''}</div>`).join('')}</div>` : '';
     const statusText=item.is_connected?t('marketplace_connected','Подключено'):approval==='pending'?'Источник требует повторной проверки':approval==='rejected'?'Отклонено — можно отправить заново':t('marketplace_not_connected','Не подключено');
-    return `<article class="settings-card tenant-marketplace-card ${item.is_connected ? 'connected' : ''}" data-marketplace-code="${esc(item.code)}">
+    return `<article class="settings-card tenant-marketplace-card ${item.is_connected ? 'connected' : ''}" data-settings-section="marketplaces" data-marketplace-code="${esc(item.code)}">
       <div class="marketplace-card-head"><div><h3>${esc(item.name)}</h3></div><span class="marketplace-approval ${esc(approval)}">${esc(statusText)}</span></div>
       <p>${esc(item.description || '')}</p>
       ${item.is_connected || activeSellers.length ? sellerBlocks : canManage ? `
@@ -134,9 +134,79 @@
     }
     try {
       if (isCheck) {
-        const data = await request('/api/tenant/marketplaces/check', {method:'POST', body:{marketplace_code:code, source}});
-        checked.set(code, data.result);
-        notify(isOzon ? 'Магазин подтверждён. Подтвердите подключение.' : t('marketplace_url_verified','Ссылка проверена. Подтвердите подключение.'));
+        const data = await request('/api/tenant/marketplaces/check', {
+          method:'POST',
+          body:{
+            marketplace_code:code,
+            source
+          }
+        });
+
+        const verified = data.result || {};
+        checked.set(code, verified);
+
+        if (isOzon) {
+          if (verified.catalogue_empty === true) {
+            checked.delete(code);
+
+            if (checkStatus) {
+              checkStatus.textContent =
+                'Магазин найден, но товары не обнаружены. Подключение не выполнено.';
+              checkStatus.hidden = false;
+            }
+
+            button.disabled = false;
+            button.textContent = idleButtonText;
+
+            notify(
+              'Магазин Ozon найден, но товары не обнаружены.',
+              true
+            );
+
+            return;
+          }
+
+          if (!verified.verification_proof) {
+            throw new Error(
+              'Ozon verification proof was not returned.'
+            );
+          }
+
+          if (checkStatus) {
+            checkStatus.textContent =
+              'Магазин подтверждён. Подключаем…';
+            checkStatus.hidden = false;
+          }
+
+          await request(
+            '/api/tenant/marketplaces/connect',
+            {
+              method:'POST',
+              body:{
+                marketplace_code:code,
+                source,
+                verification_proof:verified.verification_proof
+              }
+            }
+          );
+
+          checked.delete(code);
+
+          await load();
+
+          notify(
+            'Магазин Ozon подтверждён и подключён.'
+          );
+
+          return;
+        }
+
+        notify(
+          t(
+            'marketplace_url_verified',
+            'Ссылка проверена. Подтвердите подключение.'
+          )
+        );
       } else if (button.matches('[data-marketplace-connect]')) {
         const data = await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source, verification_proof:checked.get(code)?.verification_proof || ''}});
         checked.delete(code);

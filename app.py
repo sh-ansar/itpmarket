@@ -4147,7 +4147,7 @@ def api_tenant_get() -> Any:
                 "code", "name", "description", "availability", "connection_fields",
                 "credential_fields", "capabilities", "limitations"
             ) if key in item}
-            for item in marketplace_access
+            for item in SAAS.public_integrations()
         ],
     )
 

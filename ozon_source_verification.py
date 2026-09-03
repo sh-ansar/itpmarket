@@ -56,21 +56,20 @@ def resolve_ozon_snapshot(
     page_html: str,
     page_text: str,
     page_title: str = "",
-) -> dict[str, str]:
-    """Validate independent storefront evidence from an interactive browser.
+) -> dict[str, Any]:
+    """Verify an Ozon seller storefront by its real seller catalogue."""
 
-    A final seller URL, canonical link and seller-specific page data must agree.
-    A status code, a seller-looking heading, or a product card alone is not
-    evidence and cannot produce ``verified``.
-    """
     code = str(marketplace_code or "").strip().casefold()
+
+    # The browser must remain on a seller storefront for the selected
+    # marketplace. Search, category, product and foreign-host pages fail here.
     final = _canonical_url(final_url, code)
+
     canonical_raw = _canonical_link(page_html, final_url)
     canonical = final
 
-    # Ozon may omit <link rel="canonical"> in the interactive SPA snapshot.
-    # When present, canonical is additional evidence and must agree with the
-    # final seller URL. Its absence alone must not reject a valid storefront.
+    # Canonical is corroborating evidence only. Ozon SPA may omit it.
+    # When present it must identify exactly the same seller.
     if canonical_raw:
         canonical = _canonical_url(canonical_raw, code)
         if canonical != final:
@@ -78,74 +77,197 @@ def resolve_ozon_snapshot(
                 "Ozon final URL and canonical seller identity disagree."
             )
 
-    seller_id = re.search(
-        r"/(?:seller|продавец)/([^/]+)/",
+    seller_match = re.search(
+        r"/seller/([^/]+)/",
         final,
-    ).group(1)  # final is validated by _canonical_url above
-    evidence = f"{page_title}\n{page_text}\n{page_html}".casefold()
-    if seller_id.casefold() not in evidence:
-        raise OzonSourceVerificationError("Ozon page has no seller-specific identity evidence.")
-    empty_markers = (
-        "не нашли товары в магазине",
-        "товары в магазине не найдены",
-        "no products found in the store",
+        re.IGNORECASE,
     )
-    is_empty = any(marker in evidence for marker in empty_markers)
+    if not seller_match:
+        raise OzonSourceVerificationError(
+            "The final Ozon URL is not a seller storefront."
+        )
+
+    seller_id = seller_match.group(1)
+
+    # Product evidence is the actual verification contract.
+    # parse_catalog_html accepts seller catalogue grids and explicitly
+    # rejects recommendation grids.
+    from collectors.ozon.ozon_probe_core import parse_catalog_html
+
+    grid_scan: dict[str, Any] = {}
+    products, _next_page = parse_catalog_html(
+        str(page_html or ""),
+        final,
+        grid_scan,
+    )
+
+    if not products:
+        raise OzonSourceVerificationError(
+            "Ozon seller storefront has no verified catalogue products."
+        )
+
+    # Name is presentation metadata only. It must never block connection.
+    seller_name = ""
+
     name_match = re.search(
-        r"<h1[^>]*>\s*([^<]{2,160})\s*</h1>", str(page_html or ""), re.IGNORECASE
+        r"<h1[^>]*>\s*([^<]{2,160})\s*</h1>",
+        str(page_html or ""),
+        re.IGNORECASE,
     )
-    seller_name = re.sub(r"\s+", " ", name_match.group(1)).strip() if name_match else ""
+    if name_match:
+        seller_name = re.sub(
+            r"\s+",
+            " ",
+            name_match.group(1),
+        ).strip()
+
     if not seller_name:
-        # Seller identity survives in the page state on both Ozon locales; do
-        # not infer it from recommendation cards.
-        name_match = re.search(r'"(?:sellerName|seller_name|name)"\s*:\s*"([^"\\]{2,160})"', page_html)
-        seller_name = name_match.group(1).strip() if name_match else ""
+        name_match = re.search(
+            r'"(?:sellerName|seller_name)"\s*:\s*"([^"\\]{2,160})"',
+            str(page_html or ""),
+            re.IGNORECASE,
+        )
+        if name_match:
+            seller_name = name_match.group(1).strip()
+
+    # The proof/connect pipeline expects a non-empty display identity.
+    # If Ozon does not expose a name, use the verified seller slug.
     if not seller_name:
-        raise OzonSourceVerificationError("Ozon page has no seller name evidence.")
+        seller_name = seller_id
+
+    first_product = products[0] if products else {}
+
     return {
         "verification_state": "verified",
         "marketplace_code": code,
         "canonical_seller_id": seller_id,
         "canonical_seller_url": canonical,
         "seller_name": seller_name,
-        "catalogue_empty": "true" if is_empty else "false",
+        "catalogue_empty": False,
+        "product_count": len(products),
+        "sample_product_id": str(first_product.get("article") or ""),
+        "sample_product_url": str(first_product.get("url") or ""),
     }
 
 
-def _interactive_snapshot(marketplace_code: str, source_url: str) -> dict[str, str]:
-    """Use only the existing debug browser; this function never launches Chrome."""
+def _interactive_snapshot(
+    marketplace_code: str,
+    source_url: str,
+) -> dict[str, Any]:
+    """Wait for a real Ozon seller catalogue in the existing debug browser."""
+
+    import time
+
     root = Path(__file__).resolve().parent
     collector_dir = root / "collectors" / "ozon"
+
     if str(collector_dir) not in sys.path:
         sys.path.insert(0, str(collector_dir))
+
     from browser_session import BrowserSession  # type: ignore[import-not-found]
+    from collectors.ozon.ozon_probe_core import parse_catalog_html
 
     port = 9222 if marketplace_code == "ozon" else 9333
     session = BrowserSession(port, source_url)
+
     driver = None
     original_handle = ""
     original_handles: set[str] = set()
     temporary_handle = ""
+
     try:
         session.connect()
+
         assert session.driver is not None
         driver = session.driver
+
         original_handle = str(driver.current_window_handle)
-        original_handles = {str(handle) for handle in driver.window_handles}
+        original_handles = {
+            str(handle)
+            for handle in driver.window_handles
+        }
+
         driver.switch_to.new_window("tab")
         temporary_handle = str(driver.current_window_handle)
+
+        # BrowserSession uses page_load_strategy="none", therefore driver.get()
+        # intentionally returns before Ozon's SPA has populated the catalogue.
         driver.get(source_url)
-        title, text, page_html = session.snapshot()
-        return {
-            "final_url": str(driver.current_url or source_url),
-            "page_title": title,
-            "page_text": text,
-            "page_html": page_html,
-        }
+
+        started = time.monotonic()
+        deadline = started + 15.0
+        latest_snapshot: dict[str, Any] = {}
+
+        while True:
+            title, text, page_html = session.snapshot()
+            final_url = str(driver.current_url or source_url)
+
+            grid_scan: dict[str, Any] = {}
+
+            try:
+                products, _next_page = parse_catalog_html(
+                    page_html,
+                    final_url,
+                    grid_scan,
+                )
+            except Exception:
+                products = []
+
+            latest_snapshot = {
+                "final_url": final_url,
+                "page_title": title,
+                "page_text": text,
+                "page_html": page_html,
+                "product_count": len(products),
+                "grid_scan": grid_scan,
+                "verification_wait_ms": int(
+                    (time.monotonic() - started) * 1000
+                ),
+            }
+
+            # Stop immediately when an actual seller catalogue product appears.
+            if products:
+                return latest_snapshot
+
+            if time.monotonic() >= deadline:
+                return latest_snapshot
+
+            # Ozon may lazy-initialize storefront widgets only after the page
+            # gets a small real scroll. Do not jump to the page bottom because
+            # recommendation widgets live there as well.
+            try:
+                driver.execute_script(
+                    """
+                    const root =
+                        document.scrollingElement
+                        || document.documentElement
+                        || document.body;
+
+                    if (root) {
+                        const target = Math.min(
+                            900,
+                            Math.max(
+                                0,
+                                (root.scrollHeight || 0) * 0.18
+                            )
+                        );
+                        root.scrollTo(0, target);
+                    }
+                    """
+                )
+            except Exception:
+                pass
+
+            time.sleep(0.5)
+
     finally:
         if driver is not None:
             try:
-                handles = {str(handle) for handle in driver.window_handles}
+                handles = {
+                    str(handle)
+                    for handle in driver.window_handles
+                }
+
                 if (
                     temporary_handle
                     and temporary_handle not in original_handles
@@ -153,23 +275,37 @@ def _interactive_snapshot(marketplace_code: str, source_url: str) -> dict[str, s
                 ):
                     driver.switch_to.window(temporary_handle)
                     driver.close()
+
             except Exception:
                 pass
+
             try:
-                handles = {str(handle) for handle in driver.window_handles}
+                handles = {
+                    str(handle)
+                    for handle in driver.window_handles
+                }
+
                 restore_handle = (
-                    original_handle if original_handle in handles else
-                    next((handle for handle in original_handles if handle in handles), "")
+                    original_handle
+                    if original_handle in handles
+                    else next(
+                        (
+                            handle
+                            for handle in original_handles
+                            if handle in handles
+                        ),
+                        "",
+                    )
                 )
+
                 if restore_handle:
                     driver.switch_to.window(restore_handle)
+
             except Exception:
                 pass
-        # BrowserSession.close() intentionally navigates its target back to
-        # original_url.  The verification tab is already closed above, so a
-        # plain detach avoids reloading the user's or collector's active tab.
-        session.driver = None
 
+        # Detach only. Never close the shared Ozon browser.
+        session.driver = None
 
 def verify_ozon_storefront(
     marketplace_code: str,

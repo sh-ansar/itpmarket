@@ -1775,6 +1775,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     if(
       card.querySelector('#catalogAttributeSearch')
       ||card.querySelector('#catalogAttributeMarketplace')
+      ||card.hasAttribute('data-marketplace-code')
       ||card.querySelector('[data-marketplace-code]')
       ||card.querySelector('[data-marketplace-settings]')
       ||card.querySelector('.marketplace-settings')
