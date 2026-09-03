@@ -1187,7 +1187,7 @@ class BrowserSession:
 
         return (
             list(unique.values()),
-            "" if seller_root else best_next_page,
+            best_next_page,
             last_title,
             last_text,
             last_html,
