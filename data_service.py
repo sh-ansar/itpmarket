@@ -17,6 +17,8 @@ from storage.postgres_compat import PostgresConnection, configure_connection, co
 from engine.kaspi_market_v9_1 import Database, enriched_comparison_rows, status_snapshot
 from collectors.wildberries.wildberries_collector import image_url_for_article
 from market_intelligence import (
+    EXACT_PRICE_TOLERANCE_MIN_KZT,
+    EXACT_PRICE_TOLERANCE_RATIO,
     STATUS_INFO,
     Candidate,
     exact_offer_position,
@@ -43,9 +45,9 @@ SORT_FIELDS = {
 
 RISK_STATUSES = {
     "EXACT_ABOVE", "EXACT_HIGHEST", "EXACT_TIED_HIGHEST",
-    "EXACT_BELOW", "DATA_ERROR",
+    "DATA_ERROR",
 }
-OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_TIED_LOWEST"}
+OPPORTUNITY_STATUSES = {"EXACT_LOWEST", "EXACT_TIED_LOWEST", "EXACT_BELOW"}
 UNSCANNED_STATUSES = {"NOT_ANALYZED", "INSUFFICIENT_DATA", "REVIEW_REQUIRED"}
 TENANT_SNAPSHOT_CACHE_TTL_SECONDS = 2.0
 TENANT_SNAPSHOT_CACHE_MAX_KEYS = 128
@@ -75,6 +77,29 @@ SEASON_LABELS = {
     "ALL_SEASON": "Всесезонные",
     "UNKNOWN": "Сезон не определён",
 }
+
+
+def _exact_offer_price_status_sql() -> str:
+    tolerance = (
+        f"GREATEST({EXACT_PRICE_TOLERANCE_MIN_KZT}, "
+        f"a.market_median * {EXACT_PRICE_TOLERANCE_RATIO})"
+    )
+    return f"""CASE
+      WHEN b.scan_status='error' THEN 'DATA_ERROR'
+      WHEN COALESCE(a.references,0)=0 AND b.scan_status IN ('ok','no_competitors') THEN 'NO_OTHER_SELLERS'
+      WHEN b.scan_status IS NULL THEN 'NOT_ANALYZED'
+      WHEN b.scan_status NOT IN ('ok','no_competitors','error') THEN 'REVIEW_REQUIRED'
+      WHEN b.price_amount=a.market_min AND b.price_amount=a.market_max THEN 'EXACT_IN_MARKET'
+      WHEN b.price_amount<a.market_min THEN 'EXACT_LOWEST'
+      WHEN b.price_amount=a.market_min AND a.market_min<a.market_max THEN 'EXACT_TIED_LOWEST'
+      WHEN b.price_amount>a.market_max AND b.price_amount<=a.market_median+{tolerance} THEN 'EXACT_IN_MARKET'
+      WHEN b.price_amount=a.market_max AND a.market_min<a.market_max AND b.price_amount<=a.market_median+{tolerance} THEN 'EXACT_IN_MARKET'
+      WHEN b.price_amount>a.market_max THEN 'EXACT_HIGHEST'
+      WHEN b.price_amount=a.market_max AND a.market_min<a.market_max THEN 'EXACT_TIED_HIGHEST'
+      WHEN b.price_amount<a.market_median-{tolerance} THEN 'EXACT_BELOW'
+      WHEN b.price_amount>a.market_median+{tolerance} THEN 'EXACT_ABOVE'
+      ELSE 'EXACT_IN_MARKET'
+    END"""
 
 
 class DataService:
@@ -2485,8 +2510,10 @@ class DataService:
 
     @staticmethod
     def _is_opportunity(row: dict[str, Any]) -> bool:
-        """Return only price increases proven safe by the exact-price model."""
+        """Return safe increases and below-market control-margin cases."""
         status = str(row.get("price_status") or "")
+        if status == "EXACT_BELOW":
+            return True
         return (
             status in OPPORTUNITY_STATUSES
             and float(row.get("potential_margin_per_unit_kzt") or 0) > 0
@@ -2498,7 +2525,7 @@ class DataService:
         status = str(row.get("price_status") or "NOT_ANALYZED")
         risk_order = {
             "EXACT_HIGHEST": 0, "EXACT_TIED_HIGHEST": 1,
-            "EXACT_ABOVE": 2, "EXACT_BELOW": 3, "DATA_ERROR": 4,
+            "EXACT_ABOVE": 2, "DATA_ERROR": 3,
         }
         if status in risk_order:
             magnitude = abs(float(row.get("difference_kzt") or 0))
@@ -2839,19 +2866,7 @@ class DataService:
               GROUP BY b.tenant_id,b.marketplace_code,b.tenant_seller_id,b.source_product_code
             ), analytics AS (
               SELECT b.*, a.references,a.market_min,a.market_max,a.market_q1,a.market_median,a.min_ties,a.max_ties,
-                CASE
-                  WHEN b.scan_status='error' THEN 'DATA_ERROR'
-                  WHEN COALESCE(a.references,0)=0 AND b.scan_status IN ('ok','no_competitors') THEN 'NO_OTHER_SELLERS'
-                  WHEN b.scan_status IS NULL THEN 'NOT_ANALYZED'
-                  WHEN b.scan_status NOT IN ('ok','no_competitors','error') THEN 'REVIEW_REQUIRED'
-                  WHEN b.price_amount>a.market_max THEN 'EXACT_HIGHEST'
-                  WHEN b.price_amount=a.market_max THEN 'EXACT_TIED_HIGHEST'
-                  WHEN b.price_amount<a.market_min THEN 'EXACT_LOWEST'
-                  WHEN b.price_amount=a.market_min THEN 'EXACT_TIED_LOWEST'
-                  WHEN b.price_amount>a.market_median THEN 'EXACT_ABOVE'
-                  WHEN b.price_amount<a.market_median THEN 'EXACT_BELOW'
-                  ELSE 'EXACT_IN_MARKET'
-                END AS price_status,
+                {_exact_offer_price_status_sql()} AS price_status,
                 GREATEST(0, COALESCE(a.market_q1,0)-COALESCE(b.price_amount,0)) AS safe_potential
               FROM base b LEFT JOIN aggregate_offers a USING(tenant_id,marketplace_code,tenant_seller_id,source_product_code)
             )
@@ -2862,9 +2877,9 @@ class DataService:
             conditions.append("price_status IN (" + ",".join("?" for _ in statuses) + ")")
             extra.extend(sorted(statuses))
         if scope == "risks":
-            conditions.append("price_status IN ('EXACT_HIGHEST','EXACT_TIED_HIGHEST','EXACT_ABOVE','EXACT_BELOW','DATA_ERROR')")
+            conditions.append("price_status IN ('EXACT_HIGHEST','EXACT_TIED_HIGHEST','EXACT_ABOVE','DATA_ERROR')")
         elif scope == "opportunities":
-            conditions.append("price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') AND safe_potential>0")
+            conditions.append("(price_status='EXACT_BELOW' OR (price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') AND safe_potential>0))")
         elif scope in {"unscanned", "review"}:
             conditions.append("price_status IN ('NOT_ANALYZED','INSUFFICIENT_DATA','REVIEW_REQUIRED')")
         filtered = (" WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -2872,7 +2887,7 @@ class DataService:
         size = max(10, min(int(page_size), 200)); pages = max(1, math.ceil(total / size)); current = max(1, min(int(page), pages))
         sort_name = str(filters.get("sort") or "updated")
         if sort_name == "updated" and scope == "all":
-            order = """CASE price_status WHEN 'EXACT_HIGHEST' THEN 0 WHEN 'EXACT_TIED_HIGHEST' THEN 1 WHEN 'EXACT_ABOVE' THEN 2 WHEN 'EXACT_BELOW' THEN 3 WHEN 'DATA_ERROR' THEN 4 WHEN 'EXACT_LOWEST' THEN 10 WHEN 'EXACT_TIED_LOWEST' THEN 11 WHEN 'EXACT_IN_MARKET' THEN 20 WHEN 'NO_OTHER_SELLERS' THEN 21 WHEN 'NOT_ANALYZED' THEN 40 WHEN 'INSUFFICIENT_DATA' THEN 41 WHEN 'REVIEW_REQUIRED' THEN 42 ELSE 30 END, CASE WHEN price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') THEN safe_potential ELSE ABS(COALESCE(price_amount-market_median,0)) END DESC, title ASC"""
+            order = """CASE price_status WHEN 'EXACT_HIGHEST' THEN 0 WHEN 'EXACT_TIED_HIGHEST' THEN 1 WHEN 'EXACT_ABOVE' THEN 2 WHEN 'DATA_ERROR' THEN 3 WHEN 'EXACT_LOWEST' THEN 10 WHEN 'EXACT_TIED_LOWEST' THEN 11 WHEN 'EXACT_BELOW' THEN 12 WHEN 'EXACT_IN_MARKET' THEN 20 WHEN 'NO_OTHER_SELLERS' THEN 21 WHEN 'NOT_ANALYZED' THEN 40 WHEN 'INSUFFICIENT_DATA' THEN 41 WHEN 'REVIEW_REQUIRED' THEN 42 ELSE 30 END, CASE WHEN price_status IN ('EXACT_LOWEST','EXACT_TIED_LOWEST') THEN safe_potential ELSE ABS(COALESCE(price_amount-market_median,0)) END DESC, title ASC"""
         else:
             columns = {"title":"title", "price":"price_amount", "delta":"price_amount-market_median", "status":"price_status", "brand":"brand", "platform":"marketplace_code", "updated":"COALESCE(source_updated_at,last_seen_at)"}
             direction = "ASC" if str(filters.get("direction") or "desc").casefold()=="asc" else "DESC"

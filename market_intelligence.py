@@ -33,7 +33,7 @@ STATUS_INFO: dict[str, dict[str, str]] = {
     "NO_OTHER_SELLERS": {"label": "Других продавцов не найдено", "tone": "neutral"},
     "EXACT_LOWEST": {"label": "Единственная минимальная цена среди продавцов", "tone": "success"},
     "EXACT_TIED_LOWEST": {"label": "Делит минимальную цену с другими продавцами", "tone": "info"},
-    "EXACT_BELOW": {"label": "Ниже медианы продавцов", "tone": "danger"},
+    "EXACT_BELOW": {"label": "Ниже медианы продавцов", "tone": "info"},
     "EXACT_IN_MARKET": {"label": "В рыночном диапазоне", "tone": "info"},
     "EXACT_ABOVE": {"label": "Выше медианы продавцов", "tone": "danger"},
     "EXACT_HIGHEST": {"label": "Единственная максимальная цена среди продавцов", "tone": "danger"},
@@ -55,6 +55,9 @@ STATUS_INFO: dict[str, dict[str, str]] = {
     "SEGMENT_ABOVE": {"label": "Архивный сегментный статус", "tone": "neutral"},
     "SEGMENT_HIGHEST": {"label": "Архивный сегментный статус", "tone": "neutral"},
 }
+
+EXACT_PRICE_TOLERANCE_MIN_KZT = 500.0
+EXACT_PRICE_TOLERANCE_RATIO = 0.02
 
 
 
@@ -392,7 +395,10 @@ def exact_offer_position(
     q3 = float(percentile(prices, 0.75) or median)
     lowest = min(reference, key=lambda item: item.price)
     highest = max(reference, key=lambda item: item.price)
-    tolerance = max(500.0, median * 0.02)
+    tolerance = max(
+        EXACT_PRICE_TOLERANCE_MIN_KZT,
+        median * EXACT_PRICE_TOLERANCE_RATIO,
+    )
 
     price_epsilon = 0.01
     same_as_minimum = math.isclose(own, minimum, rel_tol=0.0, abs_tol=price_epsilon)
@@ -406,14 +412,22 @@ def exact_offer_position(
         for price in prices
     ) if same_as_maximum else 1 if own > maximum else 0
 
-    if own < minimum - price_epsilon:
+    if same_as_minimum and same_as_maximum:
+        status = "EXACT_IN_MARKET"
+    elif own < minimum - price_epsilon:
         status = "EXACT_LOWEST"
     elif same_as_minimum:
         status = "EXACT_TIED_LOWEST"
     elif own > maximum + price_epsilon:
-        status = "EXACT_HIGHEST"
+        status = (
+            "EXACT_HIGHEST"
+            if own > median + tolerance else "EXACT_IN_MARKET"
+        )
     elif same_as_maximum:
-        status = "EXACT_TIED_HIGHEST"
+        status = (
+            "EXACT_TIED_HIGHEST"
+            if own > median + tolerance else "EXACT_IN_MARKET"
+        )
     elif own < median - tolerance:
         status = "EXACT_BELOW"
     elif own > median + tolerance:
@@ -523,7 +537,10 @@ def price_position(
     q3 = float(percentile(prices, 0.75) or median)
     lowest = min(reference, key=lambda item: item.price)
     highest = max(reference, key=lambda item: item.price)
-    tolerance = max(500.0, median * 0.02)
+    tolerance = max(
+        EXACT_PRICE_TOLERANCE_MIN_KZT,
+        median * EXACT_PRICE_TOLERANCE_RATIO,
+    )
 
     price_epsilon = 0.01
     same_as_minimum = math.isclose(own, minimum, rel_tol=0.0, abs_tol=price_epsilon)

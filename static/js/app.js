@@ -510,9 +510,10 @@
         'Ссылка на товар','Ссылка на минимум','Ссылка на максимум'
       ];
       const rows=items.map(p=>{
-        const risk=['EXACT_ABOVE','EXACT_HIGHEST','EXACT_TIED_HIGHEST','EXACT_BELOW','DATA_ERROR'].includes(String(p.price_status||''));
+        const priceStatus=String(p.price_status||'');
+        const risk=['EXACT_ABOVE','EXACT_HIGHEST','EXACT_TIED_HIGHEST','DATA_ERROR'].includes(priceStatus);
         const review=['NOT_ANALYZED','INSUFFICIENT_DATA','REVIEW_REQUIRED'].includes(String(p.price_status||''));
-        const opportunity=String(p.price_status||'')==='EXACT_LOWEST'||(String(p.price_status||'')==='EXACT_TIED_LOWEST'&&Number(p.potential_margin_per_unit_kzt||0)>0);
+        const opportunity=priceStatus==='EXACT_BELOW'||(['EXACT_LOWEST','EXACT_TIED_LOWEST'].includes(priceStatus)&&Number(p.potential_margin_per_unit_kzt||0)>0);
         const rank=p.price_rank&&p.price_rank_total?`${p.price_rank} / ${p.price_rank_total}`:'';
         const values=[
           p.product_code,p.title,p.brand,p.model,p.size,p.platform_label||p.platform,p.seller_name,

@@ -62,18 +62,90 @@ def catalog_rows() -> list[dict[str, object]]:
 
 
 class ExactPriceTieTests(unittest.TestCase):
-    def test_equal_minimum_is_tied_not_unique_lowest(self) -> None:
+    def test_all_prices_equal_are_in_market(self) -> None:
         result = exact_offer_position(
             188_600,
             [offer("seller-a", 188_600), offer("seller-b", 188_600)],
             "ok",
         )
 
-        self.assertEqual("EXACT_TIED_LOWEST", result["price_status"])
-        self.assertTrue(result["is_lowest"])
+        self.assertEqual("EXACT_IN_MARKET", result["price_status"])
+        self.assertFalse(result["is_lowest"])
         self.assertFalse(result["is_unique_lowest"])
         self.assertEqual(3, result["lowest_tie_count"])
         self.assertEqual(3, result["price_rank_tie_count"])
+        self.assertEqual(0, result["potential_margin_per_unit_kzt"])
+
+    def test_equal_minimum_below_maximum_is_tied_lowest(self) -> None:
+        result = exact_offer_position(
+            188_600,
+            [offer("seller-a", 188_600), offer("seller-b", 190_000)],
+            "ok",
+        )
+
+        self.assertEqual("EXACT_TIED_LOWEST", result["price_status"])
+        self.assertTrue(result["is_lowest"])
+        self.assertFalse(result["is_unique_lowest"])
+
+    def test_equal_maximum_above_minimum_is_tied_highest(self) -> None:
+        result = exact_offer_position(
+            190_000,
+            [offer("seller-a", 100_000), offer("seller-b", 190_000)],
+            "ok",
+        )
+
+        self.assertEqual("EXACT_TIED_HIGHEST", result["price_status"])
+        self.assertTrue(result["is_highest"])
+        self.assertFalse(result["is_unique_highest"])
+
+    def test_high_side_production_boundaries_respect_tolerance(self) -> None:
+        cases = [
+            ("108065336", 188_600, [188_550, 188_600, 188_600], "EXACT_IN_MARKET"),
+            ("123070844", 52_900, [52_800, 52_900, 52_900], "EXACT_IN_MARKET"),
+            ("12719578", 156_700, [152_590, 156_700, 156_700], "EXACT_IN_MARKET"),
+            ("135745057", 82_000, [81_995, 82_000, 82_000], "EXACT_IN_MARKET"),
+            ("143279516", 105_500, [104_210, 104_210], "EXACT_IN_MARKET"),
+            ("120426914", 32_000, [29_600, 29_750, 32_000], "EXACT_TIED_HIGHEST"),
+            ("132368483", 105_300, [70_000, 78_000, 105_300], "EXACT_TIED_HIGHEST"),
+        ]
+
+        for product_code, own_price, prices, expected in cases:
+            with self.subTest(product_code=product_code):
+                result = exact_offer_position(
+                    own_price,
+                    [
+                        offer(f"seller-{index}", price)
+                        for index, price in enumerate(prices)
+                    ],
+                    "ok",
+                )
+                self.assertEqual(expected, result["price_status"])
+
+    def test_price_within_two_percent_tolerance_is_in_market(self) -> None:
+        result = exact_offer_position(
+            139_490,
+            [
+                offer("seller-a", 130_000),
+                offer("seller-b", 140_245),
+                offer("seller-c", 150_490),
+            ],
+            "ok",
+        )
+
+        self.assertEqual("EXACT_IN_MARKET", result["price_status"])
+
+    def test_price_below_tolerance_is_exact_below_without_safe_potential(self) -> None:
+        result = exact_offer_position(
+            130_000,
+            [
+                offer("seller-a", 120_000),
+                offer("seller-b", 140_000),
+                offer("seller-c", 160_000),
+            ],
+            "ok",
+        )
+
+        self.assertEqual("EXACT_BELOW", result["price_status"])
         self.assertEqual(0, result["potential_margin_per_unit_kzt"])
 
     def test_strictly_lower_price_remains_unique_lowest(self) -> None:
