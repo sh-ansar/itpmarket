@@ -206,6 +206,21 @@ def billing_service() -> BillingService:
     return BILLING
 
 
+def public_invoice_configuration() -> dict[str, Any]:
+    """Return invoice display settings safe for public/client UI."""
+    supplier = billing_service().supplier_settings()
+
+    return {
+        "vat_enabled": bool(
+            supplier.get("vat_enabled")
+        ),
+        "vat_rate": float(
+            supplier.get("vat_rate")
+            or 0
+        ),
+    }
+
+
 def legal_document_service() -> LegalDocumentService:
     """Return legal lifecycle storage bound to the active test/runtime DB."""
     global LEGAL_DOCUMENTS_SERVICE
@@ -252,6 +267,9 @@ def addon_order_public(order: dict[str, Any]) -> dict[str, Any]:
             "number": str(invoice.get("invoice_number") or ""),
             "status": str(invoice.get("status") or ""),
             "due_at": invoice.get("due_at"),
+            "vat_rate": float(invoice.get("vat_rate") or 0),
+            "vat_amount": float(invoice.get("vat_amount") or 0),
+            "total_amount": float(invoice.get("total_amount") or 0),
             "download_url": f"/api/addon-billing/invoices/{invoice_id}/pdf" if invoice_id else "",
         } if invoice_id else None),
         "payment_proof": (dict(order.get("payment_proof") or {}) or None),
@@ -2461,6 +2479,7 @@ def landing() -> Any:
         "landing.html", capabilities=PUBLIC_CAPABILITIES,
         plans=subscription_service().plans(public_only=True), has_users=AUTH.has_users(),
         public_locale=locale,
+        invoice_configuration=public_invoice_configuration(),
     )
 
 
@@ -2500,6 +2519,7 @@ def registration() -> Any:
         "default_workspace_template": default_workspace_template,
         "default_theme": default_workspace_template.get("theme", "system"),
         "subscription_plans": subscription_service().plans(public_only=True),
+        "invoice_configuration": public_invoice_configuration(),
         "selected_plan_code": str(
             request.form.get("plan_code") or request.args.get("plan") or ""
         ),
@@ -4966,7 +4986,10 @@ def api_subscription_addon_request() -> Any:
 @app.get("/api/addon-billing/catalog")
 @permission_required("view_settings")
 def api_addon_billing_catalog() -> Any:
-    return json_ok(addons=addon_billing_service().catalog())
+    return json_ok(
+        addons=addon_billing_service().catalog(),
+        invoice_configuration=public_invoice_configuration(),
+    )
 
 
 @app.get("/api/addon-billing/orders")

@@ -425,8 +425,8 @@
                   {% else %}
                     {{ plan.daily_operation_limit }} runs per day
                   {% endif %}
-                  {% if plan.price_amount > 0 %}
-                    &middot; с учётом НДС 16% Казахстан
+                  {% if plan.price_amount > 0 and invoice_configuration.vat_enabled and invoice_configuration.vat_rate > 0 %}
+                    &middot; с учётом НДС {{ '{:g}'.format(invoice_configuration.vat_rate) }}% Казахстан
                   {% endif %}
                 </small>
               </span>

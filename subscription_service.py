@@ -175,45 +175,28 @@ class SubscriptionService:
         ).strip().casefold()
 
         if plan_code == "trial":
-            value[
-                "billing_period_unit"
-            ] = "day"
-
-            value[
-                "billing_period_count"
-            ] = int(
+            value["billing_period_unit"] = "day"
+            value["billing_period_count"] = int(
                 value.get("term_days")
                 or 3
             )
-
-        elif plan_code in {
-            "starter",
-            "growth",
-            "business",
-        }:
-            value[
-                "billing_period_unit"
-            ] = "month"
-
-            value[
-                "billing_period_count"
-            ] = 1
-
-        else:
-            # Compatibility contract for legacy/custom plans.
-            # Commercial defaults above no longer expose
-            # "30 days" as their billing period.
-            value[
-                "billing_period_unit"
-            ] = "day"
-
-            value[
-                "billing_period_count"
-            ] = int(
+        elif plan_code == "legacy":
+            value["billing_period_unit"] = "day"
+            value["billing_period_count"] = int(
                 value.get("term_days")
-                or 0
+                or 36500
+            )
+        else:
+            compatibility_days = int(
+                value.get("term_days")
+                or 30
             )
 
+            value["billing_period_unit"] = "month"
+            value["billing_period_count"] = max(
+                1,
+                (compatibility_days + 29) // 30,
+            )
         return value
 
     def ensure_seed_data(self) -> None:
@@ -358,9 +341,53 @@ class SubscriptionService:
         if len(name) < 2:
             raise SubscriptionError("Укажите название пакета.")
         price = float(payload.get("price_amount") or 0)
-        term_days = int(payload.get("term_days") or 30)
-        if price < 0 or not 1 <= term_days <= 3650:
-            raise SubscriptionError("Проверьте цену и срок пакета.")
+
+        if price < 0:
+            raise SubscriptionError(
+                "\u0426\u0435\u043d\u0430 \u0442\u0430\u0440\u0438\u0444\u0430 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043e\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0439."
+            )
+
+        if code == "trial":
+            term_days = int(
+                payload.get("term_days")
+                or 3
+            )
+
+            if not 1 <= term_days <= 365:
+                raise SubscriptionError(
+                    "\u0421\u0440\u043e\u043a Trial \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u043e\u0442 1 \u0434\u043e 365 \u0434\u043d\u0435\u0439."
+                )
+        else:
+            raw_months = payload.get(
+                "billing_period_months"
+            )
+
+            if raw_months in (None, ""):
+                old_days = int(
+                    payload.get("term_days")
+                    or 30
+                )
+                raw_months = max(
+                    1,
+                    (old_days + 29) // 30,
+                )
+
+            try:
+                billing_period_months = int(
+                    raw_months
+                )
+            except (TypeError, ValueError):
+                raise SubscriptionError(
+                    "\u0421\u0440\u043e\u043a \u0442\u0430\u0440\u0438\u0444\u0430 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c \u043c\u0435\u0441\u044f\u0446\u0435\u0432."
+                )
+
+            if not 1 <= billing_period_months <= 120:
+                raise SubscriptionError(
+                    "\u0421\u0440\u043e\u043a \u0442\u0430\u0440\u0438\u0444\u0430 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u043e\u0442 1 \u0434\u043e 120 \u043c\u0435\u0441\u044f\u0446\u0435\u0432."
+                )
+
+            # Compatibility storage for the existing schema.
+            term_days = billing_period_months * 30
         daily_limit = _optional_limit(payload.get("daily_operation_limit"), maximum=100000)
         position_limit = _optional_limit(payload.get("position_limit"))
         stamp = now_iso()

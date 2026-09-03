@@ -2565,6 +2565,15 @@ class BillingService:
                 proof_value,
             "supplier_ready":
                 ready,
+            "invoice_configuration": {
+                "vat_enabled": bool(
+                    supplier.get("vat_enabled")
+                ),
+                "vat_rate": float(
+                    supplier.get("vat_rate")
+                    or 0
+                ),
+            },
             "can_issue":
                 can_issue,
         }
