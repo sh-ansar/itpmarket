@@ -64,6 +64,109 @@ class ProductSqlPaginationTests(unittest.TestCase):
             for call in product.call_args_list
         ])
 
+    def test_kaspi_targeted_detail_matches_list_analytics_and_isolates_seller(self) -> None:
+        stamp = "2026-09-03T12:00:00+00:00"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            seller_a = int(conn.execute(
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,
+                       source_url,status,approval_status,created_at,updated_at
+                   ) VALUES(?,'kaspi','seller-a','Seller A','https://kaspi.kz/a',
+                            'active','approved',?,?)""",
+                (self.tenant_id, stamp, stamp),
+            ).lastrowid)
+            seller_b = int(conn.execute(
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,
+                       source_url,status,approval_status,created_at,updated_at
+                   ) VALUES(?,'kaspi','seller-b','Seller B','https://kaspi.kz/b',
+                            'active','approved',?,?)""",
+                (self.tenant_id, stamp, stamp),
+            ).lastrowid)
+            conn.executemany(
+                """INSERT INTO tenant_seller_catalog_products(
+                       tenant_id,marketplace_code,tenant_seller_id,
+                       source_product_code,title,brand,source_url,price_amount,
+                       currency,active,first_seen_at,last_seen_at,source_updated_at
+                   ) VALUES(?,'kaspi',?,'120426914','Kaspi product','Brand',
+                            'https://kaspi.kz/shop/p/120426914',?,'KZT',1,?,?,?)""",
+                [
+                    (self.tenant_id, seller_a, 32_000, stamp, stamp, stamp),
+                    (self.tenant_id, seller_b, 999_000, stamp, stamp, stamp),
+                ],
+            )
+            conn.executemany(
+                """INSERT INTO tenant_seller_offer_scans(
+                       tenant_id,marketplace_code,tenant_seller_id,
+                       source_product_code,status,offers_count,competitor_count,
+                       min_price,max_price,duration_seconds,error,checked_at
+                   ) VALUES(?,'kaspi',?,'120426914','ok',?,?,?,?,0.1,'',?)""",
+                [
+                    (self.tenant_id, seller_a, 5, 4, 29_600, 32_000, stamp),
+                    (self.tenant_id, seller_b, 3, 2, 1, 999_000, stamp),
+                ],
+            )
+            offers = [
+                ("own-a", "Seller A", 32_000, 1),
+                ("competitor-a", "Competitor A", 29_600, 0),
+                ("competitor-b", "Competitor B", 29_600, 0),
+                ("competitor-c", "Competitor C", 29_900, 0),
+                ("competitor-d", "Competitor D", 32_000, 0),
+            ]
+            other_seller_offers = [
+                ("own-b", "Seller B", 999_000, 1),
+                ("other-a", "Other A", 1, 0),
+                ("other-b", "Other B", 2, 0),
+            ]
+            conn.executemany(
+                """INSERT INTO tenant_seller_offer_snapshots(
+                       run_id,tenant_id,marketplace_code,tenant_seller_id,
+                       source_product_code,merchant_id,merchant_name,
+                       price_amount,currency,is_own,captured_at
+                   ) VALUES('run-a',?,'kaspi',?,'120426914',?,?,?,'KZT',?,?)""",
+                [
+                    (self.tenant_id, seller_a, merchant_id, merchant_name, price, is_own, stamp)
+                    for merchant_id, merchant_name, price, is_own in offers
+                ],
+            )
+            conn.executemany(
+                """INSERT INTO tenant_seller_offer_snapshots(
+                       run_id,tenant_id,marketplace_code,tenant_seller_id,
+                       source_product_code,merchant_id,merchant_name,
+                       price_amount,currency,is_own,captured_at
+                   ) VALUES('run-b',?,'kaspi',?,'120426914',?,?,?,'KZT',?,?)""",
+                [
+                    (self.tenant_id, seller_b, merchant_id, merchant_name, price, is_own, stamp)
+                    for merchant_id, merchant_name, price, is_own in other_seller_offers
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        item = self.data.targeted_product(
+            f"kaspi:s{seller_a}:120426914",
+            self.user_id,
+        )
+
+        list_analytics = {
+            "reference_count": 4,
+            "market_min_price_kzt": 29_600,
+            "market_median_price_kzt": 29_750,
+            "market_max_price_kzt": 32_000,
+            "price_status": "EXACT_TIED_HIGHEST",
+        }
+        self.assertIsNotNone(item)
+        for key, value in list_analytics.items():
+            self.assertEqual(value, item[key])
+        self.assertEqual(5, len(item["offers"]))
+        self.assertEqual(4, len(item["candidates"]))
+        self.assertEqual(
+            {seller_a},
+            {int(offer["tenant_seller_id"]) for offer in item["offers"]},
+        )
+
     def test_targeted_drawer_reports_targeted_for_every_marketplace_family(self) -> None:
         stamp = "2026-09-01T12:00:00+00:00"
         families = {

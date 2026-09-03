@@ -436,6 +436,115 @@ class DataService:
         result.sort(key=lambda item: (item.price, item.title.casefold()))
         return result
 
+    def _tenant_seller_kaspi_detail_analytics(
+        self,
+        tenant_id: int,
+        tenant_seller_id: int,
+        product: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        source_code = str(product.get("source_product_code") or "")
+        conn = self._connect()
+        try:
+            scan_row = conn.execute(
+                """SELECT status,offers_count,competitor_count,checked_at
+                   FROM tenant_seller_offer_scans
+                   WHERE tenant_id=? AND marketplace_code='kaspi'
+                     AND tenant_seller_id=? AND source_product_code=?""",
+                (int(tenant_id), int(tenant_seller_id), source_code),
+            ).fetchone()
+            if not scan_row:
+                return None
+            scan = dict(scan_row)
+            offers = [
+                dict(row)
+                for row in conn.execute(
+                    """SELECT id,run_id,tenant_id,marketplace_code,
+                              tenant_seller_id,source_product_code,merchant_id,
+                              merchant_name,merchant_sku,price_amount,currency,
+                              merchant_rating,merchant_reviews,is_own,captured_at
+                       FROM tenant_seller_offer_snapshots
+                       WHERE tenant_id=? AND marketplace_code='kaspi'
+                         AND tenant_seller_id=? AND source_product_code=?
+                         AND captured_at=?
+                       ORDER BY is_own DESC,price_amount,merchant_name,id""",
+                    (
+                        int(tenant_id),
+                        int(tenant_seller_id),
+                        source_code,
+                        str(scan.get("checked_at") or ""),
+                    ),
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+        product_url = str(product.get("product_url") or "")
+        competitors = [
+            Candidate(
+                code=str(
+                    offer.get("merchant_id")
+                    or offer.get("merchant_name")
+                    or f"snapshot-{offer.get('id')}"
+                ),
+                title=str(offer.get("merchant_name") or ""),
+                url=product_url,
+                price=float(offer.get("price_amount") or 0),
+                brand=str(product.get("brand") or ""),
+                tier="SAME_PRODUCT_CARD",
+                model=str(product.get("title") or ""),
+                score=100.0,
+                relation="KASPI_SAME_CARD",
+                reasons=[
+                    "same_product_code",
+                    f"product_code={source_code}",
+                    "different_seller",
+                ],
+            )
+            for offer in offers
+            if not int(offer.get("is_own") or 0)
+            and float(offer.get("price_amount") or 0) > 0
+        ]
+        own_price = product.get("own_price_kzt")
+        if own_price is None:
+            own_price = product.get("price_kzt")
+        position = exact_offer_position(
+            own_price,
+            competitors,
+            str(scan.get("status") or ""),
+        )
+        status = str(position.get("price_status") or "NOT_ANALYZED")
+        info = STATUS_INFO.get(status, STATUS_INFO["NOT_ANALYZED"])
+        public_offers = [
+            {
+                **offer,
+                "price_kzt": offer.get("price_amount"),
+                "is_own": bool(offer.get("is_own")),
+                "product_url": product_url,
+                "match_method": "KASPI_PRODUCT_CODE",
+                "match_method_label": "Та же карточка Kaspi",
+            }
+            for offer in offers
+        ]
+        return {
+            **position,
+            "price_status": status,
+            "raw_price_status": status,
+            "status_label": info["label"],
+            "status_tone": info["tone"],
+            "candidate_count": int(position.get("reference_count") or 0),
+            "exact_offer_count": int(scan.get("offers_count") or 0),
+            "competitor_seller_count": int(
+                position.get("reference_count") or 0
+            ),
+            "exact_offer_status": str(scan.get("status") or ""),
+            "exact_offer_checked_at": scan.get("checked_at"),
+            "analytics_updated_at": scan.get("checked_at"),
+            "candidates": [
+                offer for offer in public_offers if not offer["is_own"]
+            ],
+            "offers": public_offers,
+        }
+
     def _kaspi_rows(
         self,
         product_codes: list[str] | None = None,
@@ -3177,6 +3286,15 @@ class DataService:
         if base is not None:
             result = self.product(code, user_id, rows=[base])
             if result is not None:
+                tenant_seller_id = int(base.get("tenant_seller_id") or 0)
+                if platform == "kaspi" and tenant_seller_id:
+                    analytics = self._tenant_seller_kaspi_detail_analytics(
+                        int(tenant_id),
+                        tenant_seller_id,
+                        result,
+                    )
+                    if analytics is not None:
+                        result.update(analytics)
                 result["lookup_strategy"] = "targeted"
             return result
         # A populated tenant projection is authoritative for its marketplace.
