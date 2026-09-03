@@ -318,83 +318,7 @@
         </div>
       </section>
 
-      <!-- STEP 2: MARKETPLACES -->
-      <section
-        class="wizard-section"
-        data-registration-step
-        data-step-code="marketplaces"
-        data-step-title-key="register_marketplaces_title"
-        hidden
-      >
-        <div class="section-head">
-          <div>
-            <span
-              class="eyebrow"
-              data-pi18n="register_step_marketplaces"
-            >MARKETPLACES</span>
-
-            <div class="required-section-title">
-              <h2 data-pi18n="register_marketplaces_title">
-                Select marketplaces
-              </h2>
-              <span aria-hidden="true">*</span>
-            </div>
-          </div>
-
-          <p data-pi18n="register_marketplaces_hint">
-            Select at least one marketplace.
-          </p>
-        </div>
-
-        <fieldset
-          class="integration-selector"
-          id="registrationMarketplaces"
-        >
-          <legend
-            class="sr-only"
-            data-pi18n="register_marketplaces_title"
-          >
-            Select marketplaces
-          </legend>
-
-          <div class="integration-grid">
-            {% for item in public_integrations %}
-            <label class="integration-card available">
-              <input
-                type="checkbox"
-                name="marketplaces"
-                value="{{ item.code }}"
-                {% if item.code in selected_marketplaces %}checked{% endif %}
-              >
-
-              <span class="integration-body">
-                <span class="integration-head">
-                  <strong>{{ item.name }}</strong>
-                  <span
-                    class="integration-status"
-                    data-pi18n="marketplace_requested"
-                  >Select</span>
-                </span>
-
-                <span class="integration-description">
-                  {{ item.description }}
-                </span>
-              </span>
-            </label>
-            {% endfor %}
-          </div>
-
-          <small
-            class="marketplace-selection-error"
-            id="marketplaceSelectionError"
-            data-pi18n="register_marketplaces_required"
-          >
-            Select at least one marketplace.
-          </small>
-        </fieldset>
-      </section>
-
-      <!-- STEP 3: PLAN -->
+      <!-- STEP 2: PLAN -->
       <section
         class="wizard-section"
         data-registration-step
@@ -434,7 +358,6 @@
             Enter the estimated number of products first.
           </span>
 
-          <small id="planMarketplaceSummary"></small>
         </div>
 
         <fieldset
@@ -504,7 +427,7 @@
         </fieldset>
       </section>
 
-      <!-- STEP 4: ACCOUNT -->
+      <!-- STEP 3: ACCOUNT -->
       <section
         class="wizard-section"
         data-registration-step
@@ -646,7 +569,7 @@
         >
           <small>
             <span id="registrationStepNumber">
-              Step 1 of 4
+              Step 1 of 3
             </span>
             &middot;
             <span

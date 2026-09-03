@@ -22,13 +22,6 @@
   var status = document.getElementById("registrationStepStatus");
   var progress = document.getElementById("registrationProgressBar");
 
-  var marketplaceBox = document.getElementById(
-    "registrationMarketplaces"
-  );
-  var marketplaceError = document.getElementById(
-    "marketplaceSelectionError"
-  );
-
   var productsInput = document.getElementById(
     "registrationProducts"
   );
@@ -36,10 +29,6 @@
   var recommendation = document.getElementById(
     "planRecommendationText"
   );
-  var marketplaceSummary = document.getElementById(
-    "planMarketplaceSummary"
-  );
-
   var emailInput = document.getElementById("registrationEmail");
   var accountEmail = document.getElementById(
     "registrationAccountEmail"
@@ -218,29 +207,6 @@
     });
   }
 
-  function marketplaceValid() {
-    if (!marketplaceBox) {
-      return true;
-    }
-
-    var valid = Boolean(
-      marketplaceBox.querySelector(
-        'input[name="marketplaces"]:checked'
-      )
-    );
-
-    marketplaceBox.classList.toggle(
-      "invalid",
-      !valid
-    );
-
-    if (marketplaceError) {
-      marketplaceError.hidden = valid;
-    }
-
-    return valid;
-  }
-
   function refreshPasswordValidation() {
     if (!password || !passwordConfirm) {
       return;
@@ -263,17 +229,6 @@
 
   function invalidControlFor(index) {
     var section = sections[index];
-
-    if (
-      section.dataset.stepCode === "marketplaces" &&
-      !marketplaceValid()
-    ) {
-      return (
-        section.querySelector(
-          'input[name="marketplaces"]'
-        ) || section
-      );
-    }
 
     refreshPasswordValidation();
 
@@ -391,16 +346,6 @@
     });
   }
 
-  function selectedMarketplaceCount() {
-    if (!marketplaceBox) {
-      return 0;
-    }
-
-    return marketplaceBox.querySelectorAll(
-      'input[name="marketplaces"]:checked'
-    ).length;
-  }
-
   function updateRecommendation() {
     var products = Number(
       productsInput ? productsInput.value : 0
@@ -424,10 +369,6 @@
           "register_plan_recommendation_wait",
           "Enter the estimated number of products."
         );
-      }
-
-      if (marketplaceSummary) {
-        marketplaceSummary.textContent = "";
       }
 
       return;
@@ -496,17 +437,6 @@
       }
     }
 
-    if (marketplaceSummary) {
-      marketplaceSummary.textContent = interpolate(
-        tr(
-          "register_plan_per_marketplace",
-          "{count} marketplaces - the limit applies separately to each."
-        ),
-        {
-          count: selectedMarketplaceCount(),
-        }
-      );
-    }
   }
 
   function refreshLocale() {
@@ -633,16 +563,6 @@
         if (validateStep(current)) {
           go(current + 1);
         }
-      }
-    );
-  }
-
-  if (marketplaceBox) {
-    marketplaceBox.addEventListener(
-      "change",
-      function () {
-        marketplaceValid();
-        updateRecommendation();
       }
     );
   }
@@ -801,7 +721,6 @@
 
   syncEmail();
   syncAddress();
-  marketplaceValid();
   updateRecommendation();
   refreshLocale();
 

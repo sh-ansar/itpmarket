@@ -25,9 +25,9 @@ class RegistrationWizardUiTests(unittest.TestCase):
             / "registration_guide.css"
         ).read_text(encoding="utf-8")
 
-    def test_registration_has_exactly_four_real_steps(self) -> None:
+    def test_registration_has_company_plan_and_account_steps_only(self) -> None:
         self.assertEqual(
-            4,
+            3,
             self.template.count(
                 "data-registration-step"
             ),
@@ -36,9 +36,6 @@ class RegistrationWizardUiTests(unittest.TestCase):
         company = self.template.index(
             'data-step-code="company"'
         )
-        marketplaces = self.template.index(
-            'data-step-code="marketplaces"'
-        )
         plan = self.template.index(
             'data-step-code="plan"'
         )
@@ -46,8 +43,9 @@ class RegistrationWizardUiTests(unittest.TestCase):
             'data-step-code="account"'
         )
 
-        self.assertLess(company, marketplaces)
-        self.assertLess(marketplaces, plan)
+        self.assertNotIn('data-step-code="marketplaces"', self.template)
+        self.assertNotIn('name="marketplaces"', self.template)
+        self.assertLess(company, plan)
         self.assertLess(plan, account)
 
     def test_required_and_optional_ui_contract(self) -> None:
@@ -111,14 +109,9 @@ class RegistrationWizardUiTests(unittest.TestCase):
             "is-recommended",
             self.script,
         )
-        self.assertIn(
-            "selectedMarketplaceCount",
-            self.script,
-        )
-        self.assertIn(
-            "register_plan_per_marketplace",
-            self.script,
-        )
+        self.assertNotIn("selectedMarketplaceCount", self.script)
+        self.assertNotIn("marketplaceValid", self.script)
+        self.assertIn("!planTouched", self.script)
 
     def test_wizard_submits_only_after_all_steps_validate(self) -> None:
         self.assertIn(
@@ -155,7 +148,6 @@ class RegistrationWizardUiTests(unittest.TestCase):
             "register_plan_recommendation_wait",
             "register_plan_recommendation_fit",
             "register_plan_recommendation_extra",
-            "register_plan_per_marketplace",
             "register_recommended_badge",
             "register_account_email",
             "register_account_email_hint",

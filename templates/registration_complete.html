@@ -86,8 +86,7 @@
         </h1>
 
         <p data-pi18n="completion_intro">
-          Our team will review the company information,
-          selected marketplaces and subscription plan.
+          The account and selected plan have been saved.
         </p>
 
         <div class="completion-details">
@@ -156,26 +155,6 @@
             </strong>
           </div>
 
-        </div>
-
-        <div class="completion-marketplaces">
-          <span
-            class="completion-section-label"
-            data-pi18n="completion_marketplaces"
-          >
-            Requested marketplaces
-          </span>
-
-          <div class="completion-badges">
-            {% for marketplace in result.marketplaces %}
-              <span
-                class="completion-badge"
-                data-marketplace-code="{{ marketplace.code }}"
-              >
-                {{ marketplace.name }}
-              </span>
-            {% endfor %}
-          </div>
         </div>
 
         <section

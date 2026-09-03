@@ -63,17 +63,18 @@
     const approval=item.approval_status||'draft';
     const activeSellers=(item.sellers||[]).filter(seller=>seller.status==='active'&&seller.approval_status==='approved');
     const sellerBlocks=activeSellers.length ? `<div class="marketplace-source-list">${activeSellers.map(seller=>`<div class="marketplace-discovery-note"><strong>${esc(seller.display_name||seller.external_seller_id)}</strong><br><a href="${esc(seller.source_url)}" target="_blank" rel="noreferrer">${esc(seller.source_url)}</a>${canManage?`<div class="marketplace-source-actions"><button type="button" class="marketplace-source-action marketplace-source-action--replace" data-marketplace-replace data-seller-id="${Number(seller.id)}">Заменить источник</button><button type="button" class="marketplace-source-action marketplace-source-action--remove" data-marketplace-remove data-seller-id="${Number(seller.id)}">Удалить источник</button></div>`:''}</div>`).join('')}</div>` : '';
-    const statusText=item.is_connected?t('marketplace_connected','Подключено'):approval==='pending'?'Ожидает подтверждения':approval==='rejected'?'Отклонено — можно отправить заново':t('marketplace_not_connected','Не подключено');
+    const statusText=item.is_connected?t('marketplace_connected','Подключено'):approval==='pending'?'Источник требует повторной проверки':approval==='rejected'?'Отклонено — можно отправить заново':t('marketplace_not_connected','Не подключено');
     return `<article class="settings-card tenant-marketplace-card ${item.is_connected ? 'connected' : ''}" data-marketplace-code="${esc(item.code)}">
       <div class="marketplace-card-head"><div><h3>${esc(item.name)}</h3></div><span class="marketplace-approval ${esc(approval)}">${esc(statusText)}</span></div>
       <p>${esc(item.description || '')}</p>
       ${item.is_connected || activeSellers.length ? sellerBlocks : canManage ? `
-        ${approval==='pending'?`<div class="marketplace-discovery-note"><strong>${esc(item.seller_name||item.seller_identifier)}</strong><br>Заявка отправлена супер-администратору. После подтверждения площадка появится в каталоге и операциях.</div>`:''}
+        ${approval==='pending'?`<div class="marketplace-discovery-note"><strong>${esc(item.seller_name||item.seller_identifier)}</strong><br>Источник требует повторной проверки. Выполните распознавание и подтвердите подключение ещё раз.</div>`:''}
         ${approval==='rejected'&&item.review_note?`<div class="marketplace-limitation">Причина: ${esc(item.review_note)}</div>`:''}
         <label>${esc(t('marketplace_source_input','Ссылка, ID продавца или slug'))}<input data-marketplace-source type="text" required value="${esc(result?.source_input || result?.seller_url || '')}" placeholder="${esc(item.connection_fields?.[0]?.placeholder || 'Ссылка или ID продавца')}"></label>
         ${item.source_examples?.length ? `<small class="marketplace-source-examples">${esc(t('marketplace_source_examples','Примеры'))}: ${esc(item.source_examples.join(' · '))}</small>` : ''}
         <div class="settings-inline-actions"><button type="button" class="secondary" data-marketplace-check>${esc(t('marketplace_check_source','Распознать'))}</button></div>
-        ${result ? `<div class="marketplace-discovery-note"><strong>${esc(result.marketplace_name)}</strong><br>${esc(result.source_scope === 'product' ? t('marketplace_product_found','Найдена карточка товара') : t('marketplace_seller_found','Найден продавец'))}: ${esc(result.seller_name)}<br><small>ID: ${esc(result.seller_identifier)}${result.product_id ? ` · productId: ${esc(result.product_id)}` : ''}</small><br><a href="${esc(result.seller_url)}" target="_blank" rel="noreferrer">${esc(result.seller_url)}</a><div class="settings-inline-actions"><button type="button" class="primary" data-marketplace-connect>${esc(t('marketplace_confirm_connect','Подтвердить подключение'))}</button></div></div>` : ''}
+        <div class="marketplace-discovery-note" data-marketplace-check-status hidden></div>
+        ${result ? `<div class="marketplace-discovery-note"><strong>${esc(result.verified && (item.code==='ozon'||item.code==='ozon_kz') ? 'Магазин подтверждён' : result.marketplace_name)}</strong><br>${esc(result.source_scope === 'product' ? t('marketplace_product_found','Найдена карточка товара') : t('marketplace_seller_found','Найден продавец'))}: ${esc(result.seller_name)}<br><small>ID: ${esc(result.seller_identifier)}${result.product_id ? ` · productId: ${esc(result.product_id)}` : ''}</small><br><a href="${esc(result.seller_url)}" target="_blank" rel="noreferrer">${esc(result.seller_url)}</a><div class="settings-inline-actions"><button type="button" class="primary" data-marketplace-connect>${esc(t('marketplace_confirm_connect','Подтвердить подключение'))}</button></div></div>` : ''}
       ` : `<div class="marketplace-limitation">${esc(t('marketplace_not_connected','Не подключено'))}</div>`}
     </article>`;
   }
@@ -92,17 +93,28 @@
     const code = cardNode.dataset.marketplaceCode;
     const marketplace = marketplaces.find(item => item.code === code);
     const source = cardNode.querySelector('[data-marketplace-source]')?.value.trim() || checked.get(code)?.source_input || checked.get(code)?.seller_url || '';
+    const isCheck = button.matches('[data-marketplace-check]');
+    const isOzon = code === 'ozon' || code === 'ozon_kz';
+    const checkStatus = cardNode.querySelector('[data-marketplace-check-status]');
+    const idleButtonText = button.textContent;
     button.disabled = true;
+    if (isCheck && isOzon) {
+      button.textContent = 'Проверяем магазин…';
+      if (checkStatus) {
+        checkStatus.textContent = 'Проверяем магазин Ozon. Это может занять несколько секунд.';
+        checkStatus.hidden = false;
+      }
+    }
     try {
-      if (button.matches('[data-marketplace-check]')) {
+      if (isCheck) {
         const data = await request('/api/tenant/marketplaces/check', {method:'POST', body:{marketplace_code:code, source}});
         checked.set(code, data.result);
-        notify(t('marketplace_url_verified','Ссылка проверена. Подтвердите подключение.'));
+        notify(isOzon ? 'Магазин подтверждён. Подтвердите подключение.' : t('marketplace_url_verified','Ссылка проверена. Подтвердите подключение.'));
       } else if (button.matches('[data-marketplace-connect]')) {
-        const data = await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source}});
+        const data = await request('/api/tenant/marketplaces/connect', {method:'POST', body:{marketplace_code:code, source, verification_proof:checked.get(code)?.verification_proof || ''}});
         checked.delete(code);
         render(data.marketplace_access);
-        notify('Заявка на подключение отправлена супер-администратору.');
+        notify(t('marketplace_connected','Магазин подключён.'));
       } else if (button.matches('[data-marketplace-replace]')) {
         const seller=(marketplace?.sellers||[]).find(item=>Number(item.id)===Number(button.dataset.sellerId));
         if (seller) openSourceModal('replace', marketplace, seller);
@@ -111,7 +123,14 @@
         if (seller) openSourceModal('remove', marketplace, seller);
       }
       if (!button.matches('[data-marketplace-replace],[data-marketplace-remove],[data-marketplace-connect]')) await load();
-    } catch (error) { notify(error.message, true); button.disabled = false; }
+    } catch (error) {
+      notify(error.message, true);
+      button.disabled = false;
+      if (isCheck && isOzon) {
+        button.textContent = idleButtonText;
+        if (checkStatus) checkStatus.hidden = true;
+      }
+    }
   });
 
   modal?.addEventListener('click', event => {

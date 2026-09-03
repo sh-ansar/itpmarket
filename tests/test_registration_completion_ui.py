@@ -71,21 +71,14 @@ class RegistrationCompletionUiTests(unittest.TestCase):
             template,
         )
 
-    def test_completion_displays_selected_plan_and_marketplaces(self) -> None:
+    def test_completion_displays_selected_plan_without_registration_marketplaces(self) -> None:
         self.assertIn(
             "data-plan-code=",
             self.template,
         )
 
-        self.assertIn(
-            "data-marketplace-code=",
-            self.template,
-        )
-
-        self.assertIn(
-            "result.marketplaces",
-            self.template,
-        )
+        self.assertNotIn("data-marketplace-code=", self.template)
+        self.assertNotIn("result.marketplaces", self.template)
 
     def test_completion_displays_account_email(self) -> None:
         self.assertIn(

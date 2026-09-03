@@ -2496,11 +2496,8 @@ def registration() -> Any:
     template_data = {
         "public_capabilities": PUBLIC_CAPABILITIES,
         "workspace_templates": workspace_templates,
-        "public_integrations": SAAS.public_integrations(),
         "default_workspace_template_code": default_workspace_template_code,
         "default_workspace_template": default_workspace_template,
-        "default_marketplaces": default_workspace_template.get("recommended_integrations", []),
-        "selected_marketplaces": request.form.getlist("marketplaces") if request.method == "POST" else [],
         "default_theme": default_workspace_template.get("theme", "system"),
         "subscription_plans": subscription_service().plans(public_only=True),
         "selected_plan_code": str(
@@ -2589,7 +2586,6 @@ def registration() -> Any:
                 "",
             ),
             "capabilities": request.form.getlist("capabilities"),
-            "marketplaces": request.form.getlist("marketplaces"),
             "estimated_products": request.form.get("estimated_products", "0"),
             "comment": request.form.get("comment", ""),
             "privacy_consent": request.form.get("privacy_consent") == "1",
@@ -2633,7 +2629,6 @@ def registration() -> Any:
                     request_id,
                     None,
                     "approved",
-                    grant_marketplaces=False,
                     conn=registration_conn,
                     commit=False,
                 )
@@ -2685,40 +2680,11 @@ def registration() -> Any:
                 {},
             )
 
-            marketplace_names = {
-                str(
-                    item.get("code") or ""
-                ): str(
-                    item.get("name")
-                    or item.get("code")
-                    or ""
-                )
-                for item in template_data[
-                    "public_integrations"
-                ]
-            }
-
-            selected_marketplaces = [
-                {
-                    "code": str(code),
-                    "name": marketplace_names.get(
-                        str(code),
-                        str(code),
-                    ),
-                }
-                for code in profile.get(
-                    "selected_integrations",
-                    [],
-                )
-            ]
-
             completion_result.update(
                 {
                     "subscription_request":
                         subscription_request,
                     "plan": selected_plan,
-                    "marketplaces":
-                        selected_marketplaces,
                     "payment_required": (
                         str(
                             selected_plan.get("code")
@@ -4251,9 +4217,10 @@ def api_tenant_marketplace_check() -> Any:
     user = current_user() or {}
     payload = json_payload()
     try:
-        result = SAAS.detect_marketplace_url(
+        result = SAAS.check_marketplace_source(
             int(user["tenant_id"]),
             str(payload.get("source") or payload.get("seller_url") or payload.get("url") or ""),
+            int(user["id"]),
             str(payload.get("marketplace_code") or ""),
         )
         return json_ok(result=result)
@@ -4274,6 +4241,7 @@ def api_tenant_marketplace_connect() -> Any:
             str(payload.get("source") or payload.get("seller_url") or payload.get("url") or ""),
             int(user["id"]),
             str(payload.get("marketplace_code") or ""),
+            str(payload.get("verification_proof") or ""),
         )
         DATA.invalidate()
         return json_ok(

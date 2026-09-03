@@ -12,6 +12,7 @@ os.environ["ITP_DISABLE_SCHEDULER"] = "1"
 
 import app as webapp
 from auth_service import AuthService
+from ozon_source_verification import OzonSourceVerificationError
 from saas_service import SaaSService
 from schema import ensure_database
 
@@ -78,37 +79,46 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         self.assertTrue(next(item for item in access if item["code"] == "ozon_kz")["is_allowed"])
 
         self.login(int(self.company_admin["id"]))
-        checked = self.client.post(
-            "/api/tenant/marketplaces/check",
-            json={"marketplace_code": "ozon_kz", "source": "company-b-90210"},
-            headers=self.headers,
-        )
-        self.assertEqual(200, checked.status_code)
-        self.assertEqual("ozon_kz", checked.get_json()["result"]["marketplace_code"])
-        self.assertEqual(
-            "https://ozon.kz/seller/company-b-90210/",
-            checked.get_json()["result"]["seller_url"],
-        )
-        connected = self.client.post(
-            "/api/tenant/marketplaces/connect",
-            json={"marketplace_code": "ozon_kz", "source": "company-b-90210"},
-            headers=self.headers,
-        )
-        self.assertEqual(200, connected.status_code)
-        self.assertFalse(connected.get_json()["result"]["is_connected"])
-        self.assertEqual("pending", connected.get_json()["result"]["approval_status"])
-
-        self.login(int(self.root["id"]))
         with patch("saas_service.verify_ozon_storefront", return_value={
             "canonical_seller_id": "company-b-90210",
             "canonical_seller_url": "https://ozon.kz/seller/company-b-90210/",
             "seller_name": "Company B", "catalogue_empty": "false",
-        }):
-            reviewed = self.client.post(
-                f"/api/platform/tenants/{self.tenant_b}/marketplaces/ozon_kz/approved",
-                json={}, headers=self.headers,
+        }) as verifier:
+            checked = self.client.post(
+                "/api/tenant/marketplaces/check",
+                json={"marketplace_code": "ozon_kz", "source": "company-b-90210"},
+                headers=self.headers,
             )
-        self.assertEqual(200, reviewed.status_code)
+            proof = checked.get_json()["result"]["verification_proof"]
+            connected = self.client.post(
+                "/api/tenant/marketplaces/connect",
+                json={
+                    "marketplace_code": "ozon_kz",
+                    "source": "company-b-90210",
+                    "verification_proof": proof,
+                },
+                headers=self.headers,
+            )
+        self.assertEqual(200, checked.status_code)
+        checked_result = checked.get_json()["result"]
+        self.assertEqual("verified", checked_result["verification_state"])
+        self.assertTrue(checked_result["verified"])
+        self.assertEqual("ozon_kz", checked_result["marketplace_code"])
+        self.assertEqual("company-b-90210", checked_result["seller_identifier"])
+        self.assertEqual("Company B", checked_result["seller_name"])
+        self.assertEqual(
+            "https://ozon.kz/seller/company-b-90210/",
+            checked_result["seller_url"],
+        )
+        self.assertTrue(proof)
+        verifier.assert_called_once_with(
+            "ozon_kz", "https://ozon.kz/seller/company-b-90210/"
+        )
+        self.assertEqual(200, connected.status_code)
+        self.assertTrue(connected.get_json()["result"]["is_connected"])
+        self.assertEqual("approved", connected.get_json()["result"]["approval_status"])
+
+        self.login(int(self.root["id"]))
         detail = self.client.get(f"/api/platform/tenants/{self.tenant_b}/detail")
         self.assertEqual(200, detail.status_code)
         detail_data = detail.get_json()
@@ -142,34 +152,109 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         )
         self.assertEqual(404, wrong_tenant.status_code)
 
-    def test_rejected_marketplace_can_be_resubmitted_and_approved(self) -> None:
+    def test_failed_ozon_verification_can_be_retried_without_admin_approval(self) -> None:
         self.login(int(self.root["id"]))
         self.client.put(
             f"/api/platform/tenants/{self.tenant_b}/marketplaces",
             json={"marketplaces": ["ozon_kz"]}, headers=self.headers,
         )
         self.login(int(self.company_admin["id"]))
-        submitted = self.client.post(
-            "/api/tenant/marketplaces/connect",
-            json={"marketplace_code": "ozon_kz", "source": "store-first-101"},
-            headers=self.headers,
+        with patch(
+            "saas_service.verify_ozon_storefront",
+            side_effect=OzonSourceVerificationError("blocked"),
+        ):
+            failed = self.client.post(
+                "/api/tenant/marketplaces/check",
+                json={"marketplace_code": "ozon_kz", "source": "store-first-101"},
+                headers=self.headers,
+            )
+        self.assertEqual(400, failed.status_code)
+        self.assertEqual([], self.saas.sellers(self.tenant_b, "ozon_kz"))
+        integration = next(
+            item for item in self.saas.integrations(self.tenant_b)
+            if item["integration_code"] == "ozon_kz"
         )
-        self.assertEqual("pending", submitted.get_json()["result"]["approval_status"])
+        self.assertNotEqual("active", integration["status"])
 
-        self.login(int(self.root["id"]))
-        rejected = self.client.post(
-            f"/api/platform/tenants/{self.tenant_b}/marketplaces/ozon_kz/rejected",
-            json={"review_note": "Укажите основной магазин"}, headers=self.headers,
-        )
-        self.assertEqual("rejected", rejected.get_json()["integration"]["approval_status"])
+        with patch("saas_service.verify_ozon_storefront", return_value={
+            "canonical_seller_id": "store-correct-202",
+            "canonical_seller_url": "https://ozon.kz/seller/store-correct-202/",
+            "seller_name": "Correct Store", "catalogue_empty": "false",
+        }) as verifier:
+            checked = self.client.post(
+                "/api/tenant/marketplaces/check",
+                json={"marketplace_code": "ozon_kz", "source": "store-correct-202"},
+                headers=self.headers,
+            )
+            connected = self.client.post(
+                "/api/tenant/marketplaces/connect",
+                json={
+                    "marketplace_code": "ozon_kz",
+                    "source": "store-correct-202",
+                    "verification_proof": checked.get_json()["result"]["verification_proof"],
+                },
+                headers=self.headers,
+            )
+        verifier.assert_called_once()
+        self.assertEqual(200, connected.status_code)
+        self.assertEqual("approved", connected.get_json()["result"]["approval_status"])
+        self.assertTrue(connected.get_json()["result"]["is_connected"])
 
-        self.login(int(self.company_admin["id"]))
-        resubmitted = self.client.post(
-            "/api/tenant/marketplaces/connect",
-            json={"marketplace_code": "ozon_kz", "source": "store-correct-202"},
-            headers=self.headers,
+    def test_ozon_proof_rejects_invalid_expired_and_mismatched_context(self) -> None:
+        source = "https://ozon.kz/seller/proof-store-101/"
+        with patch("saas_service.verify_ozon_storefront", return_value={
+            "canonical_seller_id": "proof-store-101",
+            "canonical_seller_url": source,
+            "seller_name": "Proof Store",
+            "catalogue_empty": "false",
+        }) as verifier:
+            checked = self.saas.check_marketplace_source(
+                self.tenant_b, source, int(self.company_admin["id"]), "ozon_kz"
+            )
+        verifier.assert_called_once()
+        proof = str(checked["verification_proof"])
+
+        attempts = (
+            (self.tenant_b, int(self.company_admin["id"]), "ozon_kz", source, "invalid"),
+            (self.tenant_b, int(self.root["id"]), "ozon_kz", source, proof),
+            (int(self.root["tenant_id"]), int(self.company_admin["id"]), "ozon_kz", source, proof),
+            (
+                self.tenant_b,
+                int(self.company_admin["id"]),
+                "ozon",
+                "https://www.ozon.ru/seller/proof-store-101/",
+                proof,
+            ),
+            (
+                self.tenant_b,
+                int(self.company_admin["id"]),
+                "ozon_kz",
+                "https://ozon.kz/seller/another-store-202/",
+                proof,
+            ),
         )
-        self.assertEqual("pending", resubmitted.get_json()["result"]["approval_status"])
+        with patch("saas_service.verify_ozon_storefront") as browser_verifier:
+            for tenant_id, actor_id, code, attempt_source, attempt_proof in attempts:
+                with self.subTest(code=code, source=attempt_source, actor_id=actor_id):
+                    with self.assertRaisesRegex(ValueError, "повторно распознать"):
+                        self.saas.connect_marketplace(
+                            tenant_id,
+                            attempt_source,
+                            actor_id,
+                            code,
+                            attempt_proof,
+                        )
+            with patch("marketplace_verification_proof.time.time", return_value=4_000_000_000):
+                with self.assertRaisesRegex(ValueError, "повторно распознать"):
+                    self.saas.connect_marketplace(
+                        self.tenant_b,
+                        source,
+                        int(self.company_admin["id"]),
+                        "ozon_kz",
+                        proof,
+                    )
+        browser_verifier.assert_not_called()
+        self.assertEqual([], self.saas.sellers(self.tenant_b, "ozon_kz"))
 
     def test_logout_and_split_platform_pages(self) -> None:
         self.login(int(self.root["id"]))
@@ -343,63 +428,39 @@ class PlatformCompanyAdminTests(unittest.TestCase):
             ozon_kz["is_allowed"]
         )
 
-        checked = self.client.post(
-            "/api/tenant/marketplaces/check",
-            json={
-                "marketplace_code":
-                    "ozon_kz",
-                "source":
-                    "future-store-456",
-            },
-            headers=self.headers,
-        )
-        self.assertEqual(
-            200,
-            checked.status_code,
-        )
-
-        submitted = self.client.post(
-            "/api/tenant/marketplaces/connect",
-            json={
-                "marketplace_code":
-                    "ozon_kz",
-                "source":
-                    "future-store-456",
-            },
-            headers=self.headers,
-        )
+        with patch("saas_service.verify_ozon_storefront", return_value={
+            "canonical_seller_id": "future-store-456",
+            "canonical_seller_url": "https://ozon.kz/seller/future-store-456/",
+            "seller_name": "Future Store", "catalogue_empty": "false",
+        }) as verifier:
+            checked = self.client.post(
+                "/api/tenant/marketplaces/check",
+                json={
+                    "marketplace_code": "ozon_kz",
+                    "source": "future-store-456",
+                },
+                headers=self.headers,
+            )
+            submitted = self.client.post(
+                "/api/tenant/marketplaces/connect",
+                json={
+                    "marketplace_code": "ozon_kz",
+                    "source": "future-store-456",
+                    "verification_proof": checked.get_json()["result"]["verification_proof"],
+                },
+                headers=self.headers,
+            )
+        self.assertEqual(200, checked.status_code)
+        verifier.assert_called_once()
         self.assertEqual(
             200,
             submitted.status_code,
         )
         self.assertEqual(
-            "pending",
+            "approved",
             submitted.get_json()[
                 "result"
             ]["approval_status"],
-        )
-
-        self.login(int(self.root["id"]))
-
-        with patch("saas_service.verify_ozon_storefront", return_value={
-            "canonical_seller_id": "future-store-456",
-            "canonical_seller_url": "https://ozon.kz/seller/future-store-456/",
-            "seller_name": "Future Store", "catalogue_empty": "false",
-        }):
-            approved = self.client.post(
-                f"/api/platform/tenants/"
-                f"{self.tenant_b}/marketplaces/"
-                "ozon_kz/approved",
-                json={},
-                headers=self.headers,
-            )
-        self.assertEqual(
-            200,
-            approved.status_code,
-        )
-
-        self.login(
-            int(self.company_admin["id"])
         )
 
         after = self.client.get(
@@ -499,16 +560,32 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         finally:
             webapp.cleanup_pending_command(complete)
 
-    def test_revoking_company_grant_disables_connection_without_deleting_seller(self) -> None:
+    def test_revoking_company_grant_blocks_access_without_deleting_active_seller(self) -> None:
         self.saas.set_marketplace_access(self.tenant_b, ["ozon"], int(self.root["id"]))
-        self.saas.connect_marketplace(
-            self.tenant_b, "https://www.ozon.ru/seller/company-b-90210/",
-            int(self.company_admin["id"]), "ozon",
-        )
+        with patch(
+            "saas_service.verify_ozon_storefront",
+            return_value={
+                "canonical_seller_id": "company-b-90210",
+                "canonical_seller_url": "https://www.ozon.ru/seller/company-b-90210/",
+                "seller_name": "Company B",
+                "catalogue_empty": "false",
+            },
+        ):
+            checked = self.saas.check_marketplace_source(
+                self.tenant_b,
+                "https://www.ozon.ru/seller/company-b-90210/",
+                int(self.company_admin["id"]),
+                "ozon",
+            )
+            self.saas.connect_marketplace(
+                self.tenant_b, "https://www.ozon.ru/seller/company-b-90210/",
+                int(self.company_admin["id"]), "ozon",
+                str(checked["verification_proof"]),
+            )
         self.saas.set_marketplace_access(self.tenant_b, [], int(self.root["id"]))
         access = next(item for item in self.saas.marketplace_access(self.tenant_b) if item["code"] == "ozon")
         self.assertFalse(access["is_allowed"])
-        self.assertFalse(access["is_connected"])
+        self.assertTrue(access["is_connected"])
         conn = sqlite3.connect(self.db_path)
         seller_count = conn.execute(
             "SELECT COUNT(*) FROM tenant_marketplace_sellers WHERE tenant_id=? AND marketplace_code='ozon'",

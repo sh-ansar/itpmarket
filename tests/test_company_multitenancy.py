@@ -47,10 +47,7 @@ class CompanyMultitenancyTests(unittest.TestCase):
             int(self.admin_a["id"]),
         )
         saas.set_marketplace_access(self.tenant_a, ["ozon", "halyk_market"], int(self.admin_a["id"]))
-        saas.connect_marketplace(self.tenant_a, "https://www.ozon.ru/seller/company-a-101/", int(self.admin_a["id"]), "ozon")
-        saas.connect_marketplace(self.tenant_a, "https://halykmarket.kz/merchant/company-a", int(self.admin_a["id"]), "halyk_market")
         saas.set_marketplace_access(self.tenant_b, ["ozon"], int(self.admin_a["id"]))
-        saas.connect_marketplace(self.tenant_b, "https://www.ozon.ru/seller/company-b-202/", int(self.user_b["id"]), "ozon")
         self.admin_a = self.auth.get_user(int(self.admin_a["id"])) or self.admin_a
         self.user_b = self.auth.get_user(int(self.user_b["id"])) or self.user_b
         self.catalog = CatalogConfigurationService(self.db_path)
@@ -312,6 +309,11 @@ class CompanyMultitenancyTests(unittest.TestCase):
             request_id, "approved", int(self.admin_a["id"])
         )
         self.assertEqual("approved", result["status"])
+        access = SaaSService(self.db_path).marketplace_access(
+            self.tenant_b, include_unavailable=True
+        )
+        self.assertEqual(6, len(access))
+        self.assertTrue(all(item["is_allowed"] for item in access))
         conn = sqlite3.connect(self.db_path)
         status = conn.execute("SELECT status FROM tenants WHERE id=?", (self.tenant_b,)).fetchone()[0]
         conn.close()

@@ -1,12 +1,115 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from collectors.ozon.ozon_probe_core import parse_catalog_html
-from ozon_source_verification import OzonSourceVerificationError, resolve_ozon_snapshot
+from ozon_source_verification import (
+    OzonSourceVerificationError,
+    _interactive_snapshot,
+    resolve_ozon_snapshot,
+)
 
 
 class OzonSourceVerificationTests(unittest.TestCase):
+    @staticmethod
+    def _temporary_tab_fixture(*, fail_navigation: bool = False):
+        class FakeSwitch:
+            def __init__(self, driver):
+                self.driver = driver
+
+            def new_window(self, _kind):
+                self.driver.handles.append("verification-tab")
+                self.driver.current = "verification-tab"
+
+            def window(self, handle):
+                if handle not in self.driver.handles:
+                    raise RuntimeError("missing window")
+                self.driver.current = handle
+
+        class FakeDriver:
+            def __init__(self):
+                self.handles = ["working-tab"]
+                self.current = "working-tab"
+                self.current_url = "https://www.ozon.ru/search/?text=working"
+                self.get_calls = []
+                self.closed = []
+                self.switch_to = FakeSwitch(self)
+
+            @property
+            def current_window_handle(self):
+                return self.current
+
+            @property
+            def window_handles(self):
+                return list(self.handles)
+
+            def get(self, url):
+                self.get_calls.append((self.current, url))
+                if fail_navigation:
+                    raise RuntimeError("navigation failed")
+                self.current_url = url
+
+            def close(self):
+                self.closed.append(self.current)
+                self.handles.remove(self.current)
+                self.current = self.handles[0]
+
+        driver = FakeDriver()
+
+        class FakeSession:
+            instance = None
+
+            def __init__(self, _port, _source_url):
+                self.driver = driver
+                FakeSession.instance = self
+
+            def connect(self):
+                return self
+
+            def snapshot(self):
+                return "Store", "store-101", '<h1>Store</h1>'
+
+        return driver, FakeSession
+
+    def test_interactive_snapshot_uses_temporary_tab_and_restores_working_tab(self) -> None:
+        driver, fake_session = self._temporary_tab_fixture()
+        with patch.dict(
+            sys.modules,
+            {"browser_session": SimpleNamespace(BrowserSession=fake_session)},
+        ):
+            result = _interactive_snapshot(
+                "ozon", "https://www.ozon.ru/seller/store-101/"
+            )
+
+        self.assertEqual("https://www.ozon.ru/seller/store-101/", result["final_url"])
+        self.assertEqual(
+            [("verification-tab", "https://www.ozon.ru/seller/store-101/")],
+            driver.get_calls,
+        )
+        self.assertEqual(["working-tab"], driver.handles)
+        self.assertEqual("working-tab", driver.current_window_handle)
+        self.assertEqual(["verification-tab"], driver.closed)
+        self.assertIsNone(fake_session.instance.driver)
+
+    def test_interactive_snapshot_closes_temporary_tab_after_navigation_error(self) -> None:
+        driver, fake_session = self._temporary_tab_fixture(fail_navigation=True)
+        with patch.dict(
+            sys.modules,
+            {"browser_session": SimpleNamespace(BrowserSession=fake_session)},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "navigation failed"):
+                _interactive_snapshot(
+                    "ozon", "https://www.ozon.ru/seller/store-101/"
+                )
+
+        self.assertEqual(["working-tab"], driver.handles)
+        self.assertEqual("working-tab", driver.current_window_handle)
+        self.assertEqual(["verification-tab"], driver.closed)
+        self.assertIsNone(fake_session.instance.driver)
+
     def test_seller_grid_pages_accumulate_more_than_sixteen_unique_products(self) -> None:
         seen: set[str] = set()
         for page_no in range(3):

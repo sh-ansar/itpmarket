@@ -112,14 +112,53 @@ def _interactive_snapshot(marketplace_code: str, source_url: str) -> dict[str, s
 
     port = 9222 if marketplace_code == "ozon" else 9333
     session = BrowserSession(port, source_url)
+    driver = None
+    original_handle = ""
+    original_handles: set[str] = set()
+    temporary_handle = ""
     try:
         session.connect()
         assert session.driver is not None
-        session.driver.get(source_url)
+        driver = session.driver
+        original_handle = str(driver.current_window_handle)
+        original_handles = {str(handle) for handle in driver.window_handles}
+        driver.switch_to.new_window("tab")
+        temporary_handle = str(driver.current_window_handle)
+        driver.get(source_url)
         title, text, page_html = session.snapshot()
-        return {"final_url": str(session.driver.current_url or source_url), "page_title": title, "page_text": text, "page_html": page_html}
+        return {
+            "final_url": str(driver.current_url or source_url),
+            "page_title": title,
+            "page_text": text,
+            "page_html": page_html,
+        }
     finally:
-        session.close()
+        if driver is not None:
+            try:
+                handles = {str(handle) for handle in driver.window_handles}
+                if (
+                    temporary_handle
+                    and temporary_handle not in original_handles
+                    and temporary_handle in handles
+                ):
+                    driver.switch_to.window(temporary_handle)
+                    driver.close()
+            except Exception:
+                pass
+            try:
+                handles = {str(handle) for handle in driver.window_handles}
+                restore_handle = (
+                    original_handle if original_handle in handles else
+                    next((handle for handle in original_handles if handle in handles), "")
+                )
+                if restore_handle:
+                    driver.switch_to.window(restore_handle)
+            except Exception:
+                pass
+        # BrowserSession.close() intentionally navigates its target back to
+        # original_url.  The verification tab is already closed above, so a
+        # plain detach avoids reloading the user's or collector's active tab.
+        session.driver = None
 
 
 def verify_ozon_storefront(

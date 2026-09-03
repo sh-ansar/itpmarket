@@ -46,7 +46,7 @@ class RegistrationHttpTests(unittest.TestCase):
             item.stop()
         self.folder.cleanup()
 
-    def test_registration_creates_approved_company_owner_without_marketplace_grants(self) -> None:
+    def test_registration_without_marketplaces_grants_all_as_available_not_connected(self) -> None:
         page = self.client.get("/register")
         self.assertEqual(200, page.status_code)
         html = page.get_data(as_text=True)
@@ -54,6 +54,7 @@ class RegistrationHttpTests(unittest.TestCase):
         self.assertIsNotNone(token)
         self.assertIn('name="registration_number"', html)
         self.assertNotIn('name="launch_mode"', html)
+        self.assertNotIn('name="marketplaces"', html)
 
         response = self.client.post(
             "/register",
@@ -69,7 +70,6 @@ class RegistrationHttpTests(unittest.TestCase):
                 "actual_address": "Astana, Office Street 20",
                 "estimated_products": "250",
                 "plan_code": "growth",
-                "marketplaces": ["kaspi", "ozon_kz"],
                 "password": "SafeVaultNumber927!",
                 "password_confirm": "SafeVaultNumber927!",
                 "privacy_consent": "1",
@@ -96,7 +96,21 @@ class RegistrationHttpTests(unittest.TestCase):
             conn.close()
         self.assertEqual(("approved", "BIN-HTTP-001"), tenant)
         self.assertEqual(("approved", tenant_id), request_row)
-        self.assertFalse(any(item["is_allowed"] for item in self.saas.marketplace_access(tenant_id)))
+        access = self.saas.marketplace_access(tenant_id)
+        self.assertEqual(6, len(access))
+        self.assertTrue(all(item["is_allowed"] for item in access))
+        self.assertFalse(any(item["is_connected"] for item in access))
+
+    def test_explicit_public_plan_remains_selected_when_another_is_recommended(self) -> None:
+        page = self.client.get("/register?plan=growth")
+        self.assertEqual(200, page.status_code)
+        html = page.get_data(as_text=True)
+        growth = re.search(
+            r'name="plan_code"\s+value="growth"(?P<attrs>[^>]*)>',
+            html,
+        )
+        self.assertIsNotNone(growth)
+        self.assertIn("checked", growth.group("attrs"))
 
     def test_public_registration_runtime_has_no_manual_approval_copy(self) -> None:
         runtime = (
@@ -131,7 +145,6 @@ class RegistrationHttpTests(unittest.TestCase):
                 "actual_address": "Astana, Office Street 20",
                 "estimated_products": "250",
                 "plan_code": "growth",
-                "marketplaces": ["kaspi"],
                 "password": "SafeVaultNumber927!",
                 "password_confirm": "SafeVaultNumber927!",
                 "privacy_consent": "1",

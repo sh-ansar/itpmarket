@@ -16,6 +16,11 @@ from marketplace_source_rules import (
     parse_marketplace_source,
     validate_marketplace_source_rules,
 )
+from marketplace_verification_proof import (
+    MarketplaceVerificationProofError,
+    issue_ozon_verification_proof,
+    verify_ozon_verification_proof,
+)
 from ozon_source_verification import OzonSourceVerificationError, verify_ozon_storefront
 from security_hygiene import redact_sensitive
 from tenant_security import (
@@ -301,13 +306,10 @@ def build_workspace_profile(payload: dict[str, Any]) -> dict[str, Any]:
     explicit_theme = str(payload.get("theme") or "").strip().casefold()
     theme = explicit_theme if explicit_theme in {"system", "light", "dark"} else template["theme"]
     all_integrations = {item["code"] for item in INTEGRATION_CATALOG}
-    has_explicit_integrations = "marketplaces" in payload or "integrations" in payload
     selected_integrations = _normalize_codes(
         payload.get("marketplaces") if "marketplaces" in payload else payload.get("integrations"),
         all_integrations,
     )
-    if not selected_integrations and not has_explicit_integrations:
-        selected_integrations = [code for code in template["recommended_integrations"] if code in all_integrations]
     marketplace_categories = {
         code: [str(category) for category in categories]
         for code, categories in template["marketplace_categories"].items()
@@ -338,6 +340,7 @@ class SaaSService:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self._ensure_identity_uniqueness_guards()
+        self._normalize_verified_pending_connections()
 
     def _connect(self) -> sqlite3.Connection:
         conn = connect_database(self.db_path, timeout=30)
@@ -938,7 +941,7 @@ class SaaSService:
             "input_type": str(source.get("input_type") or "url"),
             "source_input": str(source.get("source_input") or value),
             # URL parsing only proves syntax.  Ozon needs independent browser
-            # evidence before an administrator can activate the source.
+            # evidence before the source can be activated.
             "verification_state": "parsed" if is_ozon else "verified",
             "verified": not is_ozon,
         }
@@ -949,21 +952,57 @@ class SaaSService:
         seller_url: str,
         actor_user_id: int,
         marketplace_code: str = "",
+        verification_proof: str = "",
     ) -> dict[str, Any]:
-        detected = self.detect_marketplace_url(tenant_id, seller_url, marketplace_code)
+        detected = self.detect_marketplace_url(
+            tenant_id, seller_url, marketplace_code
+        )
+        code = str(detected["marketplace_code"])
+        if code in {"ozon", "ozon_kz"}:
+            normalized_source = str(detected["seller_url"])
+            try:
+                proof = verify_ozon_verification_proof(
+                    verification_proof,
+                    tenant_id=int(tenant_id),
+                    actor_user_id=int(actor_user_id),
+                    marketplace_code=code,
+                    normalized_source=normalized_source,
+                )
+            except MarketplaceVerificationProofError as exc:
+                raise ValueError(
+                    "Источник необходимо повторно распознать."
+                ) from exc
+            detected.update({
+                "seller_identifier": str(proof["canonical_seller_id"]),
+                "seller_name": str(proof["seller_name"]),
+                "seller_url": str(proof["canonical_seller_url"]),
+                "verification_state": "verified",
+                "verified": True,
+            })
+            discovery = {
+                "evidence": "self_service_verification_proof",
+                "host_verified": True,
+                "verification_state": "verified",
+                "verified": True,
+                "source_scope": str(proof.get("source_scope") or "seller"),
+                "product_id": str(proof.get("product_id") or ""),
+                "product_slug": str(proof.get("product_slug") or ""),
+                "input_type": detected.get("input_type") or "url",
+                "source_input": detected.get("source_input") or seller_url,
+                "canonical_seller_id": str(proof["canonical_seller_id"]),
+                "canonical_seller_url": str(proof["canonical_seller_url"]),
+                "seller_name": str(proof["seller_name"]),
+                "catalogue_empty": bool(proof.get("catalogue_empty")),
+            }
+        else:
+            detected, discovery = self._verified_marketplace_source(
+                tenant_id,
+                code,
+                seller_url,
+                evidence_kind="self_service_connect",
+                detected=detected,
+            )
         stamp = now_iso()
-        verification_state = str(detected.get("verification_state") or "parsed")
-        discovery = {
-            "evidence": "public_url",
-            "host_verified": True,
-            "verification_state": verification_state,
-            "verified": verification_state == "verified",
-            "source_scope": detected.get("source_scope") or "seller",
-            "product_id": detected.get("product_id") or "",
-            "product_slug": detected.get("product_slug") or "",
-            "input_type": detected.get("input_type") or "url",
-            "source_input": detected.get("source_input") or seller_url,
-        }
         conn = self._connect()
         try:
             tenant = conn.execute("SELECT * FROM tenants WHERE id=?", (int(tenant_id),)).fetchone()
@@ -974,20 +1013,22 @@ class SaaSService:
                 """INSERT INTO tenant_marketplace_sellers(
                        tenant_id,marketplace_code,external_seller_id,display_name,source_url,
                        status,discovery_status,approval_status,discovery_json,
-                       submitted_by,submitted_at,review_note,created_at,updated_at
-                   ) VALUES(?,?,?,?,?,'pending',?,'pending',?,?,?,'',?,?)
+                       submitted_by,submitted_at,reviewed_by,reviewed_at,review_note,
+                       created_at,updated_at
+                   ) VALUES(?,?,?,?,?,'active','verified','approved',?,?,?,?,?,'',?,?)
                    ON CONFLICT(tenant_id,marketplace_code,external_seller_id) DO UPDATE SET
                        display_name=excluded.display_name,source_url=excluded.source_url,
-                       status='pending',discovery_status=excluded.discovery_status,
-                       approval_status='pending',discovery_json=excluded.discovery_json,
+                       status='active',discovery_status='verified',
+                       approval_status='approved',discovery_json=excluded.discovery_json,
                        submitted_by=excluded.submitted_by,submitted_at=excluded.submitted_at,
-                       reviewed_by=NULL,reviewed_at=NULL,review_note='',
+                       reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at,
+                       review_note='',
                        updated_at=excluded.updated_at""",
                 (
                     int(tenant_id), detected["marketplace_code"], detected["seller_identifier"],
-                    detected["seller_name"], detected["seller_url"], verification_state,
+                    detected["seller_name"], detected["seller_url"],
                     json.dumps(discovery, ensure_ascii=False, separators=(",", ":")),
-                    int(actor_user_id), stamp, stamp, stamp,
+                    int(actor_user_id), stamp, int(actor_user_id), stamp, stamp, stamp,
                 ),
             )
             seller_row = conn.execute(
@@ -998,58 +1039,180 @@ class SaaSService:
                     detected["seller_identifier"],
                 ),
             ).fetchone()
-            active_exists = conn.execute(
-                """SELECT 1 FROM tenant_marketplace_sellers
-                   WHERE tenant_id=? AND marketplace_code=? AND status='active'
-                     AND approval_status='approved' LIMIT 1""",
-                (int(tenant_id), detected["marketplace_code"]),
-            ).fetchone()
-            if active_exists:
-                # A pending replacement must not change the live integration
-                # summary or collector target before it has been approved.
-                conn.execute(
-                    """UPDATE tenant_integrations
-                       SET submitted_by=?,submitted_at=?,updated_at=?
-                       WHERE tenant_id=? AND integration_code=?""",
-                    (int(actor_user_id), stamp, stamp, int(tenant_id), detected["marketplace_code"]),
-                )
-            else:
-                conn.execute(
-                    """UPDATE tenant_integrations SET seller_name=?,seller_identifier=?,seller_url=?,
-                           discovery_status=?,approval_status=?,discovery_json=?,
-                           status=?,submitted_by=?,submitted_at=?,updated_at=?
-                       WHERE tenant_id=? AND integration_code=?""",
-                    (
-                        detected["seller_name"], detected["seller_identifier"], detected["seller_url"], verification_state,
-                        "pending", json.dumps(discovery, ensure_ascii=False, separators=(",", ":")),
-                        "setup", int(actor_user_id), stamp, stamp,
-                        int(tenant_id), detected["marketplace_code"],
-                    ),
-                )
+            conn.execute(
+                """UPDATE tenant_integrations
+                   SET seller_name=?,seller_identifier=?,seller_url=?,
+                       discovery_status='verified',approval_status='approved',
+                       discovery_json=?,status='active',submitted_by=?,submitted_at=?,
+                       reviewed_by=?,reviewed_at=?,review_note='',updated_at=?
+                   WHERE tenant_id=? AND integration_code=?""",
+                (
+                    detected["seller_name"], detected["seller_identifier"],
+                    detected["seller_url"],
+                    json.dumps(discovery, ensure_ascii=False, separators=(",", ":")),
+                    int(actor_user_id), stamp, int(actor_user_id), stamp, stamp,
+                    int(tenant_id), detected["marketplace_code"],
+                ),
+            )
+            conn.execute(
+                """INSERT INTO tenant_marketplace_access(
+                       tenant_id,marketplace_code,is_allowed,granted_by,granted_at,updated_at
+                   ) VALUES(?,?,1,?,?,?)
+                   ON CONFLICT(tenant_id,marketplace_code) DO UPDATE SET
+                       is_allowed=1,granted_by=excluded.granted_by,
+                       granted_at=excluded.granted_at,updated_at=excluded.updated_at""",
+                (
+                    int(tenant_id), detected["marketplace_code"],
+                    int(actor_user_id), stamp, stamp,
+                ),
+            )
             self._audit(
-                conn, actor_user_id, "tenant_marketplace_submitted", int(tenant_id),
-                "tenant_integration", detected["marketplace_code"], detected,
+                conn, actor_user_id, "tenant_marketplace_connected", int(tenant_id),
+                "tenant_marketplace_seller", str(seller_row["id"]), detected,
             )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
         return detected | {
             "tenant_seller_id": int(seller_row["id"]) if seller_row else None,
-            "is_connected": False,
-            "approval_status": "pending",
+            "is_connected": True,
+            "approval_status": "approved",
         }
 
-    def _replacement_source(
+    def check_marketplace_source(
+        self,
+        tenant_id: int,
+        seller_url: str,
+        actor_user_id: int,
+        marketplace_code: str = "",
+    ) -> dict[str, Any]:
+        """Recognize a source and fully verify Ozon before confirmation."""
+        detected = self.detect_marketplace_url(
+            tenant_id, seller_url, marketplace_code
+        )
+        code = str(detected["marketplace_code"])
+        if code not in {"ozon", "ozon_kz"}:
+            return detected
+        normalized_source = str(detected["seller_url"])
+        verified, _ = self._verified_marketplace_source(
+            tenant_id,
+            code,
+            seller_url,
+            evidence_kind="self_service_check",
+            detected=detected,
+        )
+        verified["verification_proof"] = issue_ozon_verification_proof(
+            tenant_id=int(tenant_id),
+            actor_user_id=int(actor_user_id),
+            marketplace_code=code,
+            normalized_source=normalized_source,
+            verified_source=verified,
+        )
+        return verified
+
+    def _normalize_verified_pending_connections(self) -> int:
+        """Activate only legacy pending sellers with persisted verification proof."""
+        stamp = now_iso()
+        conn = self._connect()
+        activated = 0
+        try:
+            rows = conn.execute(
+                """SELECT * FROM tenant_marketplace_sellers
+                   WHERE status='pending' AND approval_status='pending'
+                   ORDER BY id"""
+            ).fetchall()
+            for raw in rows:
+                seller = dict(raw)
+                discovery = _json_or_default(seller.get("discovery_json"), {})
+                verified = (
+                    seller.get("discovery_status") == "verified"
+                    or discovery.get("verified") is True
+                    or str(discovery.get("verification_state") or "").casefold()
+                    == "verified"
+                )
+                if not verified:
+                    continue
+                conn.execute(
+                    """UPDATE tenant_marketplace_sellers
+                       SET status='active',approval_status='approved',
+                           discovery_status='verified',reviewed_at=COALESCE(reviewed_at,?),
+                           updated_at=?
+                       WHERE id=? AND status='pending' AND approval_status='pending'""",
+                    (stamp, stamp, int(seller["id"])),
+                )
+                conn.execute(
+                    """UPDATE tenant_integrations
+                       SET seller_name=?,seller_identifier=?,seller_url=?,
+                           discovery_status='verified',approval_status='approved',
+                           discovery_json=?,status='active',reviewed_at=COALESCE(reviewed_at,?),
+                           updated_at=?
+                       WHERE tenant_id=? AND integration_code=?""",
+                    (
+                        str(seller.get("display_name") or ""),
+                        str(seller.get("external_seller_id") or ""),
+                        str(seller.get("source_url") or ""),
+                        str(seller.get("discovery_json") or "{}"),
+                        stamp,
+                        stamp,
+                        int(seller["tenant_id"]),
+                        str(seller["marketplace_code"]),
+                    ),
+                )
+                conn.execute(
+                    """INSERT INTO tenant_marketplace_access(
+                           tenant_id,marketplace_code,is_allowed,granted_by,granted_at,updated_at
+                       ) VALUES(?,?,1,NULL,?,?)
+                       ON CONFLICT(tenant_id,marketplace_code) DO UPDATE SET
+                           is_allowed=1,granted_at=COALESCE(
+                               tenant_marketplace_access.granted_at,excluded.granted_at
+                           ),updated_at=excluded.updated_at""",
+                    (
+                        int(seller["tenant_id"]),
+                        str(seller["marketplace_code"]),
+                        stamp,
+                        stamp,
+                    ),
+                )
+                self._audit(
+                    conn,
+                    None,
+                    "tenant_marketplace_verified_pending_activated",
+                    int(seller["tenant_id"]),
+                    "tenant_marketplace_seller",
+                    str(seller["id"]),
+                    {"marketplace_code": str(seller["marketplace_code"])},
+                )
+                activated += 1
+            conn.commit()
+            return activated
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _verified_marketplace_source(
         self, tenant_id: int, marketplace_code: str, source_url: str,
+        *, evidence_kind: str, detected: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Validate a source before a replacement transaction touches live state."""
+        """Fully verify a source before a connection transaction touches live state."""
         code = str(marketplace_code or "").strip().casefold()
-        detected = self.detect_marketplace_url(int(tenant_id), source_url, code)
+        detected = detected or self.detect_marketplace_url(
+            int(tenant_id), source_url, code
+        )
+        code = str(detected["marketplace_code"])
         discovery = {
-            "evidence": "admin_replace_validation",
+            "evidence": str(evidence_kind),
+            "host_verified": True,
             "verification_state": "verified",
             "verified": True,
             "source_scope": detected.get("source_scope") or "seller",
+            "product_id": detected.get("product_id") or "",
+            "product_slug": detected.get("product_slug") or "",
+            "input_type": detected.get("input_type") or "url",
             "source_input": detected.get("source_input") or source_url,
         }
         if code in {"ozon", "ozon_kz"}:
@@ -1065,6 +1228,7 @@ class SaaSService:
                 "seller_url": evidence["canonical_seller_url"],
                 "verification_state": "verified",
                 "verified": True,
+                "catalogue_empty": evidence["catalogue_empty"] == "true",
             })
             discovery.update({
                 "evidence": "interactive_browser",
@@ -1120,7 +1284,12 @@ class SaaSService:
         code = str(marketplace_code or "").strip().casefold()
         if code not in MARKETPLACE_BY_CODE:
             raise ValueError("Неизвестная площадка.")
-        detected, discovery = self._replacement_source(tenant_id, code, source_url)
+        detected, discovery = self._verified_marketplace_source(
+            tenant_id,
+            code,
+            source_url,
+            evidence_kind="admin_replace_validation",
+        )
         stamp = now_iso()
         conn = self._connect()
         try:
@@ -1849,8 +2018,6 @@ class SaaSService:
                 "\u0442\u043e\u0432\u0430\u0440\u043e\u0432."
             )
         profile = self.workspace_profile_for_payload(payload)
-        if not profile["selected_integrations"]:
-            raise ValueError("Выберите хотя бы один маркетплейс для заявки.")
         stamp = now_iso()
         conn = self._connect()
         try:
@@ -2017,7 +2184,7 @@ class SaaSService:
                 self._write_marketplace_access(
                     conn,
                     tenant_id,
-                    profile["selected_integrations"],
+                    set(MARKETPLACE_BY_CODE),
                     actor_user_id,
                     stamp,
                 )
@@ -2093,9 +2260,8 @@ class SaaSService:
                     ),
                 )
                 if target_status == "approved":
-                    profile = self.workspace_profile_for_row(row)
                     self._write_marketplace_access(
-                        conn, tenant_id, profile["selected_integrations"], actor_user_id, stamp
+                        conn, tenant_id, set(MARKETPLACE_BY_CODE), actor_user_id, stamp
                     )
             conn.execute(
                 """

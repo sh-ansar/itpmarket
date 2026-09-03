@@ -33,13 +33,26 @@ class MarketplaceSourceReplacementTests(unittest.TestCase):
         first = self.saas.connect_marketplace(
             self.tenant_id, "https://kaspi.kz/shop/m/first-seller/products", int(self.admin["id"]), "kaspi",
         )
-        self.saas.review_marketplace_connection(
-            self.tenant_id, "kaspi", "approved", int(self.admin["id"]), tenant_seller_id=int(first["tenant_seller_id"]),
-        )
-        staged = self.saas.connect_marketplace(
-            self.tenant_id,
-            "https://kaspi.kz/shop/m/second-seller/products", int(self.admin["id"]), "kaspi",
-        )
+        stamp = now_iso()
+        conn = self.saas._connect()
+        try:
+            staged_id = int(conn.execute(
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,
+                       source_url,status,discovery_status,approval_status,
+                       discovery_json,created_at,updated_at
+                   ) VALUES(?,'kaspi','second-seller','Second Seller',?,
+                            'pending','parsed','pending','{}',?,?)""",
+                (
+                    self.tenant_id,
+                    "https://kaspi.kz/shop/m/second-seller/products",
+                    stamp,
+                    stamp,
+                ),
+            ).lastrowid)
+            conn.commit()
+        finally:
+            conn.close()
         replacement = self.saas.replace_marketplace_source(
             self.tenant_id, "kaspi", int(first["tenant_seller_id"]),
             "https://kaspi.kz/shop/m/second-seller/products", int(self.admin["id"]),
@@ -48,16 +61,13 @@ class MarketplaceSourceReplacementTests(unittest.TestCase):
         self.assertEqual("replaced", sellers["first-seller"]["status"])
         self.assertEqual("active", sellers["second-seller"]["status"])
         self.assertEqual("approved", sellers["second-seller"]["approval_status"])
-        self.assertEqual(int(staged["tenant_seller_id"]), int(replacement["seller"]["id"]))
+        self.assertEqual(staged_id, int(replacement["seller"]["id"]))
 
     def test_invalid_replacement_leaves_the_old_source_unchanged(self) -> None:
         first = self.saas.connect_marketplace(
             self.tenant_id, "https://kaspi.kz/shop/m/first-seller/products", int(self.admin["id"]), "kaspi",
         )
         seller_id = int(first["tenant_seller_id"])
-        self.saas.review_marketplace_connection(
-            self.tenant_id, "kaspi", "approved", int(self.admin["id"]), tenant_seller_id=seller_id,
-        )
         with self.assertRaises(ValueError):
             self.saas.replace_marketplace_source(
                 self.tenant_id, "kaspi", seller_id,

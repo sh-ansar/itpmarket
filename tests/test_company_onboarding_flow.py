@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from auth_service import AuthService
+from ozon_source_verification import OzonSourceVerificationError
 from saas_service import SaaSService
 from schema import ensure_database
 
@@ -39,7 +40,6 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
             "terms_consent": True,
             "launch_mode": "self_service",
             "template_code": "general",
-            "marketplaces": ["kaspi", "ozon_kz"],
         }
 
     def test_registration_is_pending_has_no_grants_and_rejects_duplicate(self) -> None:
@@ -136,11 +136,6 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
                 "parsed" if code in {"ozon", "ozon_kz"} else "verified",
                 checked["verification_state"],
             )
-            submitted = self.saas.connect_marketplace(
-                tenant_id, url, int(self.root["id"]), code
-            )
-            self.assertFalse(submitted["is_connected"])
-            self.assertEqual("pending", submitted["approval_status"])
             if code in {"ozon", "ozon_kz"}:
                 host = "https://www.ozon.ru" if code == "ozon" else "https://ozon.kz"
                 with patch(
@@ -151,15 +146,32 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
                         "seller_name": "Ridial",
                         "catalogue_empty": "false",
                     },
-                ):
-                    reviewed = self.saas.review_marketplace_connection(
-                        tenant_id, code, "approved", int(self.root["id"])
+                ) as verifier:
+                    verified = self.saas.check_marketplace_source(
+                        tenant_id, url, int(self.root["id"]), code
                     )
+                    connected = self.saas.connect_marketplace(
+                        tenant_id, url, int(self.root["id"]), code,
+                        str(verified["verification_proof"]),
+                    )
+                verifier.assert_called_once_with(code, url)
             else:
-                reviewed = self.saas.review_marketplace_connection(
-                    tenant_id, code, "approved", int(self.root["id"])
-                )
-            self.assertEqual("approved", reviewed["approval_status"])
+                with patch("saas_service.verify_ozon_storefront") as verifier:
+                    recognized = self.saas.check_marketplace_source(
+                        tenant_id, url, int(self.root["id"]), code
+                    )
+                    connected = self.saas.connect_marketplace(
+                        tenant_id, url, int(self.root["id"]), code
+                    )
+                verifier.assert_not_called()
+                self.assertNotIn("verification_proof", recognized)
+            self.assertTrue(connected["is_connected"])
+            self.assertEqual("approved", connected["approval_status"])
+            seller = self.saas.seller(tenant_id, int(connected["tenant_seller_id"]))
+            self.assertIsNotNone(seller)
+            self.assertEqual(("active", "approved"), (
+                seller["status"], seller["approval_status"]
+            ))
         halyk = self.saas.detect_marketplace_url(tenant_id, urls["halyk_market"], "halyk_market")
         self.assertEqual("24955", halyk["seller_identifier"])
         self.assertEqual("Mechta.kz", halyk["seller_name"])
@@ -176,6 +188,10 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
         self.assertEqual("250000260", wildberries["seller_identifier"])
         self.assertEqual("https://global.wildberries.ru/seller/250000260", wildberries["seller_url"])
         integrations = {item["integration_code"]: item for item in self.saas.integrations(tenant_id)}
+        self.assertTrue(all(
+            (item["status"], item["approval_status"]) == ("active", "approved")
+            for item in integrations.values()
+        ))
         self.assertEqual("123271857", integrations["kaspi"]["discovery"]["product_id"])
         self.assertEqual(
             "c681a9d9-6ef7-11ed-9013-92962dec7f6b",
@@ -188,6 +204,126 @@ class CompanyOnboardingFlowTests(unittest.TestCase):
             self.saas.detect_marketplace_url(
                 tenant_id, "http://www.ozon.ru/seller/insecure-1/", "ozon"
             )
+
+    def test_failed_ozon_check_does_not_write_active_state(self) -> None:
+        payload = dict(
+            self.registration_payload(),
+            company_name="Ozon Verification Company",
+            registration_number="BIN-OZON-VERIFY-001",
+            email="ozon-verify@example.com",
+        )
+        submission = self.saas.submit_registration_request(payload)
+        tenant_id = int(self.saas.provision_tenant_from_request(
+            int(submission["request_id"]), None, "approved"
+        )["tenant_id"])
+
+        with patch(
+            "saas_service.verify_ozon_storefront",
+            side_effect=OzonSourceVerificationError("blocked"),
+        ) as verifier:
+            with self.assertRaisesRegex(ValueError, "not verified"):
+                self.saas.check_marketplace_source(
+                    tenant_id,
+                    "https://www.ozon.ru/seller/unverified-store-101/",
+                    int(self.root["id"]),
+                    "ozon",
+                )
+        verifier.assert_called_once_with(
+            "ozon", "https://www.ozon.ru/seller/unverified-store-101/"
+        )
+
+        self.assertEqual([], self.saas.sellers(tenant_id, "ozon"))
+        ozon = next(
+            item for item in self.saas.marketplace_access(tenant_id)
+            if item["code"] == "ozon"
+        )
+        self.assertFalse(ozon["is_connected"])
+
+    def test_verified_pending_is_activated_but_parsed_only_pending_stays_pending(self) -> None:
+        payload = dict(
+            self.registration_payload(),
+            company_name="Pending Normalization Company",
+            registration_number="BIN-PENDING-NORMALIZE-001",
+            email="pending-normalize@example.com",
+        )
+        submission = self.saas.submit_registration_request(payload)
+        tenant_id = int(self.saas.provision_tenant_from_request(
+            int(submission["request_id"]), None, "approved"
+        )["tenant_id"])
+        conn = sqlite3.connect(self.db_path)
+        stamp = "2026-09-03T12:00:00+00:00"
+        try:
+            conn.executemany(
+                """INSERT INTO tenant_marketplace_sellers(
+                       tenant_id,marketplace_code,external_seller_id,display_name,
+                       source_url,status,discovery_status,approval_status,
+                       discovery_json,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,'pending',?,'pending',?,?,?)""",
+                [
+                    (
+                        tenant_id, "kaspi", "verified-seller", "Verified Seller",
+                        "https://kaspi.kz/shop/m/verified-seller/products", "verified",
+                        json.dumps({"verified": True, "verification_state": "verified"}),
+                        stamp, stamp,
+                    ),
+                    (
+                        tenant_id, "ozon", "parsed-store-101", "Parsed Store",
+                        "https://www.ozon.ru/seller/parsed-store-101/", "parsed",
+                        json.dumps({"verified": False, "verification_state": "parsed"}),
+                        stamp, stamp,
+                    ),
+                ],
+            )
+            conn.executemany(
+                """UPDATE tenant_integrations
+                   SET status='setup',approval_status='pending',discovery_status=?
+                   WHERE tenant_id=? AND integration_code=?""",
+                [
+                    ("verified", tenant_id, "kaspi"),
+                    ("parsed", tenant_id, "ozon"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        normalized = SaaSService(self.db_path)
+        kaspi = normalized.sellers(tenant_id, "kaspi")[0]
+        ozon = normalized.sellers(tenant_id, "ozon")[0]
+        self.assertEqual(("active", "approved"), (
+            kaspi["status"], kaspi["approval_status"]
+        ))
+        self.assertEqual(("pending", "pending"), (
+            ozon["status"], ozon["approval_status"]
+        ))
+        integrations = {
+            item["integration_code"]: item
+            for item in normalized.integrations(tenant_id)
+        }
+        self.assertEqual(("active", "approved"), (
+            integrations["kaspi"]["status"],
+            integrations["kaspi"]["approval_status"],
+        ))
+        self.assertEqual(("setup", "pending"), (
+            integrations["ozon"]["status"],
+            integrations["ozon"]["approval_status"],
+        ))
+        self.assertEqual(0, normalized._normalize_verified_pending_connections())
+
+    def test_marketplace_settings_copy_has_no_legacy_admin_approval_gate(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "static" / "js" / "marketplace_settings.js"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("Ожидает подтверждения", script)
+        self.assertNotIn("Заявка отправлена супер-администратору", script)
+        self.assertNotIn(
+            "Заявка на подключение отправлена супер-администратору", script
+        )
+        self.assertIn("Источник требует повторной проверки", script)
+        self.assertIn("Проверяем магазин Ozon", script)
+        self.assertIn("Магазин подтверждён", script)
+        self.assertIn("verification_proof:checked.get(code)?.verification_proof", script)
 
     def test_removed_admin_modules_and_company_table_contract(self) -> None:
         root = Path(__file__).resolve().parents[1]
