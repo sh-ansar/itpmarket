@@ -1030,7 +1030,7 @@ class DataService:
         current = conn.execute(
             """SELECT mac.market_run_id FROM market_analysis_current mac
                JOIN market_analysis_runs mar ON mar.run_id=mac.market_run_id
-               WHERE mac.catalog_run_id=? AND mar.status='PASSED'""",
+               WHERE mac.catalog_run_id=?""",
             (catalog_run_id,),
         ).fetchone()
         market_run_id = str(current["market_run_id"]) if current else ""
@@ -3244,30 +3244,16 @@ class DataService:
             result["history"] = self.price_history(code, user_id=user_id)
             return result
         if result.get("platform") == "ozon_kz":
-            product_id = str(result.get("source_product_code") or "")
-            detail = None
-            offers: list[dict[str, Any]] = []
-            if self.ozon_kz_db_path and self.ozon_kz_db_path.exists():
-                conn = self._connect_path(self.ozon_kz_db_path)
-                try:
-                    detail_row = conn.execute(
-                        "SELECT * FROM ozon_kz_products WHERE product_id=?",
-                        (product_id,),
-                    ).fetchone()
-                    detail = dict(detail_row) if detail_row else None
-                    offers = [dict(row) for row in conn.execute(
-                        """SELECT * FROM ozon_kz_offers
-                           WHERE product_id=? AND active=1
-                           ORDER BY is_own DESC,price_kzt,seller_name LIMIT 100""",
-                        (product_id,),
-                    ).fetchall()]
-                finally:
-                    conn.close()
-            result["specifications"] = normalize_specifications(
-                (detail or {}).get("specifications_json") or []
-            )
-            result["detail"] = detail
-            result["candidates"] = result.get("exact_candidates") or []
+            result["specifications"] = self._ozon_specifications(result)
+            offers = [
+                dict(candidate)
+                for candidate in [
+                    *(result.get("exact_candidates") or []),
+                    *(result.get("comparable_candidates") or []),
+                ]
+            ]
+            result["detail"] = None
+            result["candidates"] = offers
             result["offers"] = offers
             result["history"] = self.price_history(code, user_id=user_id)
             result.pop("_ozon_kz_specifications", None)
@@ -3350,6 +3336,116 @@ class DataService:
                     )
                     if analytics is not None:
                         result.update(analytics)
+                elif platform in {"ozon", "ozon_kz"}:
+                    market_rows = (
+                        self._ozon_rows()
+                        if platform == "ozon"
+                        else self._ozon_kz_rows()
+                    )
+                    analytics = next(
+                        (
+                            row
+                            for row in market_rows
+                            if str(row.get("source_product_code") or "")
+                            == str(source_code)
+                        ),
+                        None,
+                    )
+                    if analytics is not None:
+                        own_price_kzt = result.get("price_kzt")
+                        own_price_original = result.get("price_original")
+                        for field in (
+                            "market_price_kzt",
+                            "market_min_price_kzt",
+                            "market_median_price_kzt",
+                            "market_max_price_kzt",
+                            "market_min_price_original",
+                            "market_median_price_original",
+                            "market_max_price_original",
+                            "difference_pct",
+                            "price_status",
+                            "status_label",
+                            "status_tone",
+                            "reference_count",
+                            "candidate_count",
+                            "exact_candidate_count",
+                            "comparable_candidate_count",
+                            "reference_type",
+                            "market_basis",
+                            "match_method",
+                            "match_method_label",
+                            "exact_candidates",
+                            "comparable_candidates",
+                            "price_rank",
+                            "price_rank_total",
+                            "price_rank_tie_count",
+                            "lowest_tie_count",
+                            "highest_tie_count",
+                            "is_lowest",
+                            "is_unique_lowest",
+                            "is_highest",
+                            "is_unique_highest",
+                            "lowest_product_url",
+                            "highest_product_url",
+                            "market_run_id",
+                        ):
+                            if field in analytics:
+                                result[field] = analytics[field]
+
+                        # The tenant catalogue remains authoritative for the
+                        # connected seller's own price.
+                        result["price_kzt"] = own_price_kzt
+                        result["price_original"] = own_price_original
+
+                        if platform == "ozon":
+                            rate = float(
+                                self.preferences(user_id).get("rub_to_kzt") or 5.5
+                            )
+                            for source_key, target_key in (
+                                ("market_min_price_original", "market_min_price_kzt"),
+                                ("market_median_price_original", "market_median_price_kzt"),
+                                ("market_max_price_original", "market_max_price_kzt"),
+                            ):
+                                value = result.get(source_key)
+                                result[target_key] = (
+                                    round(float(value) * rate, 2)
+                                    if value not in (None, "")
+                                    else None
+                                )
+                            result["market_price_kzt"] = result.get(
+                                "market_median_price_kzt"
+                            )
+
+                        offers = []
+                        for candidate in [
+                            *(result.get("exact_candidates") or []),
+                            *(result.get("comparable_candidates") or []),
+                        ]:
+                            value = dict(candidate)
+                            if (
+                                platform == "ozon"
+                                and value.get("price_kzt") in (None, "")
+                            ):
+                                original = (
+                                    value.get("price_rub")
+                                    or value.get("price_original")
+                                )
+                                if original not in (None, ""):
+                                    value["price_kzt"] = round(
+                                        float(original) * rate,
+                                        2,
+                                    )
+                            offers.append(value)
+
+                        result["specifications"] = self._ozon_specifications(
+                            {**result, **analytics}
+                        )
+                        result["offers"] = offers
+                        result["candidates"] = offers
+                        result["history"] = self.price_history(
+                            code,
+                            user_id=user_id,
+                        )
                 result["lookup_strategy"] = "targeted"
             return result
         # A populated tenant projection is authoritative for its marketplace.
@@ -3388,7 +3484,13 @@ class DataService:
         return [{"section": "Основные", "name": name, "value": str(value)} for name, value in mapping if value not in (None, "")]
 
     def _ozon_offers(self, article: str) -> list[dict[str, Any]]:
-        if not self.ozon_db_path or not self.ozon_db_path.exists():
+        if not self.ozon_db_path:
+            return []
+        if (
+            DatabaseSettings.from_environment().backend
+            is DatabaseBackend.SQLITE
+            and not self.ozon_db_path.exists()
+        ):
             return []
         conn = self._connect_path(self.ozon_db_path)
         try:
@@ -3405,10 +3507,39 @@ class DataService:
             return []
         if str(code).startswith("ozon_kz:"):
             product_id = parsed_source_code
-            if not self.ozon_kz_db_path or not self.ozon_kz_db_path.exists():
+            if not self.ozon_kz_db_path:
+                return []
+            if (
+                DatabaseSettings.from_environment().backend
+                is DatabaseBackend.SQLITE
+                and not self.ozon_kz_db_path.exists()
+            ):
                 return []
             conn = self._connect_path(self.ozon_kz_db_path)
             try:
+                if table_exists(conn, "price_history"):
+                    return [
+                        {
+                            **dict(row),
+                            "price_kzt": float(row["price"] or 0),
+                        }
+                        for row in conn.execute(
+                            """
+                            SELECT
+                                collected_at AS at,
+                                card_price AS price,
+                                seller_key AS series,
+                                availability_status,
+                                currency
+                            FROM price_history
+                            WHERE article=?
+                              AND card_price>0
+                            ORDER BY collected_at DESC
+                            LIMIT ?
+                            """,
+                            (product_id, int(limit)),
+                        ).fetchall()
+                    ]
                 return [dict(row) for row in conn.execute(
                     """SELECT captured_at AS at,price_kzt AS price,
                               CASE WHEN seller_id='' THEN 'own' ELSE seller_id END AS series,
@@ -3473,7 +3604,13 @@ class DataService:
                 conn.close()
         if str(code).startswith("ozon:"):
             article = parsed_source_code
-            if not self.ozon_db_path or not self.ozon_db_path.exists():
+            if not self.ozon_db_path:
+                return []
+            if (
+                DatabaseSettings.from_environment().backend
+                is DatabaseBackend.SQLITE
+                and not self.ozon_db_path.exists()
+            ):
                 return []
             rate = float(self.preferences(user_id).get("rub_to_kzt") or 5.5)
             conn = self._connect_path(self.ozon_db_path)

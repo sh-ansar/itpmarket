@@ -72,6 +72,7 @@ SQLite является локальным backend по умолчанию. Prod
 - Чтение tenant-каталога использует короткий двухсекундный in-process snapshot и single-flight только в пределах одинаковых tenant/marketplace scope. Это объединяет одновременные запросы списка, фильтров и сводки, не блокируя другие компании; после TTL данные снова читаются из PostgreSQL. Product drawer повторно использует уже проверенный tenant-каталог вместо второй полной выборки.
 - Операции включают сбор каталога, актуализацию собственных цен, получение точных предложений продавцов, поиск рыночных совпадений, повтор ошибок, полный sync, аудит каталога, экспорт и резервное копирование.
 - Для Ozon.ru есть отдельный реестр обнаружения, нормализация характеристик, оценка качества карточки, очередь повторов, история цен, market matching и HTML/табличный экспорт. URL витрины продавца принимается как в прежнем виде `/seller/<slug>/`, так и в актуальном `/продавец/<slug>/`; новые ссылки нормализуются к актуальному пути.
+- Для Ozon.ru и Ozon.kz действие «Актуализация цен» выполняет market search: сначала проверяет объявленную самим Ozon runtime-возможность `otherOffersFromSellers`; валидные предложения сразу сохраняются как `OZON_SAME_PRODUCT_GROUP` и отменяют search для этой позиции. Если возможности нет, запускается прежняя цепочка: принудительное обновление известных `candidate_article`, затем поиск только новых альтернатив. Новый market-run сразу наследует и публикует предыдущий snapshot; временная ошибка modal сохраняет последнюю подтверждённую цену и даёт `PARTIAL`, а stale same-product строки удаляются только после успешного ответа `webSellerList-*`. Drawer и история используют generic Ozon registry (`ozon_ru`/`ozon_kz` в PostgreSQL), а legacy `ozon_kz_products`/`ozon_kz_offers` не являются источником drawer.
 - Ozon seller-catalogue reads only structured `tileGridDesktop` state: grids с рекомендациями/cross-sell исключаются. Если основной grid больше не содержит seller slug, витрина принимается только при ровно одной normal unscoped grid с валидными product actions; несколько неоднозначных grids дают `NO_CATALOG`. Trace event `catalog_grid_scan` сохраняет счётчики и выбранную стратегию.
 - Фоновое задание считается успешным только при нулевом exit code. Состояния `PARTIAL`, `BLOCKED`, `FAILED` и `INTERRUPTED`, включая `NO_CATALOG` от всех seller-source, завершают Ozon-задачу ошибкой; успешно собранные до частичного сбоя данные сохраняются. Частичные ошибки точных предложений Kaspi, Halyk и Forte также возвращают ненулевой код.
 - Планировщик запускает разрешённые операции, повторно проверяет роль, tenant, доступ к площадке и feature `schedules`, резервирует лимит подписки и записывает результат исполнения.
@@ -197,7 +198,16 @@ discovery, followed by successful own-price/availability details for every
 article from that discovery, may replace the tenant seller snapshot. A partial,
 blocked, interrupted or capped run leaves the previous active snapshot intact.
 Market actualisation is a separate operation; it never republishes the own
-catalogue or changes its own price.
+catalogue or changes its own price. For each Ozon.ru or Ozon.kz owner it first
+inspects the product Composer response for a runtime `webBestSeller-*`
+capability. Only a positive `count` plus Ozon's own `modalLink` permits the
+second Composer request. A returned `webSellerList-*` is normalized directly
+as exact `OZON_SAME_PRODUCT_GROUP` offers (RUB for RU, KZT for KZ), and catalog
+search and competitor PDP enrichment are skipped for that owner. Otherwise the
+collector refreshes known candidates and uses search only to discover new
+alternatives. A failed modal request keeps the warm inherited rows and may mark
+the run partial; stale same-product rows are reconciled only after a successful
+seller-list response.
 
 ## Persistent operation queue
 

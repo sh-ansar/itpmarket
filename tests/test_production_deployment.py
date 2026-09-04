@@ -129,6 +129,14 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn("Ozon browser task registration failed.", post_update)
         self.assertNotIn("open_ozon_browsers.py", post_update)
         self.assertNotIn("Start-Process", post_update)
+        self.assertIn("stop-production.ps1", post_update)
+        self.assertIn("previousServerPid", post_update)
+        self.assertIn("newServerPid", post_update)
+        self.assertIn("Previous Spyon PID", post_update)
+        self.assertLess(
+            post_update.index("-File $stopScript"),
+            post_update.index('/End `'),
+        )
 
     def test_postgres_manifest_covers_every_runtime_schema(self) -> None:
         manifest = json.loads(

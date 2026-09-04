@@ -334,14 +334,89 @@ def _iter_widget_states(data: dict[str, Any]):
     if not isinstance(states, dict):
         return
     for key, raw in states.items():
-        if not isinstance(raw, str):
-            continue
-        try:
-            parsed = json.loads(raw)
-        except Exception:
+        if isinstance(raw, dict):
+            parsed = raw
+        elif isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                continue
+        else:
             continue
         if isinstance(parsed, dict):
             yield key, parsed
+
+
+def extract_best_seller_modal_link(data: dict[str, Any]) -> str:
+    """Return Ozon's advertised other-sellers modal only when it is usable."""
+    for key, state in _iter_widget_states(data) or ():
+        if not str(key).startswith("webBestSeller-"):
+            continue
+        count = parse_price(state.get("count"))
+        modal_link = str(state.get("modalLink") or "").strip()
+        if count > 0 and modal_link:
+            return modal_link
+    return ""
+
+
+def other_seller_list_state(data: dict[str, Any]) -> tuple[bool, int]:
+    """Report whether a dynamic webSellerList widget exists and its raw size."""
+    for key, state in _iter_widget_states(data) or ():
+        if not str(key).startswith("webSellerList-"):
+            continue
+        sellers = state.get("sellers")
+        return True, len(sellers) if isinstance(sellers, list) else 0
+    return False, 0
+
+
+def parse_other_seller_offers(
+    data: dict[str, Any],
+    base_url: str,
+    currency: str,
+) -> list[dict[str, Any]]:
+    """Normalize sellers from Ozon's runtime-discovered same-product modal."""
+    offers: list[dict[str, Any]] = []
+    for key, state in _iter_widget_states(data) or ():
+        if not str(key).startswith("webSellerList-"):
+            continue
+        sellers = state.get("sellers")
+        if not isinstance(sellers, list):
+            continue
+        for seller in sellers:
+            if not isinstance(seller, dict):
+                continue
+            price = seller.get("price")
+            price = price if isinstance(price, dict) else {}
+            card_price = price.get("cardPrice")
+            card_price = card_price if isinstance(card_price, dict) else {}
+            seller_link = str(seller.get("link") or "").strip()
+            product_link = str(seller.get("productLink") or "").strip()
+            current_price = parse_price(price.get("price"))
+            if current_price <= 0:
+                current_price = parse_price(card_price.get("price"))
+            offers.append(
+                {
+                    "candidate_article": str(seller.get("sku") or "").strip(),
+                    "seller_id": str(seller.get("id") or "").strip(),
+                    "seller_name": str(seller.get("name") or "").strip(),
+                    "seller_url": (
+                        urljoin(str(base_url or ""), seller_link)
+                        if seller_link
+                        else ""
+                    ),
+                    "product_url": (
+                        urljoin(str(base_url or ""), product_link)
+                        if product_link
+                        else ""
+                    ),
+                    "card_price": current_price,
+                    "regular_price": current_price,
+                    "original_price": parse_price(price.get("originalPrice")),
+                    "currency": str(currency or "RUB").upper(),
+                    "availability_status": "AVAILABLE",
+                }
+            )
+    return offers
 
 
 def _extract_brand(data: dict[str, Any]) -> str:

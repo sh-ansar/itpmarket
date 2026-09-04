@@ -562,15 +562,27 @@ class Collector:
         return {"run_id": run_id, "run_dir": str(run_dir), "status": status, **metrics}
 
 
-    def _enrich_market_candidate(self, article: str, run_id: str, run_dir: Path) -> bool:
+    def _enrich_market_candidate(
+        self,
+        article: str,
+        run_id: str,
+        run_dir: Path,
+        *,
+        force: bool = False,
+    ) -> bool:
         before = self.registry.get_product(article)
-        if before.get("detail_status") == "COMPLETE" and before.get("last_detail_at"):
+        if (
+            not force
+            and before.get("detail_status") == "COMPLETE"
+            and before.get("last_detail_at")
+        ):
             return True
         response = self.ensure_browser().load_product_api(
             article, self.settings.request_wait_seconds, self.settings.product_reloads
         )
         self._write_trace(run_dir, {
             "stage": "market_candidate_detail", "article": article,
+            "forced_refresh": bool(force),
             "status": response.get("status"), "elapsed_ms": response.get("elapsed_ms"),
             "events": response.get("events"),
         })
@@ -591,6 +603,227 @@ class Collector:
         raw_path = self._save_raw_json(article, response["json"], before, run_id)
         self.registry.update_from_detail(item, normalized, run_id, now_iso(), raw_path)
         return True
+
+    def _market_snapshot_counts(
+        self,
+        run_id: str,
+        client_article: str,
+    ) -> tuple[int, int, int]:
+        rows = self.registry.conn.execute(
+            """
+            SELECT match_level,COUNT(*) c
+            FROM market_analysis_candidates
+            WHERE market_run_id=?
+              AND client_article=?
+              AND match_level IN ('EXACT','STRONG','COMPARABLE')
+            GROUP BY match_level
+            """,
+            (str(run_id), str(client_article)),
+        ).fetchall()
+        counts = {str(row[0]): int(row[1]) for row in rows}
+        exact = counts.get("EXACT", 0) + counts.get("STRONG", 0)
+        comparable = counts.get("COMPARABLE", 0)
+        return exact + comparable, exact, comparable
+
+    def _is_expected_market_seller(self, offer: dict[str, Any]) -> bool:
+        identifiers = marketplace_seller_identifiers(self.settings)
+        seller_id = str(offer.get("seller_id") or "").strip().casefold()
+        seller_name = str(offer.get("seller_name") or "").strip().casefold()
+        seller_url = str(offer.get("seller_url") or "").strip().casefold()
+        return any(
+            identifier == seller_id
+            or identifier == seller_name
+            or (identifier and identifier in seller_url)
+            for identifier in identifiers
+        )
+
+    def _collect_same_product_offers(
+        self,
+        owner: dict[str, Any],
+        run_id: str,
+        run_dir: Path,
+        all_catalog_articles: set[str],
+    ) -> dict[str, Any]:
+        owner_article = str(owner.get("article") or "").strip()
+        product_response = self.ensure_browser().load_product_api(
+            owner_article,
+            int(getattr(self.settings, "request_wait_seconds", 1)),
+            int(getattr(self.settings, "product_reloads", 0)),
+        )
+        if not isinstance(product_response, dict):
+            return {
+                "available": False,
+                "failed": False,
+                "request_made": False,
+                "seller_list_found": False,
+                "offers": 0,
+                "skipped_own": 0,
+                "deduplicated": 0,
+                "error": "",
+            }
+        self._write_trace(
+            run_dir,
+            {
+                "stage": "same_product_probe",
+                "client_article": owner_article,
+                "status": product_response.get("status"),
+                "elapsed_ms": product_response.get("elapsed_ms"),
+                "events": product_response.get("events"),
+            },
+        )
+        if not product_response.get("ok") or not isinstance(
+            product_response.get("json"), dict
+        ):
+            return {
+                "available": False,
+                "failed": True,
+                "request_made": False,
+                "seller_list_found": False,
+                "offers": 0,
+                "skipped_own": 0,
+                "deduplicated": 0,
+                "error": str(product_response.get("status") or "NO_JSON"),
+            }
+
+        modal_response = self.ensure_browser().load_other_seller_offers(
+            owner_article,
+            product_response["json"],
+            int(getattr(self.settings, "request_wait_seconds", 1)),
+            int(getattr(self.settings, "product_reloads", 0)),
+        )
+        if not isinstance(modal_response, dict):
+            return {
+                "available": False,
+                "failed": True,
+                "request_made": True,
+                "seller_list_found": False,
+                "offers": 0,
+                "skipped_own": 0,
+                "deduplicated": 0,
+                "error": "INVALID_MODAL_RESPONSE",
+            }
+        self._write_trace(
+            run_dir,
+            {
+                "stage": "same_product_modal",
+                "client_article": owner_article,
+                "modal_link": modal_response.get("modal_link"),
+                "request_made": bool(modal_response.get("request_made")),
+                "seller_list_found": bool(modal_response.get("seller_list_found")),
+                "seller_count": int(modal_response.get("seller_count") or 0),
+                "status": modal_response.get("status"),
+                "elapsed_ms": modal_response.get("elapsed_ms"),
+                "events": modal_response.get("events"),
+            },
+        )
+        if not modal_response.get("ok"):
+            return {
+                "available": False,
+                "failed": True,
+                "request_made": bool(modal_response.get("request_made")),
+                "seller_list_found": False,
+                "offers": 0,
+                "skipped_own": 0,
+                "deduplicated": 0,
+                "error": str(modal_response.get("status") or "NO_JSON"),
+            }
+
+        skipped_own = 0
+        deduplicated = 0
+        seen: set[tuple[str, str, str]] = set()
+        valid_offers: list[dict[str, Any]] = []
+        for offer in modal_response.get("offers") or []:
+            candidate_article = str(offer.get("candidate_article") or "").strip()
+            current_price = int(offer.get("card_price") or 0)
+            if not candidate_article or current_price <= 0:
+                continue
+            if (
+                candidate_article in all_catalog_articles
+                or self._is_expected_market_seller(offer)
+            ):
+                skipped_own += 1
+                continue
+            dedupe_key = (
+                owner_article,
+                candidate_article,
+                str(offer.get("seller_id") or "").strip(),
+            )
+            if dedupe_key in seen:
+                deduplicated += 1
+                continue
+            seen.add(dedupe_key)
+            valid_offers.append(offer)
+
+        modal_link = str(modal_response.get("modal_link") or "")
+        modal_url = str(modal_response.get("url") or modal_link)
+        keep_keys: set[tuple[str, str]] = set()
+        same_product_match = {
+            "accepted": True,
+            "level": "EXACT",
+            "score": 100,
+            "method": "OZON_SAME_PRODUCT_GROUP",
+            "reason": "Ozon otherOffersFromSellers for the client product",
+            "reasons": ["ozon_other_offers_from_sellers"],
+        }
+        for rank, offer in enumerate(valid_offers, start=1):
+            candidate_article = str(offer["candidate_article"])
+            candidate_url = str(offer.get("product_url") or owner.get("canonical_url") or "")
+            candidate = {
+                "article": candidate_article,
+                "name": str(owner.get("title") or ""),
+                "url": candidate_url,
+                "catalog_card_price": int(offer.get("card_price") or 0),
+            }
+            self.registry.upsert_catalog_product(
+                candidate,
+                modal_url,
+                run_id,
+                0,
+                now_iso(),
+                queue_detail=False,
+            )
+            self.registry.save_market_candidate(
+                owner_article,
+                candidate_article,
+                "Ozon otherOffersFromSellers",
+                modal_url,
+                rank,
+                same_product_match,
+                run_id,
+                candidate=candidate,
+                offer=offer,
+                replace_analysis_candidate=False,
+            )
+            seller_key = str(
+                offer.get("seller_id") or offer.get("seller_name") or ""
+            ).strip()
+            keep_keys.add((candidate_article, seller_key))
+
+        seller_list_found = bool(modal_response.get("seller_list_found"))
+        stale_removed = 0
+        if seller_list_found:
+            stale_removed = self.registry.reconcile_same_product_candidates(
+                run_id,
+                owner_article,
+                keep_keys,
+            )
+        return {
+            "available": bool(valid_offers),
+            "failed": False,
+            "request_made": bool(modal_response.get("request_made")),
+            "seller_list_found": seller_list_found,
+            "offers": len(valid_offers),
+            "articles": [
+                str(offer.get("candidate_article") or "")
+                for offer in valid_offers
+            ],
+            "skipped_own": skipped_own,
+            "deduplicated": deduplicated,
+            "stale_removed": stale_removed,
+            "modal_link": modal_link,
+            "modal_url": modal_url,
+            "error": "",
+        }
 
     def market_search(
         self, limit: int | None = None, articles: set[str] | None = None,
@@ -637,8 +870,21 @@ class Collector:
             "pages_loaded": 0, "items_total": len(owners), "items_success": 0,
             "items_failed": 0, "items_blocked": 0, "candidates_found": 0,
             "exact_found": 0, "comparable_found": 0,
+            "known_candidates": 0, "known_refreshed": 0,
+            "known_refresh_failed": 0, "existing_candidates_seen": 0,
+            "new_candidates": 0,
+            "same_product_probe": 0, "same_product_requests": 0,
+            "same_product_success": 0, "same_product_failed": 0,
+            "same_product_available": 0, "same_product_unavailable": 0,
+            "same_product_offers": 0, "same_product_skipped_own": 0,
+            "same_product_deduplicated": 0,
+            "same_product_search_skipped": 0,
+            "same_product_fallback_search": 0,
+            "same_product_stale_removed": 0,
         }
         status = "PASSED" if catalog_run_id and len(owners) == len(current_catalog_articles) else "PARTIAL"
+        refreshed_candidate_articles: dict[str, bool] = {}
+        same_product_articles: set[str] = set()
         print("=" * 78)
         print("OZON COLLECTOR 3.3.2 — ПОИСК РЫНОЧНЫХ ПРЕДЛОЖЕНИЙ")
         print("Основной уровень: бренд + модель + размер. Резервный: бренд + размер.")
@@ -655,20 +901,180 @@ class Collector:
                         f"processed={owner_index - 1} remaining={remaining}"
                     )
                 owner_article = str(owner.get("article") or "")
+                self.registry.begin_market_search(owner_article, run_id)
+                metrics["same_product_probe"] += 1
+                same_product = self._collect_same_product_offers(
+                    owner,
+                    run_id,
+                    run_dir,
+                    all_catalog_articles,
+                )
+                metrics["same_product_requests"] += int(
+                    bool(same_product.get("request_made"))
+                )
+                metrics["same_product_skipped_own"] += int(
+                    same_product.get("skipped_own") or 0
+                )
+                metrics["same_product_deduplicated"] += int(
+                    same_product.get("deduplicated") or 0
+                )
+                metrics["same_product_stale_removed"] += int(
+                    same_product.get("stale_removed") or 0
+                )
+                if same_product.get("failed"):
+                    metrics["same_product_failed"] += 1
+                    if status == "PASSED":
+                        status = "PARTIAL"
+                elif same_product.get("request_made"):
+                    metrics["same_product_success"] += 1
+
+                if same_product.get("available"):
+                    metrics["same_product_available"] += 1
+                    metrics["same_product_offers"] += int(
+                        same_product.get("offers") or 0
+                    )
+                    metrics["same_product_search_skipped"] += 1
+                    same_product_articles.update(
+                        str(article)
+                        for article in same_product.get("articles") or []
+                    )
+                    total_candidates, exact_count, comparable_count = (
+                        self._market_snapshot_counts(run_id, owner_article)
+                    )
+                    modal_link = str(same_product.get("modal_link") or "")
+                    modal_url = str(same_product.get("modal_url") or modal_link)
+                    self.registry.finish_market_search(
+                        owner_article,
+                        "Ozon otherOffersFromSellers",
+                        modal_url,
+                        "COMPLETED",
+                        total_candidates,
+                        exact_count,
+                        comparable_count,
+                        run_id,
+                    )
+                    self.registry.record_market_analysis_product(
+                        run_id,
+                        owner_article,
+                        "COMPLETED",
+                        "Ozon otherOffersFromSellers",
+                        modal_url,
+                        total_candidates,
+                        exact_count,
+                        comparable_count,
+                    )
+                    metrics["candidates_found"] += total_candidates
+                    metrics["exact_found"] += exact_count
+                    metrics["comparable_found"] += comparable_count
+                    metrics["items_success"] += 1
+                    print(
+                        f"  SAME PRODUCT | offers={same_product.get('offers', 0)}; "
+                        "catalog search skipped"
+                    )
+                    continue
+
+                metrics["same_product_unavailable"] += int(
+                    not same_product.get("failed")
+                )
+                metrics["same_product_fallback_search"] += 1
+                known_rows = list(
+                    self.registry.known_market_candidates(owner_article)
+                )
+                known_articles = {
+                    str(row.get("candidate_article") or "")
+                    for row in known_rows
+                    if str(row.get("candidate_article") or "")
+                }
+                metrics["known_candidates"] += len(known_rows)
+                owner_known_refreshed = 0
+
+                for known in known_rows:
+                    candidate_article = str(
+                        known.get("candidate_article") or ""
+                    )
+                    if not candidate_article:
+                        continue
+                    if candidate_article in same_product_articles:
+                        continue
+                    if (
+                        same_product.get("failed")
+                        and str(known.get("match_method") or "")
+                        == "OZON_SAME_PRODUCT_GROUP"
+                    ):
+                        # A transient product/modal failure must not turn the
+                        # inherited Ozon-confirmed row into a PDP/search row.
+                        continue
+
+                    refreshed = refreshed_candidate_articles.get(candidate_article)
+                    if refreshed is None:
+                        refreshed = self._enrich_market_candidate(
+                            candidate_article,
+                            run_id,
+                            run_dir,
+                            force=True,
+                        )
+                        refreshed_candidate_articles[candidate_article] = bool(refreshed)
+
+                    if not refreshed:
+                        metrics["known_refresh_failed"] += 1
+                        if status == "PASSED":
+                            status = "PARTIAL"
+                        continue
+
+                    candidate = self.registry.get_product(candidate_article)
+                    offer = self.registry.primary_offer(candidate_article)
+                    match = evaluate_match(owner, candidate)
+                    if self._is_expected_market_seller(offer):
+                        match = {
+                            "accepted": False,
+                            "level": "REJECTED",
+                            "score": 0,
+                            "method": "OWN_SELLER",
+                            "reason": "Собственный продавец",
+                            "reasons": [],
+                        }
+                    self.registry.save_market_candidate(
+                        owner_article,
+                        candidate_article,
+                        str(known.get("query_text") or ""),
+                        str(known.get("query_url") or ""),
+                        int(known.get("catalog_rank") or 0),
+                        match,
+                        run_id,
+                        candidate=candidate,
+                        offer=offer,
+                    )
+                    metrics["known_refreshed"] += 1
+                    owner_known_refreshed += 1
+
+                total_candidates, exact_count, comparable_count = (
+                    self._market_snapshot_counts(run_id, owner_article)
+                )
                 queries = build_search_queries(owner)
                 print(f"\n[ПОЗИЦИЯ {owner_index}/{len(owners)}] {owner_article} — {owner.get('title','')}")
                 if not queries:
                     print("SKIP | недостаточно бренда или размера для поиска")
                     reason = "Нет безопасного identity для поиска"
-                    self.registry.finish_market_search(owner_article, "", "", "NO_SAFE_IDENTITY", 0, 0, 0, run_id, reason)
-                    self.registry.record_market_analysis_product(
-                        run_id, owner_article, "NO_SAFE_IDENTITY", "", "", 0, 0, 0, reason
+                    item_status = (
+                        "COMPLETED"
+                        if exact_count or comparable_count
+                        else "NO_SAFE_IDENTITY"
                     )
+                    self.registry.finish_market_search(
+                        owner_article, "", "", item_status, total_candidates,
+                        exact_count, comparable_count, run_id, reason,
+                    )
+                    self.registry.record_market_analysis_product(
+                        run_id, owner_article, item_status, "", "", total_candidates,
+                        exact_count, comparable_count, reason,
+                    )
+                    metrics["candidates_found"] += total_candidates
+                    metrics["exact_found"] += exact_count
+                    metrics["comparable_found"] += comparable_count
                     metrics["items_success"] += 1
                     continue
-                self.registry.begin_market_search(owner_article, run_id)
                 unique_candidates: dict[str, tuple[dict[str, Any], str, str, int]] = {}
-                exact_count = comparable_count = 0
+                processed_candidate_articles: set[str] = set()
                 last_query = last_url = ""
                 search_error = ""
                 for query_index, query in enumerate(queries, start=1):
@@ -698,14 +1104,19 @@ class Collector:
                         metrics["pages_loaded"] += 1
                         for rank, item in enumerate(response.get("products") or [], start=1):
                             article = str(item.get("article") or "")
+                            if article in known_articles:
+                                metrics["existing_candidates_seen"] += 1
+                                continue
                             if (
                                 not article or article == owner_article
                                 or article in all_catalog_articles
+                                or article in same_product_articles
                                 or article in unique_candidates
                             ):
                                 continue
                             self.registry.upsert_catalog_product(item, search_url, run_id, page_no, now_iso())
                             unique_candidates[article] = (item, query, search_url, rank)
+                            metrics["new_candidates"] += 1
                             if len(unique_candidates) >= self.settings.market_search_candidate_limit:
                                 break
                         if len(unique_candidates) >= self.settings.market_search_candidate_limit:
@@ -715,32 +1126,49 @@ class Collector:
                             break
                         current_url = next_page
                     # First query results are enriched before deciding whether fallback is needed.
-                    detail_articles = list(unique_candidates)[:self.settings.market_search_detail_limit]
+                    detail_articles = [
+                        article
+                        for article in list(unique_candidates)[
+                            :self.settings.market_search_detail_limit
+                        ]
+                        if article not in processed_candidate_articles
+                    ]
                     for candidate_article in detail_articles:
-                        self._enrich_market_candidate(candidate_article, run_id, run_dir)
+                        processed_candidate_articles.add(candidate_article)
+                        refreshed = refreshed_candidate_articles.get(candidate_article)
+                        if refreshed is None:
+                            refreshed = self._enrich_market_candidate(
+                                candidate_article,
+                                run_id,
+                                run_dir,
+                                force=True,
+                            )
+                            refreshed_candidate_articles[candidate_article] = bool(refreshed)
+                        if not refreshed:
+                            continue
                         candidate = self.registry.get_product(candidate_article)
                         offer = self.registry.primary_offer(candidate_article)
-                        own_seller = str(offer.get("seller_name") or "").strip().casefold() == str(self.settings.expected_seller or "").strip().casefold()
                         match = evaluate_match(owner, candidate)
-                        if own_seller:
-                            match = {"accepted": False, "level": "REJECTED", "score": 0, "method": "OWN_SELLER", "reason": "Собственный продавец", "reasons": []}
+                        if self._is_expected_market_seller(offer):
+                            match = {
+                                "accepted": False,
+                                "level": "REJECTED",
+                                "score": 0,
+                                "method": "OWN_SELLER",
+                                "reason": "Собственный продавец",
+                                "reasons": [],
+                            }
                         _, q, q_url, rank = unique_candidates[candidate_article]
                         self.registry.save_market_candidate(
                             owner_article, candidate_article, q, q_url, rank, match, run_id,
                             candidate=candidate, offer=offer,
                         )
-                    rows = self.registry.conn.execute(
-                        """SELECT match_level,COUNT(*) c FROM market_analysis_candidates
-                           WHERE market_run_id=? AND client_article=? GROUP BY match_level""",
-                        (run_id, owner_article),
-                    ).fetchall()
-                    counts = {str(row[0]): int(row[1]) for row in rows}
-                    exact_count = counts.get("EXACT",0)+counts.get("STRONG",0)
-                    comparable_count = counts.get("COMPARABLE",0)
+                    total_candidates, exact_count, comparable_count = (
+                        self._market_snapshot_counts(run_id, owner_article)
+                    )
                     if exact_count:
                         break
                     sleep_range(self.settings.market_search_delay_seconds)
-                total_candidates = len(unique_candidates)
                 metrics["candidates_found"] += total_candidates
                 metrics["exact_found"] += exact_count
                 metrics["comparable_found"] += comparable_count

@@ -26,7 +26,15 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-from ozon_probe_core import article_from_url, normalize_product_url, parse_catalog_html, parse_price
+from ozon_probe_core import (
+    article_from_url,
+    extract_best_seller_modal_link,
+    normalize_product_url,
+    other_seller_list_state,
+    parse_catalog_html,
+    parse_other_seller_offers,
+    parse_price,
+)
 from ozon_browser_runtime import (
     browser_is_eligible,
     normalize_profile_path,
@@ -1302,17 +1310,34 @@ class BrowserSession:
             "events": events,
         }
 
-    def load_product_api(
+    def load_composer_path(
         self,
-        article: str,
+        path: str,
         wait_seconds: int,
         reloads: int,
     ) -> dict[str, Any]:
         assert self.driver is not None
 
+        composer_path = str(path or "").strip()
+        parsed_path = urlparse(composer_path)
+        if parsed_path.scheme or parsed_path.netloc:
+            if str(parsed_path.hostname or "").casefold() not in self.allowed_hosts:
+                return {
+                    "ok": False,
+                    "status": "INVALID_COMPOSER_PATH",
+                    "url": composer_path,
+                    "elapsed_ms": 0,
+                    "events": [],
+                }
+            composer_path = parsed_path.path
+            if parsed_path.query:
+                composer_path += f"?{parsed_path.query}"
+        if not composer_path.startswith("/"):
+            composer_path = f"/{composer_path}"
+
         url = (
             f"{self.site_root}/api/composer-api.bx/page/json/v2"
-            f"?url=/product/{article}&__rr=1"
+            f"?url={composer_path}&__rr=1"
         )
 
         started = time.monotonic()
@@ -1430,6 +1455,70 @@ class BrowserSession:
             ),
             "events": events,
         }
+
+    def load_product_api(
+        self,
+        article: str,
+        wait_seconds: int,
+        reloads: int,
+    ) -> dict[str, Any]:
+        return self.load_composer_path(
+            f"/product/{article}",
+            wait_seconds=wait_seconds,
+            reloads=reloads,
+        )
+
+    def load_other_seller_offers(
+        self,
+        article: str,
+        product_json: dict[str, Any],
+        wait_seconds: int,
+        reloads: int,
+    ) -> dict[str, Any]:
+        modal_link = extract_best_seller_modal_link(product_json)
+        if not modal_link:
+            return {
+                "ok": True,
+                "status": "SAME_PRODUCT_UNAVAILABLE",
+                "request_made": False,
+                "modal_link": "",
+                "seller_list_found": False,
+                "seller_count": 0,
+                "offers": [],
+            }
+
+        response = self.load_composer_path(
+            modal_link,
+            wait_seconds=wait_seconds,
+            reloads=reloads,
+        )
+        result = dict(response)
+        result["request_made"] = True
+        result["modal_link"] = modal_link
+        if not response.get("ok"):
+            result["seller_list_found"] = False
+            result["seller_count"] = 0
+            result["offers"] = []
+            return result
+
+        modal_json = response.get("json")
+        modal_json = modal_json if isinstance(modal_json, dict) else {}
+        seller_list_found, seller_count = other_seller_list_state(modal_json)
+        currency = "KZT" if self.marketplace_label == "Ozon.kz" else "RUB"
+        offers = parse_other_seller_offers(modal_json, self.site_root, currency)
+        result.update(
+            {
+                "status": (
+                    "SAME_PRODUCT_AVAILABLE"
+                    if seller_count > 0
+                    else "SAME_PRODUCT_UNAVAILABLE"
+                ),
+                "seller_list_found": seller_list_found,
+                "seller_count": seller_count,
+                "offers": offers,
+            }
+        )
+        return result
 
     def return_original(self) -> None:
         if self.driver is None or not self.original_url:

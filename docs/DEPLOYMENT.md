@@ -124,7 +124,7 @@ Set-Location C:\Spyon\current
 
 1. Выполнить `git fetch origin production`.
 2. Выполнить только `git merge --ff-only origin/production` в `C:\Spyon\current`.
-3. Перезапустить Scheduled Task `Spyon Production`.
+3. Через `stop-production.ps1` остановить проверенный PID `app.py`, завершить wrapper Scheduled Task `Spyon Production`, запустить задачу снова и подтвердить новый живой PID в `data\server.pid`.
 4. Проверить `http://127.0.0.1:8765/health`, `/ready` и `/`.
 5. При любой ошибке завершиться ненулевым кодом и сохранить deploy log.
 
@@ -170,6 +170,19 @@ catalogue run as non-publishing: the prior tenant seller snapshot remains
 active. Ozon price actualisation is market-only and must not be used to rewrite
 the authoritative own catalogue price.
 
+The market snapshot has a different publication contract from the own catalogue:
+an Ozon.ru/Ozon.kz market run immediately clones the previous current snapshot
+and becomes current. Each owner is first probed through its normal product
+Composer response. If Ozon advertises `webBestSeller-*` with a positive count,
+deployment uses the exact returned `modalLink`; a successful `webSellerList-*`
+response becomes exact same-product offers and skips discovery search. Missing
+capability falls back to known-candidate refresh and search. `PARTIAL` keeps
+inherited values when the modal or candidate could not be opened, and stale
+same-product rows are removed only after a successful seller-list response.
+PostgreSQL reads must not depend on physical SQLite registry files, and Ozon.kz
+drawer data comes from the generic `ozon_kz` schema rather than legacy KZ
+product/offer tables.
+
 ## Post-deploy verification
 
 ```powershell
@@ -212,7 +225,7 @@ The deployment sequence is:
 5. Create a verified PostgreSQL backup when a migration is pending.
 6. Apply safe append-only migrations under an advisory lock.
 7. Verify the PostgreSQL schema.
-8. Restart Spyon.
+8. Stop the verified `app.py` PID, end/re-run `Spyon Production`, and require a different live PID before HTTP checks.
 9. Require successful /health, /ready and / responses.
 
 Applied migrations are recorded in app.schema_migrations with the migration

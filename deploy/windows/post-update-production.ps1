@@ -176,12 +176,79 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-DeployLog "Restarting Spyon Production."
 
+$pidPath = Join-Path `
+    $RepoRoot `
+    'data\server.pid'
+
+$previousServerPid = 0
+
+if (
+    Test-Path `
+        -LiteralPath $pidPath
+) {
+    [void][int]::TryParse(
+        (
+            Get-Content `
+                -LiteralPath $pidPath `
+                -Raw
+        ).Trim(),
+        [ref]$previousServerPid
+    )
+}
+
+$stopScript = Join-Path `
+    $RepoRoot `
+    'deploy\windows\stop-production.ps1'
+
+if (
+    -not (
+        Test-Path `
+            -LiteralPath $stopScript
+    )
+) {
+    throw (
+        'Production stop helper ' +
+        'was not found.'
+    )
+}
+
+& powershell.exe `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File $stopScript
+
+if (
+    $LASTEXITCODE -ne 0
+) {
+    throw (
+        'Unable to stop the previous ' +
+        'Spyon Production process.'
+    )
+}
+
+# The real app.py process is stopped before ending its Scheduled Task wrapper.
 & schtasks.exe `
     /End `
     /TN "Spyon Production" `
-    2>$null | Out-Null
+    2>$null |
+    Out-Null
 
-Start-Sleep -Seconds 3
+if (
+    $previousServerPid -gt 0 `
+    -and (
+        Get-Process `
+            -Id $previousServerPid `
+            -ErrorAction SilentlyContinue
+    )
+) {
+    throw (
+        "Previous Spyon PID " +
+        "$previousServerPid " +
+        "is still running."
+    )
+}
+
+Start-Sleep -Seconds 2
 
 & schtasks.exe `
     /Run `
@@ -193,6 +260,61 @@ if ($LASTEXITCODE -ne 0) {
         'Unable to start Spyon Production task.'
     )
 }
+
+$newServerPid = 0
+
+for (
+    $pidAttempt = 1;
+    $pidAttempt -le 30;
+    $pidAttempt++
+) {
+    if (
+        Test-Path `
+            -LiteralPath $pidPath
+    ) {
+        $candidatePid = 0
+
+        [void][int]::TryParse(
+            (
+                Get-Content `
+                    -LiteralPath $pidPath `
+                    -Raw
+            ).Trim(),
+            [ref]$candidatePid
+        )
+
+        if (
+            $candidatePid -gt 0 `
+            -and $candidatePid `
+                -ne $previousServerPid `
+            -and (
+                Get-Process `
+                    -Id $candidatePid `
+                    -ErrorAction SilentlyContinue
+            )
+        ) {
+            $newServerPid = $candidatePid
+            break
+        }
+    }
+
+    Start-Sleep -Seconds 1
+}
+
+if (
+    $newServerPid -le 0
+) {
+    throw (
+        'Spyon Production did not ' +
+        'create a new server PID.'
+    )
+}
+
+Write-DeployLog (
+    "Spyon restarted. " +
+    "previous_pid=$previousServerPid " +
+    "new_pid=$newServerPid"
+)
 
 $urls = @(
     'http://127.0.0.1:8765/health',

@@ -249,6 +249,114 @@ class OzonKzConnectorTests(unittest.TestCase):
             self.assertEqual(1, overview["ozon_kz_data_ready_count"])
             self.assertEqual("source_required", status(kz_db)["status"])
 
+    def test_kz_drawer_and_history_prefer_generic_market_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_kz_generic_drawer_") as folder:
+            root = Path(folder)
+            main_db = root / "main.db"
+            kz_db = root / "ozon_kz.db"
+            ensure_database(main_db)
+            ensure_schema(kz_db)
+            registry = Registry(kz_db)
+            stamp = "2026-09-04T10:00:00+05:00"
+            source = "https://ozon.kz/seller/alfa-tires-3381444/"
+            try:
+                registry.begin_run("catalog", "discover", source)
+                for article, title, price in (
+                    ("A", "Owner 205/55 R16", 42000),
+                    ("B", "Competitor 205/55 R16", 40000),
+                ):
+                    registry.upsert_catalog_product(
+                        {
+                            "article": article,
+                            "name": title,
+                            "url": f"https://ozon.kz/product/{article}/",
+                            "catalog_card_price": price,
+                        },
+                        source if article == "A" else "https://ozon.kz/search/",
+                        "catalog" if article == "A" else "candidate",
+                        1,
+                        stamp,
+                    )
+                registry.finish_run(
+                    "catalog", "PASSED", {"items_total": 1, "items_success": 1}
+                )
+                registry.mark_catalog_published("catalog")
+                registry.begin_market_analysis("market", "catalog", 1)
+                registry.save_market_candidate(
+                    "A", "B", "query", "https://ozon.kz/search/", 1,
+                    {
+                        "level": "EXACT",
+                        "score": 100,
+                        "method": "OZON_STRICT_FINGERPRINT",
+                        "reason": "same",
+                        "reasons": [],
+                    },
+                    "market",
+                    candidate={
+                        "title": "Competitor 205/55 R16",
+                        "canonical_url": "https://ozon.kz/product/B/",
+                    },
+                    offer={
+                        "seller_id": "generic-competitor",
+                        "seller_name": "Generic competitor",
+                        "card_price": 40000,
+                        "currency": "KZT",
+                        "availability_status": "AVAILABLE",
+                    },
+                )
+                registry.record_market_analysis_product(
+                    "market", "A", "COMPLETED", "query",
+                    "https://ozon.kz/search/", 1, 1, 0,
+                )
+                registry.finish_market_analysis(
+                    "market", "PASSED", {"items_success": 1}
+                )
+                registry.conn.execute(
+                    """INSERT INTO price_history(
+                           run_id,article,seller_key,card_price,currency,
+                           availability_status,collected_at
+                       ) VALUES(?,?,?,?,?,?,?)""",
+                    (
+                        "market", "A", "generic-history", 42000, "KZT",
+                        "AVAILABLE", stamp,
+                    ),
+                )
+                registry.conn.execute(
+                    """INSERT INTO ozon_kz_products(
+                           product_id,title,first_seen_at,last_seen_at
+                       ) VALUES('A','Legacy product',?,?)""",
+                    (stamp, stamp),
+                )
+                registry.conn.execute(
+                    """INSERT INTO ozon_kz_offers(
+                           product_id,seller_id,seller_name,price_kzt,
+                           availability_status,is_own,captured_at
+                       ) VALUES('A','legacy','Legacy competitor',1,
+                                'AVAILABLE',0,?)""",
+                    (stamp,),
+                )
+                registry.conn.execute(
+                    """INSERT INTO ozon_kz_price_history(
+                           product_id,seller_id,price_kzt,
+                           availability_status,captured_at
+                       ) VALUES('A','legacy',1,'AVAILABLE',?)""",
+                    (stamp,),
+                )
+                registry.conn.commit()
+            finally:
+                registry.close()
+
+            service = DataService(main_db, "unused", ozon_kz_db_path=kz_db)
+            row = service._ozon_kz_rows()[0]
+            detail = service.product("ozon_kz:A", rows=[row])
+            history = service.price_history("ozon_kz:A")
+
+            self.assertEqual("Generic competitor", detail["offers"][0]["merchant_name"])
+            self.assertEqual(40000, detail["offers"][0]["price_kzt"])
+            self.assertIsNone(detail["detail"])
+            self.assertEqual("generic-history", history[0]["series"])
+            self.assertEqual(42000.0, history[0]["price_kzt"])
+
 
 if __name__ == "__main__":
     unittest.main()

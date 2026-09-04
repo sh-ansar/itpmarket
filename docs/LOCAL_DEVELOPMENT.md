@@ -131,12 +131,27 @@ Ozon URL проходит два разных этапа: `parsed` означа�
 
 Canonical Ozon URL contract: accept both seller path variants on input and normalize every new/stored Ozon.ru and Ozon.kz source to `/seller/<slug>/`.
 
-For a live Ozon test, treat `sync-catalog`, `refresh-prices` (market-only), and
-`full-sync` as separate operations. `sync-catalog` publishes only after the
+For a live Ozon test, treat `sync-catalog`, the UI «Актуализация цен» action
+(`market-search`), and `full-sync` as separate operations. `sync-catalog` publishes only after the
 whole seller discovery and details phase succeeds; an explicit diagnostic cap,
 partial result, challenge or interruption must retain the previous tenant
 snapshot. `full-sync` stops before market search unless that catalogue phase is
 complete. Never use a market-only command to refresh own catalogue prices.
+
+Market search is intentionally incremental for both Ozon.ru and Ozon.kz. At run
+start it clones the last current market snapshot with plain `INSERT INTO ...
+SELECT` (required for PostgreSQL compatibility) and makes that clone current.
+For every owner, the product Composer JSON is checked for a dynamic
+`webBestSeller-*` widget. Do not construct a modal route: request the returned
+`modalLink` only when `count > 0`, then read the dynamic `webSellerList-*`
+widget. One or more valid foreign offers are saved as exact same-product rows
+and skip both search and competitor detail loading. Missing capability, missing
+seller-list, or an empty list falls back to known-candidate refresh followed by
+normal search. A temporary product/modal/detail failure retains inherited data
+and produces `PARTIAL`; reconcile stale `OZON_SAME_PRODUCT_GROUP` rows only
+after a successful seller-list response. Ozon.kz drawer/history should be
+verified against the generic registry tables, not `ozon_kz_products` or
+`ozon_kz_offers`.
 
 Marketplace settings display the complete registry even for a read-only user;
 the permission to view settings is separate from `manage_marketplaces`. A

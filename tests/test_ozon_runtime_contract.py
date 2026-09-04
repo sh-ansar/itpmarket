@@ -1024,7 +1024,23 @@ class OzonRuntimeContractTests(unittest.TestCase):
                 self.assertEqual(1400, before["market_min_price_original"])
                 self.assertEqual(1, before["exact_candidate_count"])
                 self.assertEqual("OZON_SAME_ARTICLE", before["match_method"])
-                self.assertEqual("PASSED", self._publish_market_result(registry, "market-new", None))
+                registry.begin_market_analysis("market-new", "catalog", 1)
+                registry.save_market_candidate(
+                    "A", "B", "Michelin Pilot", "https://www.ozon.ru/search/", 1,
+                    {"level": "REJECTED", "score": 0, "method": "IDENTITY_MISMATCH", "reason": "changed", "reasons": []},
+                    "market-new",
+                    candidate={"article": "B", "title": "Foreign", "canonical_url": "https://www.ozon.ru/product/B/"},
+                    offer={"seller_id": "foreign", "seller_name": "Foreign", "card_price": 1400, "currency": "RUB"},
+                )
+                registry.record_market_analysis_product(
+                    "market-new", "A", "NO_MATCH", "q", "u", 0, 0, 0
+                )
+                self.assertEqual(
+                    "PASSED",
+                    registry.finish_market_analysis(
+                        "market-new", "PASSED", {"items_success": 1}
+                    ),
+                )
                 after = service._ozon_rows()[0]
                 self.assertEqual(0, after["candidate_count"])
                 self.assertIsNone(after["market_min_price_original"])
@@ -1033,19 +1049,19 @@ class OzonRuntimeContractTests(unittest.TestCase):
             finally:
                 registry.close()
 
-    def test_partial_market_run_keeps_previous_completed_snapshot_current(self) -> None:
+    def test_partial_market_run_publishes_its_refreshed_snapshot(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_market_partial_") as folder:
             registry, path = self._market_fixture_registry(folder)
             try:
                 self.assertEqual("PASSED", self._publish_market_result(registry, "market-old", 100))
                 self.assertEqual("PARTIAL", self._publish_market_result(registry, "market-new", 120, "PARTIAL"))
                 row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
-                self.assertEqual(100, row["market_min_price_original"])
-                self.assertEqual("market-old", row["market_run_id"])
+                self.assertEqual(120, row["market_min_price_original"])
+                self.assertEqual("market-new", row["market_run_id"])
             finally:
                 registry.close()
 
-    def test_failed_blocked_or_interrupted_market_run_never_publishes(self) -> None:
+    def test_warm_snapshot_remains_current_for_terminal_nonpassed_runs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_market_failed_") as folder:
             registry, path = self._market_fixture_registry(folder)
             try:
@@ -1053,10 +1069,209 @@ class OzonRuntimeContractTests(unittest.TestCase):
                 for status in ("FAILED", "BLOCKED", "INTERRUPTED"):
                     self.assertEqual(status, self._publish_market_result(registry, f"market-{status}", 120, status))
                     row = DataService(Path(folder) / "app.db", "unused", path)._ozon_rows()[0]
-                    self.assertEqual(100, row["market_min_price_original"])
-                    self.assertEqual("market-old", row["market_run_id"])
+                    self.assertEqual(120, row["market_min_price_original"])
+                    self.assertEqual(f"market-{status}", row["market_run_id"])
             finally:
                 registry.close()
+
+    def test_market_analysis_warm_start_clones_last_snapshot_for_new_catalog(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_market_warm_start_") as folder:
+            registry, _ = self._market_fixture_registry(folder)
+            try:
+                self.assertEqual(
+                    "PASSED",
+                    self._publish_market_result(registry, "market-old", 1400),
+                )
+
+                previous = registry.begin_market_analysis(
+                    "market-new", "catalog-new", 1
+                )
+
+                self.assertEqual("market-old", previous)
+                current = registry.conn.execute(
+                    """SELECT market_run_id FROM market_analysis_current
+                       WHERE catalog_run_id='catalog-new'"""
+                ).fetchone()
+                inherited = registry.conn.execute(
+                    """SELECT card_price FROM market_analysis_candidates
+                       WHERE market_run_id='market-new'
+                         AND client_article='A'
+                         AND candidate_article='B'"""
+                ).fetchone()
+                self.assertEqual("market-new", current[0])
+                self.assertEqual(1400, inherited[0])
+            finally:
+                registry.close()
+
+    def test_market_search_refreshes_known_before_discovery_and_skips_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_known_market_") as folder:
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                market_search_batch_limit=30,
+                market_search_max_pages=1,
+                market_search_candidate_limit=10,
+                market_search_detail_limit=10,
+                market_search_delay_seconds=(0, 0),
+                catalog_wait_seconds=1,
+                page_reloads=0,
+                start_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
+                expected_seller="Alfa Tires",
+            )
+            collector.registry = MagicMock()
+            collector.registry.catalog_articles.return_value = {"A"}
+            collector.registry.client_products_for_market_search.return_value = [
+                {"article": "A", "title": "Owner"}
+            ]
+            collector.registry.known_market_candidates.return_value = [
+                {
+                    "candidate_article": "B",
+                    "query_text": "old query",
+                    "query_url": "https://www.ozon.ru/search/old",
+                    "catalog_rank": 1,
+                }
+            ]
+            collector.registry.get_product.side_effect = lambda article: {
+                "article": article,
+                "title": f"Candidate {article}",
+            }
+            collector.registry.primary_offer.return_value = {
+                "seller_id": "foreign",
+                "seller_name": "Foreign",
+                "seller_url": "https://www.ozon.ru/seller/foreign/",
+                "card_price": 1200,
+            }
+            collector.registry.finish_market_analysis.return_value = "PASSED"
+            collector._run_dir = MagicMock(return_value=Path(folder))
+            collector.generate_outputs = MagicMock()
+            collector._enrich_market_candidate = MagicMock(return_value=True)
+            collector._market_snapshot_counts = MagicMock(
+                side_effect=[(1, 1, 0), (2, 2, 0)]
+            )
+            browser = MagicMock()
+            browser.load_catalog.return_value = {
+                "ok": True,
+                "products": [
+                    {"article": "B", "name": "Known"},
+                    {"article": "C", "name": "New"},
+                ],
+                "next_page": "",
+            }
+            collector.ensure_browser = MagicMock(return_value=browser)
+
+            accepted = {
+                "accepted": True,
+                "level": "EXACT",
+                "score": 100,
+                "method": "TEST",
+                "reason": "same",
+                "reasons": [],
+            }
+            with patch(
+                "ozon_collector.build_search_queries", return_value=["test"]
+            ), patch(
+                "ozon_collector.evaluate_match", return_value=accepted
+            ), patch("ozon_collector.sleep_range"):
+                result = collector.market_search(catalog_run_id="catalog")
+
+            refreshed_articles = [
+                call.args[0]
+                for call in collector._enrich_market_candidate.call_args_list
+            ]
+            saved_articles = [
+                call.args[1]
+                for call in collector.registry.save_market_candidate.call_args_list
+            ]
+            self.assertEqual(["B", "C"], refreshed_articles)
+            self.assertTrue(all(
+                call.kwargs.get("force") is True
+                for call in collector._enrich_market_candidate.call_args_list
+            ))
+            self.assertEqual(["B", "C"], saved_articles)
+            self.assertEqual(1, result["known_candidates"])
+            self.assertEqual(1, result["known_refreshed"])
+            self.assertEqual(1, result["existing_candidates_seen"])
+            self.assertEqual(1, result["new_candidates"])
+
+    def test_failed_known_refresh_keeps_inherited_candidate_and_marks_partial(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_failed_known_") as folder:
+            collector = Collector.__new__(Collector)
+            collector.settings = SimpleNamespace(
+                market_search_batch_limit=30,
+                market_search_max_pages=1,
+                market_search_candidate_limit=10,
+                market_search_detail_limit=10,
+                market_search_delay_seconds=(0, 0),
+                catalog_wait_seconds=1,
+                page_reloads=0,
+                start_url="https://www.ozon.ru/seller/alfa-tires-3381444/",
+                expected_seller="Alfa Tires",
+            )
+            collector.registry = MagicMock()
+            collector.registry.catalog_articles.return_value = {"A"}
+            collector.registry.client_products_for_market_search.return_value = [
+                {"article": "A", "title": "Owner"}
+            ]
+            collector.registry.known_market_candidates.return_value = [
+                {"candidate_article": "B"}
+            ]
+            collector.registry.finish_market_analysis.side_effect = (
+                lambda _run_id, status, _metrics: status
+            )
+            collector._run_dir = MagicMock(return_value=Path(folder))
+            collector.generate_outputs = MagicMock()
+            collector._enrich_market_candidate = MagicMock(return_value=False)
+            collector._market_snapshot_counts = MagicMock(
+                side_effect=[(1, 1, 0), (1, 1, 0)]
+            )
+            browser = MagicMock()
+            browser.load_catalog.return_value = {
+                "ok": True,
+                "products": [],
+                "next_page": "",
+            }
+            collector.ensure_browser = MagicMock(return_value=browser)
+
+            with patch(
+                "ozon_collector.build_search_queries", return_value=["test"]
+            ), patch("ozon_collector.sleep_range"):
+                result = collector.market_search(catalog_run_id="catalog")
+
+            self.assertEqual("PARTIAL", result["status"])
+            self.assertEqual(1, result["known_refresh_failed"])
+            self.assertEqual(1, result["exact_found"])
+            collector.registry.save_market_candidate.assert_not_called()
+
+    def test_market_warm_start_uses_postgres_safe_insert_select(self) -> None:
+        source = (OZON_ROOT / "registry.py").read_text(encoding="utf-8")
+        method = source[
+            source.index("def begin_market_analysis"):
+            source.index("def record_market_analysis_product")
+        ]
+        self.assertIn("INSERT INTO market_analysis_candidates", method)
+        self.assertNotIn("INSERT OR REPLACE", method)
+
+    def test_postgres_ozon_history_does_not_require_physical_sqlite_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ozon_postgres_history_") as folder:
+            service = DataService(
+                Path(folder) / "app.db",
+                "unused",
+                Path(folder) / "missing-ru.db",
+                ozon_kz_db_path=Path(folder) / "missing-kz.db",
+            )
+            connection = MagicMock()
+            connection.execute.return_value.fetchall.return_value = []
+            with patch(
+                "data_service.DatabaseSettings.from_environment",
+                return_value=SimpleNamespace(backend="postgresql"),
+            ), patch(
+                "data_service.table_exists", return_value=False
+            ), patch.object(
+                service, "_connect_path", return_value=connection
+            ) as connect_path:
+                self.assertEqual([], service.price_history("ozon:RU"))
+                self.assertEqual([], service.price_history("ozon_kz:KZ"))
+
+            self.assertEqual(2, connect_path.call_count)
 
     def test_new_published_catalog_makes_old_market_snapshot_not_analyzed(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ozon_market_stale_") as folder:

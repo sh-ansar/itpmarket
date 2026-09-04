@@ -190,6 +190,73 @@ class ProductSqlPaginationTests(unittest.TestCase):
                 item = self.data.targeted_product(prefixes[family] + source, self.user_id)
                 self.assertEqual("targeted", item["lookup_strategy"], family)
 
+    def test_targeted_ozon_drawers_overlay_market_snapshot_but_keep_own_price(self) -> None:
+        stamp = "2026-09-04T12:00:00+00:00"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executemany(
+                """INSERT INTO tenant_catalog_products(
+                       tenant_id,marketplace_code,source_product_code,title,
+                       price_amount,currency,active,first_seen_at,last_seen_at
+                   ) VALUES(?,?,?,?,?,?,1,?,?)""",
+                [
+                    (self.tenant_id, "ozon", "ru-overlay", "RU", 100, "RUB", stamp, stamp),
+                    (self.tenant_id, "ozon_kz", "kz-overlay", "KZ", 42000, "KZT", stamp, stamp),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        ru_analytics = {
+            "source_product_code": "ru-overlay",
+            "market_median_price_original": 200,
+            "market_min_price_original": 180,
+            "market_max_price_original": 220,
+            "price_status": "EXACT_BELOW",
+            "exact_candidates": [
+                {"merchant_name": "RU competitor", "price_rub": 200}
+            ],
+            "comparable_candidates": [],
+            "candidate_count": 1,
+            "exact_candidate_count": 1,
+            "comparable_candidate_count": 0,
+            "market_run_id": "ru-market",
+        }
+        kz_analytics = {
+            "source_product_code": "kz-overlay",
+            "market_price_kzt": 40000,
+            "market_median_price_kzt": 40000,
+            "market_min_price_kzt": 39000,
+            "market_max_price_kzt": 41000,
+            "price_status": "EXACT_ABOVE",
+            "exact_candidates": [
+                {"merchant_name": "KZ competitor", "price_kzt": 40000}
+            ],
+            "comparable_candidates": [],
+            "candidate_count": 1,
+            "exact_candidate_count": 1,
+            "comparable_candidate_count": 0,
+            "market_run_id": "kz-market",
+        }
+        with patch.object(
+            self.data, "_ozon_rows", return_value=[ru_analytics]
+        ), patch.object(
+            self.data, "_ozon_kz_rows", return_value=[kz_analytics]
+        ), patch.object(self.data, "price_history", return_value=[]):
+            ru = self.data.targeted_product("ozon:ru-overlay", self.user_id)
+            kz = self.data.targeted_product("ozon_kz:kz-overlay", self.user_id)
+
+        self.assertEqual(100, ru["price_original"])
+        self.assertEqual(550, ru["price_kzt"])
+        self.assertEqual(1100, ru["market_median_price_kzt"])
+        self.assertEqual(1100, ru["offers"][0]["price_kzt"])
+        self.assertEqual("ru-market", ru["market_run_id"])
+        self.assertEqual(42000, kz["price_kzt"])
+        self.assertEqual(40000, kz["market_median_price_kzt"])
+        self.assertEqual("KZ competitor", kz["offers"][0]["merchant_name"])
+        self.assertEqual("kz-market", kz["market_run_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -429,6 +429,8 @@ class Registry:
         run_id: str,
         page_no: int,
         collected_at: str,
+        *,
+        queue_detail: bool = True,
     ) -> tuple[bool, bool]:
         article = str(item.get("article") or "").strip()
         if not article:
@@ -515,9 +517,11 @@ class Registry:
                     timestamp,
                 ),
             )
-        if is_new or not current or str(current["detail_status"] or "") != "COMPLETE":
+        if queue_detail and (
+            is_new or not current or str(current["detail_status"] or "") != "COMPLETE"
+        ):
             self.queue_task(article, "ENRICH", 100 if is_new else 80)
-        elif price_changed:
+        elif queue_detail and price_changed:
             self.queue_task(article, "REFRESH_PRICE", 90)
         return is_new, price_changed
 
@@ -873,14 +877,92 @@ class Registry:
 
     def begin_market_analysis(
         self, run_id: str, catalog_run_id: str, items_total: int
-    ) -> None:
+    ) -> str:
+        """Start from the last published market snapshot and publish it warm."""
         with self.conn:
+            previous = self.conn.execute(
+                """
+                SELECT mac.market_run_id
+                FROM market_analysis_current mac
+                JOIN market_analysis_runs mar
+                  ON mar.run_id=mac.market_run_id
+                WHERE mac.catalog_run_id=?
+                ORDER BY mac.published_at DESC
+                LIMIT 1
+                """,
+                (str(catalog_run_id),),
+            ).fetchone()
+
+            if not previous:
+                previous = self.conn.execute(
+                    """
+                    SELECT mac.market_run_id
+                    FROM market_analysis_current mac
+                    JOIN market_analysis_runs mar
+                      ON mar.run_id=mac.market_run_id
+                    ORDER BY mac.published_at DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+
+            previous_run_id = str(previous[0]) if previous else ""
+
             self.conn.execute(
                 """INSERT INTO market_analysis_runs(
                        run_id,catalog_run_id,started_at,status,items_total
                    ) VALUES(?,?,?,'RUNNING',?)""",
                 (str(run_id), str(catalog_run_id), now_iso(), int(items_total)),
             )
+
+            if previous_run_id:
+                # Plain INSERT ... SELECT is portable through the PostgreSQL
+                # compatibility layer. The new run id makes every key unique.
+                self.conn.execute(
+                    """
+                    INSERT INTO market_analysis_products(
+                        market_run_id,client_article,status,query_text,query_url,
+                        candidates_found,exact_found,comparable_found,error,completed_at
+                    )
+                    SELECT ?,client_article,status,query_text,query_url,
+                           candidates_found,exact_found,comparable_found,error,completed_at
+                    FROM market_analysis_products
+                    WHERE market_run_id=?
+                    """,
+                    (str(run_id), previous_run_id),
+                )
+                self.conn.execute(
+                    """
+                    INSERT INTO market_analysis_candidates(
+                        market_run_id,client_article,candidate_article,seller_key,seller_id,
+                        seller_name,seller_url,seller_rating,card_price,regular_price,
+                        original_price,currency,availability_status,product_url,product_title,
+                        catalog_rank,match_level,match_score,match_method,match_reason,
+                        reasons_json,collected_at
+                    )
+                    SELECT ?,client_article,candidate_article,seller_key,seller_id,
+                           seller_name,seller_url,seller_rating,card_price,regular_price,
+                           original_price,currency,availability_status,product_url,product_title,
+                           catalog_rank,match_level,match_score,match_method,match_reason,
+                           reasons_json,collected_at
+                    FROM market_analysis_candidates
+                    WHERE market_run_id=?
+                    """,
+                    (str(run_id), previous_run_id),
+                )
+
+            self.conn.execute(
+                """
+                INSERT INTO market_analysis_current(
+                    catalog_run_id,market_run_id,published_at
+                ) VALUES(?,?,?)
+                ON CONFLICT(catalog_run_id) DO UPDATE SET
+                    market_run_id=excluded.market_run_id,
+                    published_at=excluded.published_at
+                """,
+                (str(catalog_run_id), str(run_id), now_iso()),
+            )
+
+        return previous_run_id
 
     def record_market_analysis_product(
         self, run_id: str, article: str, status: str, query_text: str,
@@ -908,12 +990,12 @@ class Registry:
             ).fetchone()
             if not expected:
                 return "FAILED"
-            completed = int(self.conn.execute(
-                "SELECT COUNT(*) FROM market_analysis_products WHERE market_run_id=?",
-                (str(run_id),),
-            ).fetchone()[0])
             expected_count = int(expected["items_total"] or 0)
-            if final_status == "PASSED" and completed != expected_count:
+            processed_count = (
+                int(metrics.get("items_success") or 0)
+                + int(metrics.get("items_failed") or 0)
+            )
+            if final_status == "PASSED" and processed_count != expected_count:
                 final_status = "PARTIAL"
             self.conn.execute(
                 """UPDATE market_analysis_runs
@@ -925,7 +1007,7 @@ class Registry:
                     str(metrics.get("notes") or ""), str(run_id),
                 ),
             )
-            if final_status == "PASSED":
+            if final_status in {"PASSED", "PARTIAL", "BLOCKED", "INTERRUPTED"}:
                 self.conn.execute(
                     """INSERT INTO market_analysis_current(catalog_run_id,market_run_id,published_at)
                        VALUES(?,?,?)
@@ -943,6 +1025,39 @@ class Registry:
             """, (str(article),)
         ).fetchone()
         return dict(row) if row else {}
+
+    def known_market_candidates(
+        self,
+        client_article: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.conn.execute(
+                """
+                SELECT
+                    c.*,
+                    p.canonical_url AS product_url,
+                    p.title AS product_title
+                FROM market_search_candidates c
+                JOIN products p
+                  ON p.article=c.candidate_article
+                WHERE c.client_article=?
+                  AND c.active=1
+                  AND c.match_level IN ('EXACT','STRONG','COMPARABLE')
+                ORDER BY
+                    CASE c.match_level
+                        WHEN 'EXACT' THEN 0
+                        WHEN 'STRONG' THEN 1
+                        WHEN 'COMPARABLE' THEN 2
+                        ELSE 9
+                    END,
+                    c.match_score DESC,
+                    c.last_checked_at DESC,
+                    c.candidate_article
+                """,
+                (str(client_article),),
+            ).fetchall()
+        ]
 
     def begin_market_search(self, client_article: str, run_id: str) -> None:
         stamp = now_iso()
@@ -962,6 +1077,7 @@ class Registry:
         self, client_article: str, candidate_article: str, query_text: str,
         query_url: str, catalog_rank: int, match: dict[str, Any], run_id: str,
         candidate: dict[str, Any] | None = None, offer: dict[str, Any] | None = None,
+        *, replace_analysis_candidate: bool = True,
     ) -> None:
         stamp = now_iso()
         with self.conn:
@@ -975,15 +1091,11 @@ class Registry:
                 ON CONFLICT(client_article,candidate_article) DO UPDATE SET
                     query_text=excluded.query_text,query_url=excluded.query_url,
                     catalog_rank=MIN(market_search_candidates.catalog_rank,excluded.catalog_rank),
-                    match_level=CASE WHEN excluded.match_score>=market_search_candidates.match_score
-                        THEN excluded.match_level ELSE market_search_candidates.match_level END,
-                    match_score=MAX(market_search_candidates.match_score,excluded.match_score),
-                    match_method=CASE WHEN excluded.match_score>=market_search_candidates.match_score
-                        THEN excluded.match_method ELSE market_search_candidates.match_method END,
-                    match_reason=CASE WHEN excluded.match_score>=market_search_candidates.match_score
-                        THEN excluded.match_reason ELSE market_search_candidates.match_reason END,
-                    reasons_json=CASE WHEN excluded.match_score>=market_search_candidates.match_score
-                        THEN excluded.reasons_json ELSE market_search_candidates.reasons_json END,
+                    match_level=excluded.match_level,
+                    match_score=excluded.match_score,
+                    match_method=excluded.match_method,
+                    match_reason=excluded.match_reason,
+                    reasons_json=excluded.reasons_json,
                     active=1,last_seen_at=excluded.last_seen_at,last_checked_at=excluded.last_checked_at,
                     last_run_id=excluded.last_run_id
                 """,
@@ -1000,6 +1112,16 @@ class Registry:
             seller_key_value = str(
                 offer_data.get("seller_id") or offer_data.get("seller_name") or ""
             ).strip()
+            if replace_analysis_candidate:
+                self.conn.execute(
+                    """
+                    DELETE FROM market_analysis_candidates
+                    WHERE market_run_id=?
+                      AND client_article=?
+                      AND candidate_article=?
+                    """,
+                    (str(run_id), str(client_article), str(candidate_article)),
+                )
             self.conn.execute(
                 """INSERT OR REPLACE INTO market_analysis_candidates(
                        market_run_id,client_article,candidate_article,seller_key,seller_id,
@@ -1021,6 +1143,90 @@ class Registry:
                     json.dumps(match.get("reasons") or [], ensure_ascii=False), now_iso(),
                 ),
             )
+            self.conn.execute(
+                """
+                UPDATE market_analysis_current
+                SET published_at=?
+                WHERE market_run_id=?
+                """,
+                (now_iso(), str(run_id)),
+            )
+
+    def reconcile_same_product_candidates(
+        self,
+        run_id: str,
+        client_article: str,
+        keep_keys: set[tuple[str, str]],
+    ) -> int:
+        """Remove stale modal-derived rows after a successful seller-list response."""
+        normalized_keep = {
+            (str(candidate_article), str(seller_key))
+            for candidate_article, seller_key in keep_keys
+        }
+        rows = self.conn.execute(
+            """
+            SELECT candidate_article,seller_key
+            FROM market_analysis_candidates
+            WHERE market_run_id=?
+              AND client_article=?
+              AND match_method='OZON_SAME_PRODUCT_GROUP'
+            """,
+            (str(run_id), str(client_article)),
+        ).fetchall()
+        stale = [
+            (str(row["candidate_article"]), str(row["seller_key"]))
+            for row in rows
+            if (str(row["candidate_article"]), str(row["seller_key"]))
+            not in normalized_keep
+        ]
+        if not stale:
+            return 0
+
+        keep_articles = {candidate_article for candidate_article, _ in normalized_keep}
+        stale_articles = {candidate_article for candidate_article, _ in stale}
+        with self.conn:
+            for candidate_article, seller_key in stale:
+                self.conn.execute(
+                    """
+                    DELETE FROM market_analysis_candidates
+                    WHERE market_run_id=?
+                      AND client_article=?
+                      AND candidate_article=?
+                      AND seller_key=?
+                      AND match_method='OZON_SAME_PRODUCT_GROUP'
+                    """,
+                    (
+                        str(run_id),
+                        str(client_article),
+                        candidate_article,
+                        seller_key,
+                    ),
+                )
+            for candidate_article in stale_articles - keep_articles:
+                self.conn.execute(
+                    """
+                    UPDATE market_search_candidates
+                    SET active=0,last_checked_at=?,last_run_id=?
+                    WHERE client_article=?
+                      AND candidate_article=?
+                      AND match_method='OZON_SAME_PRODUCT_GROUP'
+                    """,
+                    (
+                        now_iso(),
+                        str(run_id),
+                        str(client_article),
+                        candidate_article,
+                    ),
+                )
+            self.conn.execute(
+                """
+                UPDATE market_analysis_current
+                SET published_at=?
+                WHERE market_run_id=?
+                """,
+                (now_iso(), str(run_id)),
+            )
+        return len(stale)
 
     def finish_market_search(
         self, client_article: str, query_text: str, query_url: str,
