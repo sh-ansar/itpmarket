@@ -38,6 +38,12 @@
     marketplaces = Array.isArray(items) ? items : [];
     host.innerHTML = marketplaces.length ? marketplaces.map(card).join('') : `<div class="empty">${esc(t('marketplace_no_access','Поддерживаемые площадки пока не настроены в системном реестре.'))}</div>`;
     window.ITPUI?.translateTree(host);
+    window.dispatchEvent(
+      new CustomEvent(
+        'spyon:marketplaces-changed'
+      )
+    );
+
   }
 
   function closeSourceModal() {

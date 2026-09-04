@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import signal
@@ -8,6 +9,48 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+
+
+PROGRESS_PREFIX = "SPYON_PROGRESS "
+
+def emit_progress(
+    *,
+    label: str,
+    step: int,
+    total: int,
+    completed: int,
+    state: str,
+) -> None:
+    payload = {
+        "phase": "workflow",
+        "phase_label": label,
+        "phase_current": step,
+        "phase_total": total,
+        "current": completed,
+        "total": total,
+        "percent": (
+            round(
+                completed / total * 100,
+                2,
+            )
+            if total > 0
+            else None
+        ),
+        "message": label,
+        "state": state,
+        "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+    print(
+        PROGRESS_PREFIX
+        + json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -66,6 +109,13 @@ def main() -> int:
                 print(f"[ЭТАП {index}/{total}] Некорректная команда.", flush=True)
                 return 2
             label = str(step.get("label") or f"Этап {index}")
+            emit_progress(
+                label=label,
+                step=index,
+                total=total,
+                completed=index - 1,
+                state="running",
+            )
             print(f"[ЭТАП {index}/{total}] {label}", flush=True)
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
             kwargs: dict[str, Any] = {}
@@ -90,7 +140,22 @@ def main() -> int:
             code = active.wait()
             if code != 0:
                 print(f"[ЭТАП {index}/{total}] Ошибка, код {code}.", flush=True)
+                emit_progress(
+                    label=label,
+                    step=index,
+                    total=total,
+                    completed=index - 1,
+                    state="failed",
+                )
                 return int(code or 1)
+
+            emit_progress(
+                label=label,
+                step=index,
+                total=total,
+                completed=index,
+                state="completed",
+            )
             print(f"[ЭТАП {index}/{total}] Завершено.", flush=True)
         print(f"Готово: {total}/{total} этапов.", flush=True)
         return 0

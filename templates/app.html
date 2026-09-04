@@ -95,7 +95,7 @@
             <h2 data-i18n="hero_title">Единая аналитика цен и рыночных сигналов без ложных сравнений.</h2>
             <p data-i18n="hero_text">Система сравнивает цены только по подтверждённым совпадениям: та же карточка, точный артикул или строгий набор характеристик. Похожие товары из другого сегмента не смешиваются с реальным рынком.</p>
             <div class="hero-buttons"><button class="primary" data-page-link="products"><img class="button-icon" src="{{ url_for('static', filename='icons/products.svg') }}" alt=""><span data-i18n="open_catalog_button">Открыть каталог</span></button><button class="ghost" data-page-link="reports"><img class="button-icon" src="{{ url_for('static', filename='icons/reports.svg') }}" alt=""><span data-i18n="open_analytics">Открыть аналитику</span></button></div>
-            <div class="hero-quick-actions">{% if 'kaspi' in visible_marketplace_codes %}<button data-quick-action="kaspi_price_actualize"><b>Kaspi</b><span data-company-price-label>Обновить цены {{ current_tenant.name if current_tenant else 'компании' }}</span></button><button data-quick-action="kaspi_full_sync"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button>{% endif %}{% if 'ozon' in visible_marketplace_codes %}<button data-quick-action="ozon_price_actualize"><b>Ozon.ru</b><span data-i18n="refresh_market_prices">Обновить цены Ozon.ru</span></button>{% endif %}{% if visible_marketplace_codes|length > 1 %}<button class="hero-full-sync" data-quick-action="full_sync_all"><b>Все площадки</b><span>Полная синхронизация</span></button>{% endif %}<button data-quick-action="export_report"><b>Spyon</b><span data-i18n="build_report">Сформировать отчёт</span></button></div>
+            <div class="hero-quick-actions">{% if 'kaspi' in visible_marketplace_codes %}<button data-quick-action="kaspi_price_actualize"><b>Kaspi</b><span data-company-price-label>Обновить цены {{ current_tenant.name if current_tenant else 'компании' }}</span></button><button data-quick-action="kaspi_full_sync"><b>Kaspi</b><span data-i18n="analyze_market">Получить точные предложения</span></button>{% endif %}{% if 'ozon' in visible_marketplace_codes %}<button data-quick-action="ozon_price_actualize"><b>Ozon.ru</b><span data-i18n="refresh_market_prices">Обновить цены Ozon.ru</span></button>{% endif %}<button data-quick-action="export_report"><b>Spyon</b><span data-i18n="build_report">Сформировать отчёт</span></button></div>
           </div>
           <div class="hero-orbit">
             <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
@@ -340,7 +340,75 @@
 <div class="backdrop" id="backdrop" hidden></div>
 <aside class="drawer" id="productDrawer" aria-hidden="true"><div class="drawer-head"><div><small>PRODUCT</small><h2 id="drawerTitle">Товар</h2></div><button class="icon" id="closeDrawer">×</button></div><div class="drawer-body" id="drawerBody"><div class="loader">Загрузка…</div></div></aside>
 
-<div class="modal" id="logModal" hidden><div class="modal-card wide"><div class="modal-head"><div><small>PROCESS LOG</small><h3 id="logTitle">Журнал операции</h3></div><button class="icon modal-close">×</button></div><div class="log-summary" id="logSummary"></div><pre id="logContent"></pre><div class="modal-actions"><button class="secondary" id="refreshLog"><img class="button-icon" src="{{ url_for('static', filename='icons/refresh.svg') }}" alt="">Обновить</button><button class="danger" id="stopTask"><img class="button-icon" src="{{ url_for('static', filename='icons/stop.svg') }}" alt="">Остановить</button></div></div></div>
+<div class="modal" id="logModal" hidden>
+  <div class="modal-card wide operation-history-modal">
+    <div class="modal-head">
+      <div>
+        <small data-i18n="operation_history_caption">OPERATION HISTORY</small>
+        <h3
+          id="logTitle"
+          data-i18n="operation_history_title"
+        >Operation history</h3>
+      </div>
+
+      <button
+        class="icon modal-close"
+        type="button"
+        aria-label="Close"
+      >?</button>
+    </div>
+
+    <div
+      class="log-summary"
+      id="logSummary"
+    ></div>
+
+    <div
+      class="operation-history"
+      id="operationHistory"
+    ></div>
+
+    <details
+      class="technical-log-section"
+      id="technicalLogSection"
+      hidden
+    >
+      <summary
+        data-i18n="technical_log"
+      >Technical log</summary>
+
+      <pre id="technicalLogContent"></pre>
+    </details>
+
+    <div class="modal-actions">
+      <button
+        class="secondary"
+        id="refreshLog"
+        type="button"
+      >
+        <img
+          class="button-icon"
+          src="{{ url_for('static', filename='icons/refresh.svg') }}"
+          alt=""
+        >
+        <span data-i18n="refresh_label">Refresh</span>
+      </button>
+
+      <button
+        class="danger"
+        id="stopTask"
+        type="button"
+      >
+        <img
+          class="button-icon"
+          src="{{ url_for('static', filename='icons/stop.svg') }}"
+          alt=""
+        >
+        <span data-i18n="stop">Stop</span>
+      </button>
+    </div>
+  </div>
+</div>
 <div class="modal" id="scheduleModal" hidden>
   <div class="modal-card schedule-modal-card">
     <div class="modal-head">

@@ -17,13 +17,13 @@
 
 
   const ACTIONS = {
-    kaspi:[['kaspi_catalog_collect','Сбор каталога'],['kaspi_price_actualize','Актуализация цен'],['kaspi_full_sync','Полная синхронизация'],['audit_catalog','Аудит каталога']],
+    kaspi:[['kaspi_catalog_collect','Сбор каталога'],['kaspi_price_actualize','Актуализация цен'],['kaspi_full_sync','Полная синхронизация']],
     ozon:[['ozon_catalog_collect','Сбор каталога'],['ozon_price_actualize','Актуализация цен'],['ozon_full_sync','Полная синхронизация']],
     ozon_kz:[['ozon_kz_catalog_collect','Сбор каталога'],['ozon_kz_price_actualize','Актуализация цен'],['ozon_kz_full_sync','Полная синхронизация']],
     halyk_market:[['halyk_catalog_collect','Сбор каталога'],['halyk_price_actualize','Актуализация цен'],['halyk_full_sync','Полная синхронизация']],
     forte_market:[['forte_catalog_collect','Сбор каталога'],['forte_price_actualize','Актуализация цен'],['forte_full_sync','Полная синхронизация']],
     wildberries:[['wb_catalog_collect','Сбор каталога'],['wb_price_actualize','Актуализация цен'],['wb_full_sync','Полная синхронизация']],
-    system:[['full_sync_all','Полная синхронизация доступных площадок'],['export_report','Сводный отчёт'],['backup_database','Резервная копия']]
+    system:[['export_report','Сводный отчёт'],['backup_database','Резервная копия']]
   };
   const LEGACY_ACTIONS = {
     sync_catalog:['Синхронизация каталога','kaspi'],update_own_prices:['Обновление цен компании','kaspi'],scan_market:['Точные предложения всех продавцов','kaspi'],refresh_market:['Обновить устаревшие точные цены','kaspi'],retry_errors:['Повтор ошибок точных карточек','kaspi'],
@@ -55,7 +55,7 @@
   const FILTERABLE_ACTIONS = new Set(['kaspi_price_actualize','ozon_price_actualize','ozon_kz_price_actualize','halyk_price_actualize','forte_price_actualize','export_report']);
 
 
-  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,overviewLoading:false,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0,inventoryLoaded:false,inventoryLoading:false,telegram:null};
+  const state = {lang:'ru',theme:'system',page:'dashboard',overview:null,overviewLoading:false,products:{page:1,pages:1,pageSize:30,scope:'all',items:[],requestStartedAt:0,lastDurationMs:0},selected:new Set(),tasks:[],tasksLoading:false,currentTask:null,currentProductCode:'',settings:null,catalogConfig:null,reportRequest:0,notifications:[],notificationsInitialized:false,lastNotificationId:0,inventoryLoaded:false,inventoryLoading:false,telegram:null,onboarding:null};
   const multiSelectRegistry = new Map();
   let helpReturnFocus = null;
   let productsRequestController = null;
@@ -196,6 +196,40 @@
   const actionLabel = (id,fallback='') => id === 'update_own_prices'
     ? `${t('updated','Обновление')} ${tenantLabel()}`
     : t(`action_${id}`, actionInfo(id).label || fallback || id);
+  const actionDescription = id => {
+    const value=String(id||'');
+
+    if(value.endsWith('_catalog_collect')){
+      return t(
+        'operation_desc_catalog',
+        'Loads the current product catalogue.'
+      );
+    }
+
+    if(value.endsWith('_price_actualize')){
+      return t(
+        'operation_desc_prices',
+        'Updates current market offers and competitor prices.'
+      );
+    }
+
+    if(value.endsWith('_full_sync')){
+      return t(
+        'operation_desc_full_sync',
+        'Updates the catalogue, product data and market prices.'
+      );
+    }
+
+    if(value==='export_report'){
+      return t(
+        'operation_desc_report',
+        'Builds a consolidated report from current marketplace data.'
+      );
+    }
+
+    return '';
+  };
+
   const formatEta = task => { const percent=Number(task?.progress?.percent||0); if(!(percent>0 && percent<100) || !task?.started_at) return ''; const elapsed=Math.max(1, (Date.now()-new Date(task.started_at).getTime())/1000); const total=elapsed/(percent/100); const remaining=Math.max(0,total-elapsed); return remaining>0 ? `Осталось ~${durationText(remaining)}` : ''; };
   const looksGarbled = text => {
     const value=String(text||'');
@@ -205,58 +239,462 @@
     const cyr=(value.match(/[А-Яа-яЁё]/g)||[]).length;
     return mojibake>=2 || (suspicious>0 && suspicious>=Math.max(2, Math.floor(cyr/6)));
   };
-  const taskProgressText = task => { const p=task?.progress; if(!p) return task?.message || ''; if(p.current!=null && p.total!=null) return `${p.current} из ${p.total} · ${Number(p.percent||0).toFixed(0)}%`; return `${Number(p.percent||0).toFixed(0)}%`; };
-  const technicalLogLine = line => /(?:[A-Z]:\\|\\\\|\/Users\/|\/tmp\/|\.py\b|\.bat\b|\.ps1\b|\.csv\b|\.json\b|\.html\b|Traceback|^\s*File ")/i.test(line);
-  const cleanLogLine = line => {
-    const raw=String(line||'').trim();
-    if(!raw || looksGarbled(raw) || /^[=\-_\s]{12,}$/.test(raw)) return '';
-    if(technicalLogLine(raw)) return t('report_file_ready','Файл отчёта подготовлен');
-    return raw
-      .replace(/^\[([^\]]+)\]\s*/, '$1: ')
-      .replace(/\bproduct_code\b/gi, t('product_code_label','Код товара').toLowerCase())
-      .replace(/\bseller\b/gi, t('seller','Продавец').toLowerCase())
-      .replace(/\bupdated=(\d+)/gi, `${t('updated_count_label','Обновлено')}: $1`)
-      .replace(/\berrors?=(\d+)/gi, `${t('errors_count_label','Ошибок')}: $1`)
-      .replace(/\bblocked=(\d+)/gi, `${t('blocked_count_label','Заблокировано')}: $1`)
-      .replace(/\bresponse=(\d+)/gi, `${t('responses_count_label','Ответов')}: $1`)
-      .replace(/\bno offers=(\d+)/gi, `${t('no_offers_count_label','Без предложения')}: $1`)
-      .replace(/\s+/g, ' ');
-  };
-  const friendlyLog = text => {
-    const lines=String(text||'').split(/\r?\n/).map(cleanLogLine).filter(line=>line && !looksGarbled(line) && !/^[=\-_\s]{12,}$/.test(line));
-    return lines.length ? lines.join('\n') : t('log_empty','Журнал пуст');
-  };
-  const taskSecondaryText = task => {
-    const eta=formatEta(task);
-    const progress=taskProgressText(task);
-    if(task?.progress?.current!=null && task?.progress?.total!=null){
-      return eta ? `${progress} · ${eta}` : progress;
+  const taskProgressPercent = task => {
+    const p=task?.progress;
+
+    if(
+      !p
+      ||p.percent==null
+    ){
+      return null;
     }
-    const line=cleanLogLine(task?.last_line||'');
-    if(line && line.length<160) return line;
-    if(task?.running && eta && progress) return `${progress} · ${eta}`;
-    if(task?.running && progress) return progress;
-    const message=cleanLogLine(task?.message || '');
-    if(message) return message;
-    return {
-      queued:t('task_queued_message','Операция ожидает запуска в очереди'),
-      completed:t('task_completed_message','Операция завершена'),
-      failed:t('task_failed_message','Операция завершилась с ошибкой'),
-      interrupted:t('task_interrupted_message','Операция прервана'),
-      stopped:t('task_stopped_message','Операция остановлена')
-    }[task?.status] || '';
+
+    const value=Number(
+      p.percent
+    );
+
+    if(
+      !Number.isFinite(value)
+      ||value<0
+      ||value>100
+    ){
+      return null;
+    }
+
+    /*
+     * At the beginning of the first workflow stage there is no measured
+     * completion yet. Keep the bar indeterminate instead of showing a
+     * misleading "0%".
+     */
+    if(
+      task?.running
+      &&Number(p.current||0)===0
+      &&Number(p.phase_current||0)===1
+    ){
+      return null;
+    }
+
+    return value;
   };
-  const logSummaryHtml = task => {
-    const tone=taskStatusTone(task.status);
+
+  const taskProgressText = task => {
+    const p=task?.progress;
+
+    if(!p){
+      return '';
+    }
+
+    const phaseCurrent=Number(
+      p.phase_current||0
+    );
+
+    const phaseTotal=Number(
+      p.phase_total||0
+    );
+
+    if(
+      phaseCurrent>0
+      &&phaseTotal>0
+    ){
+      return `${t(
+        'operation_stage',
+        'Stage'
+      )} ${phaseCurrent} ${t(
+        'of_short',
+        'of'
+      )} ${phaseTotal}`;
+    }
+
+    const percent=
+      taskProgressPercent(
+        task
+      );
+
+    return (
+      percent==null
+        ?''
+        :`${Math.round(percent)}%`
+    );
+  };
+
+  const taskPhaseText = task => {
     const p=task?.progress||{};
-    const rows=[
-      [t('status','Статус'), `<span class="${statusClass(tone)}">${esc(taskStatus(task.status))}</span>`],
-      [t('marketplace','Площадка'), esc(marketplaceLabel(taskPlatform(task)))],
-      [t('updated','Обновлено'), esc(dateText(task?.updated_at||task?.started_at))]
-    ];
-    if(p.current!=null && p.total!=null) rows.splice(1,0,[t('progress_label','Прогресс'), esc(taskProgressText(task))]);
-    return `<div class="log-summary-grid">${rows.map(([label,value])=>`<div><small>${esc(label)}</small><b>${value}</b></div>`).join('')}</div>`;
+
+    if(p.phase_label){
+      return String(
+        p.phase_label
+      );
+    }
+
+    if(task?.status==='queued'){
+      return t(
+        'task_queued_message',
+        'Waiting in queue'
+      );
+    }
+
+    const action=String(
+      task?.name||''
+    );
+
+    if(
+      action.includes(
+        'catalog_collect'
+      )
+    ){
+      return t(
+        'operation_phase_catalog',
+        'Loading catalogue'
+      );
+    }
+
+    if(
+      action.includes(
+        'price_actualize'
+      )
+    ){
+      return t(
+        'operation_phase_prices',
+        'Updating market prices'
+      );
+    }
+
+    if(
+      action.includes(
+        'full_sync'
+      )
+    ){
+      return t(
+        'operation_phase_full_sync',
+        'Running full synchronization'
+      );
+    }
+
+    if(
+      action==='export_report'
+    ){
+      return t(
+        'operation_phase_report',
+        'Building report'
+      );
+    }
+
+    if(task?.running){
+      return t(
+        'task_running',
+        'Running'
+      );
+    }
+
+    return String(
+      task?.message||''
+    );
   };
+
+  const taskSecondaryText = task => {
+    const phase=taskPhaseText(
+      task
+    );
+
+    const progress=taskProgressText(
+      task
+    );
+
+    const eta=formatEta(
+      task
+    );
+
+    const parts=[
+      phase,
+      progress,
+      eta
+    ].filter(Boolean);
+
+    if(parts.length){
+      return parts.join(' ? ');
+    }
+
+    return String(
+      task?.message||''
+    );
+  };
+
+  const logSummaryHtml = task => {
+    const tone=taskStatusTone(
+      task.status
+    );
+
+    const rows=[
+      [
+        t('status','Status'),
+        `<span class="${statusClass(tone)}">${esc(taskStatus(task.status))}</span>`
+      ],
+      [
+        t('marketplace','Marketplace'),
+        esc(
+          marketplaceLabel(
+            taskPlatform(task)
+          )
+        )
+      ],
+      [
+        t(
+          'operation_current_stage',
+          'Current stage'
+        ),
+        esc(
+          taskPhaseText(task)
+          ||'?'
+        )
+      ],
+      [
+        t(
+          'operation_started',
+          'Started'
+        ),
+        esc(
+          task?.started_at
+            ?dateText(task.started_at)
+            :'?'
+        )
+      ],
+      [
+        t(
+          'operation_finished',
+          'Finished'
+        ),
+        esc(
+          task?.finished_at
+            ?dateText(task.finished_at)
+            :'?'
+        )
+      ]
+    ];
+
+    return `<div class="log-summary-grid">${
+      rows.map(
+        ([label,value])=>
+          `<div><small>${esc(label)}</small><b>${value}</b></div>`
+      ).join('')
+    }</div>`;
+  };
+
+  const progressHistoryEventText = item => {
+    const phaseCurrent=Number(
+      item?.phase_current||0
+    );
+
+    const phaseTotal=Number(
+      item?.phase_total||0
+    );
+
+    const state=String(
+      item?.state||''
+    );
+
+    const parts=[];
+
+    if(
+      phaseCurrent>0
+      &&phaseTotal>0
+    ){
+      parts.push(
+        `${t(
+          'operation_stage',
+          'Stage'
+        )} ${phaseCurrent} ${t(
+          'of_short',
+          'of'
+        )} ${phaseTotal}`
+      );
+    }
+
+    if(state==='running'){
+      parts.push(
+        t(
+          'task_running',
+          'Running'
+        )
+      );
+
+    }else if(
+      state==='completed'
+    ){
+      parts.push(
+        t(
+          'completed',
+          'Completed'
+        )
+      );
+
+    }else if(
+      state==='failed'
+    ){
+      parts.push(
+        t(
+          'failed',
+          'Failed'
+        )
+      );
+    }
+
+    return parts.join(' ? ');
+  };
+
+  const taskHistoryHtml = (
+    task,
+    progressHistory=[]
+  ) => {
+    const events=[];
+
+    const add=(
+      time,
+      label,
+      text,
+      tone='info'
+    )=>{
+      events.push({
+        time:time||'',
+        label:label||'',
+        text:text||'',
+        tone
+      });
+    };
+
+    if(task?.queued_at){
+      add(
+        task.queued_at,
+        t(
+          'history_queued',
+          'Added to queue'
+        ),
+        t(
+          'history_queued_text',
+          'The operation was accepted by the system.'
+        ),
+        'info'
+      );
+    }
+
+    if(task?.started_at){
+      add(
+        task.started_at,
+        t(
+          'history_started',
+          'Operation started'
+        ),
+        taskPhaseText(task),
+        'running'
+      );
+    }
+
+    (
+      Array.isArray(progressHistory)
+        ?progressHistory
+        :[]
+    ).forEach(item=>{
+      const state=String(
+        item?.state||''
+      );
+
+      add(
+        item?.timestamp||'',
+        String(
+          item?.phase_label
+          ||t(
+            'history_current_stage',
+            'Operation stage'
+          )
+        ),
+        progressHistoryEventText(
+          item
+        ),
+        state==='failed'
+          ?'danger'
+          :state==='completed'
+            ?'success'
+            :'running'
+      );
+    });
+
+    if(task?.finished_at){
+      const status=String(
+        task?.status||''
+      );
+
+      let label=t(
+        'history_completed',
+        'Operation completed'
+      );
+
+      let tone='success';
+
+      if(
+        status==='failed'
+        ||status==='interrupted'
+      ){
+        label=t(
+          'history_failed',
+          'Operation failed'
+        );
+        tone='danger';
+
+      }else if(
+        status==='stopped'
+      ){
+        label=t(
+          'history_stopped',
+          'Operation stopped'
+        );
+        tone='warning';
+      }
+
+      add(
+        task.finished_at,
+        label,
+        String(
+          task?.message
+          ||taskStatus(status)
+        ),
+        tone
+      );
+    }
+
+    if(!events.length){
+      return `<div class="empty">${esc(
+        t(
+          'history_empty',
+          'No operation history yet'
+        )
+      )}</div>`;
+    }
+
+    return `<div class="operation-history-list">${
+      events.map(event=>`
+        <article class="operation-history-event ${esc(event.tone)}">
+          <i></i>
+
+          <div>
+            <div class="operation-history-event-head">
+              <b>${esc(event.label)}</b>
+              ${
+                event.time
+                  ?`<time>${esc(dateText(event.time))}</time>`
+                  :''
+              }
+            </div>
+
+            ${
+              event.text
+                ?`<p>${esc(event.text)}</p>`
+                :''
+            }
+          </div>
+        </article>
+      `).join('')
+    }</div>`;
+  };
+
 
   function applyI18n(lang,{persist=true}={}) {
     state.lang = I18N[lang] ? lang : 'ru';
@@ -276,6 +714,8 @@
     if(state.page==='operations'&&state.tasks.length)renderTasks();
     if(state.page==='schedules')loadSchedules();
     if(state.page==='users')loadUsers();
+    if(state.onboarding)renderOnboardingBanner(state.onboarding);
+
   }
   function renderPageHeading(){ const node=$('#pageTitle'),wrap=node?.closest('.page-section-header'); if(!node||!wrap)return; wrap.hidden=['dashboard','products','operations','reports','schedules','users'].includes(state.page); const key=`${state.page}_page_title`; node.textContent=t(key,t(`nav_${state.page}`,'Spyon')); }
   const PAGE_PERMISSIONS={dashboard:'view_dashboard',products:'view_products',operations:'view_operations',schedules:'view_operations',reports:'view_reports',users:'manage_users',settings:'view_settings'};
@@ -649,6 +1089,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const d=await api('/api/tasks/start',{method:'POST',body});
       toast(`Запущено: ${d.task?.label || action}`);
       if(d&&d.task){const idx=state.tasks.findIndex(t=>t.id===d.task.id);if(idx>=0)state.tasks[idx]=d.task;else state.tasks.unshift(d.task);renderTasks();}else{loadTasks();}
+      void loadOnboarding();
       if(options.navigate!==false)navigate('operations');
     }catch(e){toast(e.message,true)}
   }
@@ -690,13 +1131,13 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const runningIds = activeTasks.map(t=>t.id||'').filter(Boolean).join(',');
       const startBtn = !activeTasks.length?`<button class="primary start-op" data-action="${esc(item.id)}">${esc(t('start','Запустить'))}</button>`:'';
       const stopBtn = activeTasks.length?`<button class="danger stop-op" data-task-ids="${esc(runningIds)}">${esc(t('stop','Остановить'))}</button>`:'';
-      const percent=active?.progress?.percent==null?null:Math.max(0,Math.min(100,Number(active.progress.percent)||0));
+      const percent=active?taskProgressPercent(active):null;
       const progressText=active?taskSecondaryText(active):'';
       const progressHtml=activeTasks.length?`<div class="operation-card-progress"><div class="operation-progress-track ${percent==null?'indeterminate':''}"><i style="${percent==null?'':`width:${percent}%`}"></i></div><div class="operation-progress-meta"><span>${esc(progressText||t('task_running','Выполняется'))}</span>${percent==null?'':`<b>${Math.round(percent)}%</b>`}</div></div>`:'';
       return `
         <section class="operation-launch-card ${esc(toneClass)} ${activeTasks.length?'is-running':''}" ${active?.id?`data-open-task="${esc(active.id)}"`:''}>
           <div class="operation-card-body">
-            <div class="operation-info"><b>${esc(actionLabel(item.id,item.label))}</b><small class="operation-meta">${esc(lastStatus)} · ${esc(lastTime)}</small></div>
+            <div class="operation-info"><b>${esc(actionLabel(item.id,item.label))}</b>${actionDescription(item.id)?`<small class="operation-description">${esc(actionDescription(item.id))}</small>`:''}<small class="operation-meta">${esc(lastStatus)} · ${esc(lastTime)}</small></div>
             <div class="operation-actions">${startBtn}${stopBtn}</div>
           </div>
           ${progressHtml}
@@ -715,7 +1156,83 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   function renderTasks(){const tasks=state.tasks;const running=tasks.filter(task=>task.running).length,completed=tasks.filter(task=>task.status==='completed').length,failed=tasks.filter(task=>['failed','interrupted'].includes(task.status)).length;if($('#opsRunning'))$('#opsRunning').textContent=running;if($('#opsSummary'))$('#opsSummary').textContent=`${number(completed)} ${t('completed','завершено')} · ${number(failed)} ${t('failed','с ошибкой')}`;renderOperationActionGrid(tasks);}
 
   async function openLog(id){state.currentTask=id;showModal('logModal');await refreshLog();}
-  async function refreshLog(){if(!state.currentTask)return;try{const d=await api(`/api/tasks/${encodeURIComponent(state.currentTask)}/log?lines=800`);$('#logTitle').textContent=d.task.label;$('#logSummary').innerHTML=logSummaryHtml(d.task);$('#logContent').textContent=friendlyLog(d.log);$('#stopTask').hidden=!(d.task.running||d.task.status==='queued');}catch(e){toast(e.message,true)}}
+  async function refreshLog(){
+    if(!state.currentTask){
+      return;
+    }
+
+    try{
+      const d=await api(
+        `/api/tasks/${encodeURIComponent(state.currentTask)}/log?lines=800`
+      );
+
+      const task=d.task||{};
+
+      $('#logTitle').textContent=
+        task.label
+        ||t(
+          'operation_history_title',
+          'Operation history'
+        );
+
+      $('#logSummary').innerHTML=
+        logSummaryHtml(task);
+
+      const history=$(
+        '#operationHistory'
+      );
+
+      if(history){
+        history.innerHTML=
+          taskHistoryHtml(
+            task,
+            d.history||[]
+          );
+      }
+
+      const technicalSection=$(
+        '#technicalLogSection'
+      );
+
+      const technicalContent=$(
+        '#technicalLogContent'
+      );
+
+      const showTechnical=
+        Boolean(
+          d.show_technical_log
+        );
+
+      if(technicalSection){
+        technicalSection.hidden=
+          !showTechnical;
+      }
+
+      if(technicalContent){
+        technicalContent.textContent=
+          showTechnical
+            ?String(
+                d.technical_log
+                ||d.log
+                ||''
+              )
+            :'';
+      }
+
+      $('#stopTask').hidden=
+        !(
+          task.running
+          ||task.status==='queued'
+        );
+
+    }catch(e){
+      toast(
+        e.message,
+        true
+      );
+    }
+  }
+
   async function stopTask(id,{silent=false}={}){try{await api(`/api/tasks/${encodeURIComponent(id)}/stop`,{method:'POST'});if(!silent)toast(t('stopped_ok','Остановлено'));const idx=state.tasks.findIndex(task=>task.id===id);if(idx>=0){state.tasks[idx].running=false;state.tasks[idx].status='stopped';state.tasks[idx].message='Операция остановлена';renderTasks();}else{await loadTasks();}if(state.currentTask===id)refreshLog();return true;}catch(e){if(!silent)toast(e.message,true);return false;}}
   async function stopTasks(ids){if(!ids.length)return toast(t('stopped_none','Связанные выполняемые операции не найдены'),true);const results=await Promise.all(ids.map(id=>stopTask(id,{silent:true})));if(results.some(Boolean))toast(t('stopped_ok','Остановлено'));if(results.some(value=>!value))toast('Не все операции удалось остановить',true);await loadTasks();}
   async function deleteTask(id){if(!confirm('Удалить операцию и её журнал?'))return;try{await api(`/api/tasks/${encodeURIComponent(id)}`,{method:'DELETE'});loadTasks();}catch(e){toast(e.message,true)}}
@@ -1705,31 +2222,181 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     );
     return `<article class="subscription-billing-card"><div class="subscription-billing-head"><div><small>ADD-ON INVOICE</small><h4>${esc(title)}</h4><span>+${positions} позиций на каждую площадку</span></div><strong class="subscription-billing-status ${esc(status)}">${esc(addonOrderStatus(status))}</strong></div><div class="subscription-invoice-grid"><article><small>Пакет</small><b>+${number(order.positions)} позиций</b></article><article><small>Количество</small><b>${number(order.quantity)} пак.</b></article><article><small>Итого</small><b>${money(order.total_price)} ${esc(order.currency||'KZT')}</b>${invoiceVatText?`<small>${esc(invoiceVatText)}</small>`:''}</article></div><div class="subscription-billing-total">${invoice.download_url?`<a class="secondary" href="${esc(invoice.download_url)}">Скачать PDF</a>`:''}${(['awaiting_payment','payment_rejected'].includes(status)&&can('manage_company'))?`<button type="button" class="secondary" data-reissue-order="${Number(order.id)}">Перевыставить счёт</button>`:''}</div>${status==='payment_rejected'?`<div class="subscription-billing-warning"><b>Причина отклонения:</b> ${esc(proof.review_note||'Загрузите новый платёжный документ.')}</div>`:''}${canProof&&can('manage_company')?`<div class="subscription-proof-upload"><div class="subscription-proof-upload-copy"><small>PAYMENT CONFIRMATION</small><b>Платёжный документ</b></div><label class="subscription-proof-file"><input class="addonBillingProof" data-proof-input="${Number(order.id)}" data-order-id="${Number(order.id)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"><span data-proof-name="${Number(order.id)}">Выбрать файл</span></label><button type="button" class="secondary" data-upload-order="${Number(order.id)}" disabled>Отправить на проверку</button></div>`:''}</article>`;
   }
-  function renderSubscriptionStatusBanner(snapshot){
+  function renderOnboardingBanner(payload){
     const banner=$('#subscriptionStatusBanner');
     const title=$('#subscriptionStatusBannerTitle');
     const message=$('#subscriptionStatusBannerMessage');
     const action=$('#subscriptionStatusBannerAction');
-    if(!banner||!title||!message||!action)return;
 
-    const data=snapshot||{};
-    const entitlement=data.entitlement||{};
-    if(entitlement.active){banner.hidden=true;return;}
+    if(!banner||!title||!message||!action){
+      return;
+    }
 
-    const requests=Array.isArray(data.requests)?data.requests:[];
-    const billingStatus=String(data.billing?.subscription?.status||'');
-    const selected=requests.some(item=>[
-      'pending','awaiting_invoice','awaiting_payment','payment_review','payment_rejected'
-    ].includes(String(item.status||'')))||[
-      'awaiting_invoice','awaiting_payment','payment_review','payment_rejected'
-    ].includes(billingStatus);
+    const data=payload||{};
+    state.onboarding=data;
 
-    title.textContent=selected?'Тариф ожидает оплаты':'Не выбран тариф';
-    message.textContent=selected
-      ?'Для продолжения работы необходимо оплатить выбранный тариф.'
-      :'Для продолжения работы выберите тариф и выполните оплату.';
-    action.textContent=selected?'Перейти к оплате':'Выбрать тариф';
+    let stage='';
+    let titleKey='';
+    let titleFallback='';
+    let messageKey='';
+    let messageFallback='';
+    let actionKey='';
+    let actionFallback='';
+    let target='';
+
+    if(
+      data.visible===false
+      ||user.platform_role==='superadmin'
+    ){
+      banner.hidden=true;
+      return;
+    }
+
+    if(
+      Number(
+        data.connected_marketplace_count
+        ||0
+      )<=0
+    ){
+      stage='marketplace';
+      titleKey='onboarding_connect_title';
+      titleFallback='\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u0435 \u0441\u0432\u043e\u0439 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442-\u043c\u0430\u0433\u0430\u0437\u0438\u043d';
+      messageKey='onboarding_connect_message';
+      messageFallback='\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u0435 \u0445\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u043d\u0443 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443, \u0447\u0442\u043e\u0431\u044b \u043d\u0430\u0447\u0430\u0442\u044c \u0440\u0430\u0431\u043e\u0442\u0443 \u0441 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u043e\u043c.';
+      actionKey='onboarding_connect_action';
+      actionFallback='\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443';
+      target='marketplaces';
+
+    }else if(
+      !data.subscription_active
+    ){
+      stage='billing';
+      titleKey='onboarding_tariff_title';
+      titleFallback='\u0422\u0430\u0440\u0438\u0444 \u043e\u0436\u0438\u0434\u0430\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b';
+      messageKey='onboarding_tariff_message';
+      messageFallback='\u0414\u043b\u044f \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0435\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442\u044b \u043d\u0435\u043e\u0431\u0445\u043e\u0434\u0438\u043c\u043e \u043e\u043f\u043b\u0430\u0442\u0438\u0442\u044c \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0439 \u0442\u0430\u0440\u0438\u0444.';
+      actionKey='onboarding_tariff_action';
+      actionFallback='\u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043a \u043e\u043f\u043b\u0430\u0442\u0435';
+      target='subscription';
+
+    }else if(
+      !data.company_approved
+    ){
+      banner.hidden=true;
+      return;
+
+    }else if(
+      !data.has_started_operation
+    ){
+      stage='sync';
+      titleKey='onboarding_sync_title';
+      titleFallback='\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u043f\u0435\u0440\u0432\u0443\u044e \u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044e';
+      messageKey='onboarding_sync_message';
+      messageFallback='\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u0435 \u043a\u0430\u0442\u0430\u043b\u043e\u0433 \u0438 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u044b\u0435 \u0440\u044b\u043d\u043e\u0447\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0432\u0430\u0448\u0435\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0438.';
+      actionKey='onboarding_sync_action';
+      actionFallback='\u041f\u0435\u0440\u0435\u0439\u0442\u0438 \u043a \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u044f\u043c';
+      target='operations';
+
+    }else{
+      banner.hidden=true;
+      return;
+    }
+
+    banner.dataset.onboardingStage=
+      stage;
+
+    title.textContent=t(
+      titleKey,
+      titleFallback
+    );
+
+    message.textContent=t(
+      messageKey,
+      messageFallback
+    );
+
+    action.textContent=t(
+      actionKey,
+      actionFallback
+    );
+
+    action.dataset.onboardingTarget=
+      target;
+
     banner.hidden=false;
+  }
+
+
+  async function loadOnboarding(){
+    try{
+      const data=await api(
+        '/api/onboarding'
+      );
+
+      const access=
+        data.access||{};
+
+      if(
+        access.permissions
+        &&typeof access.permissions==='object'
+      ){
+        user.permissions=
+          access.permissions;
+      }
+
+      if(
+        access.marketplaces
+        &&typeof access.marketplaces==='object'
+      ){
+        user.marketplaces=
+          access.marketplaces;
+      }
+
+      if(
+        access.available_marketplaces
+        &&typeof access.available_marketplaces==='object'
+      ){
+        user.available_marketplaces=
+          access.available_marketplaces;
+      }
+
+      if(
+        access.marketplace_permissions
+        &&typeof access.marketplace_permissions==='object'
+      ){
+        user.marketplace_permissions=
+          access.marketplace_permissions;
+      }
+
+      const onboarding=
+        data.onboarding||{};
+
+      if(
+        onboarding.marketplace_sellers
+        &&typeof onboarding.marketplace_sellers==='object'
+      ){
+        user.marketplace_sellers=
+          onboarding.marketplace_sellers;
+      }
+
+      applyMarketplaceAccess();
+      applyPermissions();
+      updateOperationActions();
+
+      renderOnboardingBanner(
+        onboarding
+      );
+
+      return onboarding;
+
+    }catch(error){
+      console.error(
+        'ONBOARDING_STATE',
+        error
+      );
+
+      return null;
+    }
   }
 
 
@@ -2834,7 +3501,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       renderLegalDocuments(d.legal_documents||[]);
       const tenant=d.tenant||{};
       renderSubscriptionSettings(d.subscription);
-      renderSubscriptionStatusBanner(d.subscription);
+      void loadOnboarding();
       loadTelegramStatus();
       if($('#tenantName')){
         $('#tenantName').value=tenant.name||'';$('#tenantRegistrationNumber').value=tenant.registration_number||'';
@@ -3538,10 +4205,34 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     });
     $$('.nav').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
     $$('[data-page-link]').forEach(b=>b.onclick=()=>navigate(b.dataset.pageLink));
-    $('#subscriptionStatusBannerAction')?.addEventListener('click',()=>{
-      activeSettingsSection='subscription';
-      navigate('settings');
+    $('#subscriptionStatusBannerAction')?.addEventListener('click',event=>{
+      const target=String(
+        event.currentTarget.dataset.onboardingTarget
+        ||''
+      );
+
+      if(target==='operations'){
+        navigate('operations');
+        return;
+      }
+
+      if(
+        target==='marketplaces'
+        ||target==='subscription'
+      ){
+        activeSettingsSection=target;
+        navigate('settings');
+        setSettingsSection(target);
+      }
     });
+
+    window.addEventListener(
+      'spyon:marketplaces-changed',
+      ()=>{
+        void loadOnboarding();
+      }
+    );
+
     $('#mobileMenu').onclick=()=>{const nav=$('#sidebar');nav.classList.toggle('open');$('#mobileMenu').setAttribute('aria-expanded',String(nav.classList.contains('open')))};
     $('#profileButton').onclick=e=>{e.stopPropagation();const menu=$('#profileMenu'),open=menu.hidden;menu.hidden=!open;e.currentTarget.setAttribute('aria-expanded',String(open));};
     if($('#notificationButton'))$('#notificationButton').onclick=async e=>{e.stopPropagation();const drawer=$('#notificationDrawer');drawer.hidden=!drawer.hidden;$('#notificationButton').setAttribute('aria-expanded',String(!drawer.hidden));if(!drawer.hidden)await loadNotifications({announce:false})};
@@ -3603,7 +4294,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
 
 
   async function init(){
-    bind();applyMarketplaceAccess();applyPermissions();state.lang=window.ITPUI?.getLocale()||localStorage.getItem('itp_lang')||'ru';state.theme=window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:false,emit:false});applyI18n(state.lang,{persist:false});updateHelpButton();updateOperationActions();
+    bind();applyMarketplaceAccess();applyPermissions();state.lang=window.ITPUI?.getLocale()||localStorage.getItem('itp_lang')||'ru';state.theme=window.ITPUI?.getTheme()||'system';window.ITPUI?.setTheme(state.theme,{store:false,emit:false});applyI18n(state.lang,{persist:false});updateHelpButton();await loadOnboarding();updateOperationActions();
     if(!can('view_dashboard'))navigate(Object.keys(PAGE_PERMISSIONS).find(page=>can(PAGE_PERMISSIONS[page]))||'settings');
     $('#app').hidden=false;setTimeout(()=>$('#boot').classList.add('hide'),80);
     const jobs=[];
@@ -3614,7 +4305,7 @@ ${d.recovery_code}`);}catch(e){toast(e.message,true)}}
     jobs.push(loadNotifications({announce:false}),enforceLegalAcceptance());
     Promise.allSettled(jobs).then(results=>results.filter(item=>item.status==='rejected').forEach(item=>console.error(item.reason)));
     setInterval(()=>{if(can('view_operations')&&(state.page==='operations' || state.tasks.some(task=>task.running)))loadTasks()},3000);if(can('view_dashboard'))setInterval(()=>{if(state.page==='dashboard')loadOverview()},15000);
-    setInterval(()=>loadNotifications(),10000);
+    setInterval(()=>{void loadOnboarding();},15000);setInterval(()=>loadNotifications(),10000);
   }
   init().catch(e=>{console.error(e);$('#boot').innerHTML=`<strong>Ошибка запуска</strong><span>${esc(e.message)}</span>`});
 })();

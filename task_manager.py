@@ -39,6 +39,7 @@ def now_iso() -> str:
 
 
 RESULT_PREFIX = "SPYON_RESULT "
+PROGRESS_PREFIX = "SPYON_PROGRESS "
 RESULT_MESSAGES = {
     "ozon_challenge": "Ozon требует подтверждения. Откройте окно Ozon, пройдите проверку и повторите синхронизацию.",
     "browser_not_open": "Браузер Ozon не открыт. Откройте браузер Ozon и повторите синхронизацию.",
@@ -63,6 +64,172 @@ def structured_result(log_text: str) -> dict[str, Any] | None:
             return value
     return None
 
+
+
+def structured_progress(
+    log_text: str,
+) -> dict[str, Any] | None:
+    """Return explicit operation-level progress only."""
+    for line in reversed(
+        str(log_text or "").splitlines()
+    ):
+        if not line.startswith(
+            PROGRESS_PREFIX
+        ):
+            continue
+
+        try:
+            raw = json.loads(
+                line[len(PROGRESS_PREFIX):]
+            )
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(raw, dict):
+            continue
+
+        result: dict[str, Any] = {}
+
+        for key in (
+            "phase",
+            "phase_label",
+            "message",
+            "state",
+        ):
+            value = raw.get(key)
+
+            if value not in (
+                None,
+                "",
+            ):
+                result[key] = str(value)
+
+        for key in (
+            "current",
+            "total",
+            "phase_current",
+            "phase_total",
+        ):
+            value = raw.get(key)
+
+            if value is None:
+                continue
+
+            try:
+                result[key] = int(value)
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+        current = result.get(
+            "current"
+        )
+        total = result.get(
+            "total"
+        )
+
+        if (
+            isinstance(current, int)
+            and isinstance(total, int)
+            and total > 0
+            and 0 <= current <= total
+        ):
+            result["percent"] = round(
+                current / total * 100,
+                2,
+            )
+        else:
+            try:
+                percent = float(
+                    raw.get("percent")
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                percent = None
+
+            if (
+                percent is not None
+                and 0 <= percent <= 100
+            ):
+                result["percent"] = round(
+                    percent,
+                    2,
+                )
+
+        return result or None
+
+    return None
+
+
+
+def structured_progress_history(
+    log_text: str,
+) -> list[dict[str, Any]]:
+    """Return sanitized structured progress events from an operation log."""
+    events: list[dict[str, Any]] = []
+    previous_key: tuple[Any, ...] | None = None
+
+    for line in str(
+        log_text or ""
+    ).splitlines():
+        if not line.startswith(
+            PROGRESS_PREFIX
+        ):
+            continue
+
+        try:
+            raw = json.loads(
+                line[len(PROGRESS_PREFIX):]
+            )
+        except json.JSONDecodeError:
+            continue
+
+        if not isinstance(
+            raw,
+            dict,
+        ):
+            continue
+
+        progress = structured_progress(
+            line
+        )
+
+        if not progress:
+            continue
+
+        timestamp = str(
+            raw.get("timestamp")
+            or ""
+        ).strip()
+
+        if timestamp:
+            progress["timestamp"] = (
+                timestamp
+            )
+
+        key = (
+            progress.get("phase"),
+            progress.get("phase_label"),
+            progress.get("phase_current"),
+            progress.get("phase_total"),
+            progress.get("current"),
+            progress.get("total"),
+            progress.get("state"),
+        )
+
+        if key == previous_key:
+            continue
+
+        previous_key = key
+        events.append(
+            progress
+        )
+
+    return events[-100:]
 
 class TaskManager:
     """Runs background commands with resource locks and persistent task history."""
@@ -328,28 +495,12 @@ class TaskManager:
         if task_id and cached and cached[0] == cache_key:
             return dict(cached[1])
         text = self._read_tail(log_path, 220) if log_path else ""
-        progress: dict[str, Any] | None = None
-        for line in reversed(text.splitlines()):
-            for pattern in PROGRESS_PATTERNS:
-                match = pattern.search(line)
-                if not match:
-                    continue
-                current, total = int(match.group(1)), int(match.group(2))
-                if total > 0 and 0 <= current <= total:
-                    progress = {
-                        "current": current,
-                        "total": total,
-                        "percent": round(current / total * 100, 2),
-                    }
-                    break
-            if progress is not None:
-                break
-        if progress is None:
-            percentages = PERCENT_RE.findall(text)
-            if percentages:
-                value = float(percentages[-1].replace(",", "."))
-                if 0 <= value <= 100:
-                    progress = {"current": None, "total": None, "percent": round(value, 2)}
+        # Only explicit SPYON_PROGRESS records describe the
+        # complete operation. Collector-internal page/source ratios
+        # must never become the global progress bar.
+        progress = structured_progress(
+            text
+        )
         if result.get("status") == "completed":
             if progress and progress.get("total"):
                 progress["current"] = progress["total"]
@@ -1155,6 +1306,31 @@ class TaskManager:
                     except OSError:
                         pass
             return len(removed)
+
+    def progress_history(
+        self,
+        task_id: str,
+        lines: int = 2000,
+    ) -> list[dict[str, Any]]:
+        task = self.state(
+            task_id
+        )
+
+        raw = task.get(
+            "log_file"
+        )
+
+        if not raw:
+            return []
+
+        text = self._read_tail(
+            Path(str(raw)),
+            lines,
+        )
+
+        return structured_progress_history(
+            text
+        )
 
     def tail(self, task_id: str, lines: int = 300) -> str:
         task = self.state(task_id)

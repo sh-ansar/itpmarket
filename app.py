@@ -277,6 +277,117 @@ def addon_order_public(order: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def tenant_onboarding_state(
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    """Return persistent onboarding state for a tenant workspace."""
+    tenant_id = int(user.get("tenant_id") or 0)
+
+    if tenant_id <= 0 or is_superadmin(user):
+        return {
+            "visible": False,
+            "company_approved": True,
+            "connected_marketplaces": [],
+            "connected_marketplace_count": 0,
+            "subscription_active": True,
+            "has_started_operation": True,
+            "marketplace_sellers": {},
+        }
+
+    sellers = SAAS.sellers(
+        tenant_id,
+        active_only=True,
+    )
+
+    connected = sorted({
+        str(
+            seller.get("marketplace_code")
+            or ""
+        ).strip().casefold()
+        for seller in sellers
+        if str(
+            seller.get("marketplace_code")
+            or ""
+        ).strip().casefold()
+        in MARKETPLACE_CODES
+    })
+
+    marketplace_sellers = {
+        code: []
+        for code in MARKETPLACE_CODES
+    }
+
+    for seller in sellers:
+        code = str(
+            seller.get("marketplace_code")
+            or ""
+        ).strip().casefold()
+
+        if code not in marketplace_sellers:
+            continue
+
+        marketplace_sellers[code].append({
+            "id": int(seller["id"]),
+            "external_seller_id": str(
+                seller.get("external_seller_id")
+                or ""
+            ),
+            "display_name": str(
+                seller.get("display_name")
+                or ""
+            ),
+            "source_url": str(
+                seller.get("source_url")
+                or ""
+            ),
+        })
+
+    has_started_operation = False
+
+    conn = connect_database(
+        DB_PATH,
+        timeout=30,
+    )
+
+    try:
+        if table_exists(conn, "app_events"):
+            has_started_operation = bool(
+                conn.execute(
+                    """SELECT 1
+                       FROM app_events
+                       WHERE tenant_id=?
+                         AND event_type='task_started'
+                       LIMIT 1""",
+                    (tenant_id,),
+                ).fetchone()
+            )
+    finally:
+        conn.close()
+
+    entitlement = (
+        subscription_service()
+        .entitlement(tenant_id)
+    )
+
+    return {
+        "visible": True,
+        "company_approved":
+            company_is_approved(
+                user.get("tenant_status")
+            ),
+        "connected_marketplaces":
+            connected,
+        "connected_marketplace_count":
+            len(connected),
+        "subscription_active":
+            bool(entitlement.get("active")),
+        "has_started_operation":
+            has_started_operation,
+        "marketplace_sellers":
+            marketplace_sellers,
+    }
+
+
 def subscription_snapshot(
     tenant_id: int,
 ) -> dict[str, Any]:
@@ -953,6 +1064,33 @@ def schedule_actions_for_user(user: dict[str, Any]) -> list[dict[str, str]]:
 def action_access_error(action: str, user: dict[str, Any]) -> str | None:
     if action not in ACTION_INFO:
         return "Выберите поддерживаемую операцию."
+    # TEMPORARILY_HIDDEN_TENANT_ACTIONS
+    if (
+        action in {
+            "full_sync_all",
+            "audit_catalog",
+        }
+        and not is_superadmin(user)
+    ):
+        if action == "full_sync_all":
+            return (
+                "\u041f\u043e\u043b\u043d\u0430\u044f "
+                "\u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f "
+                "\u0432\u0441\u0435\u0445 "
+                "\u043f\u043b\u043e\u0449\u0430\u0434\u043e\u043a "
+                "\u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e "
+                "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430."
+            )
+
+        return (
+            "\u0410\u0443\u0434\u0438\u0442 "
+            "\u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430 "
+            "\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d "
+            "\u0442\u043e\u043b\u044c\u043a\u043e "
+            "\u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u0443 "
+            "\u043f\u043b\u0430\u0442\u0444\u043e\u0440\u043c\u044b."
+        )
+
     if action == "backup_database" and not is_superadmin(user):
         return "Повторите операцию позже или обратитесь в службу поддержки."
     if not company_is_approved(user.get("tenant_status")) and not is_superadmin(user):
@@ -3122,6 +3260,36 @@ def api_session() -> Any:
     )
 
 
+@app.get("/api/onboarding")
+@login_required
+def api_onboarding() -> Any:
+    user = current_user() or {}
+
+    return json_ok(
+        onboarding=tenant_onboarding_state(
+            user
+        ),
+        access={
+            "permissions": dict(
+                user.get("permissions")
+                or {}
+            ),
+            "marketplaces": dict(
+                user.get("marketplaces")
+                or {}
+            ),
+            "available_marketplaces": dict(
+                user.get("available_marketplaces")
+                or {}
+            ),
+            "marketplace_permissions": dict(
+                user.get("marketplace_permissions")
+                or {}
+            ),
+        },
+    )
+
+
 @app.get("/api/overview")
 @permission_required("view_dashboard")
 def api_overview() -> Any:
@@ -3819,13 +3987,62 @@ def api_tasks_stop_by_product() -> Any:
 
 @app.get("/api/tasks/<task_id>/log")
 @permission_required("view_operations")
-def api_task_log(task_id: str) -> Any:
-    task = visible_task(task_id)
-    if not task or task.get("status") == "missing":
-        return json_error("Операция не найдена.", 404)
+def api_task_log(
+    task_id: str,
+) -> Any:
+    task = visible_task(
+        task_id
+    )
+
+    if (
+        not task
+        or task.get("status")
+        == "missing"
+    ):
+        return json_error(
+            "Operation not found.",
+            404,
+        )
+
+    history = TASKS.progress_history(
+        task_id,
+        lines=2000,
+    )
+
+    user = current_user() or {}
+
+    show_technical_log = (
+        is_superadmin(user)
+    )
+
+    technical_log = ""
+
+    if show_technical_log:
+        technical_log = TASKS.tail(
+            task_id,
+            lines=min(
+                2000,
+                max(
+                    50,
+                    int(
+                        request.args.get(
+                            "lines",
+                            800,
+                        )
+                    ),
+                ),
+            ),
+        )
+
     return json_ok(
         task=public_task(task),
-        log=redact_log_text(TASKS.tail(task_id, int(request.args.get("lines", 500)))),
+        history=history,
+        show_technical_log=
+            show_technical_log,
+        technical_log=
+            technical_log,
+        # Compatibility for older superadmin clients.
+        log=technical_log,
     )
 
 
