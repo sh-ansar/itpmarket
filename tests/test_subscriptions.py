@@ -449,19 +449,22 @@ class SubscriptionServiceTests(unittest.TestCase):
             catalog.catalog_memberships(self.tenant_id, ["kaspi"]),
         )
 
-    def test_approved_addon_increases_only_requested_marketplace_capacity(self) -> None:
+    def test_new_approved_legacy_addon_request_increases_every_marketplace_capacity(self) -> None:
         self._create_limited_plan()
         self._activate("test_limited")
         addon_request = self.service.request_addon(
-            self.tenant_id, "positions_100", "kaspi", 1, int(self.admin["id"])
+            self.tenant_id, "positions_100", 1, int(self.admin["id"])
         )
+        self.assertEqual("", addon_request["marketplace_code"])
         self.service.review_addon(
             int(addon_request["id"]), "approved", int(self.admin["id"])
         )
         entitlement = self.service.entitlement(self.tenant_id)
         self.assertEqual(102, entitlement["marketplaces"]["kaspi"]["position_limit"])
         self.assertEqual(100, entitlement["marketplaces"]["kaspi"]["extra_positions"])
-        self.assertEqual(2, entitlement["marketplaces"]["wildberries"]["position_limit"])
+        self.assertEqual(102, entitlement["marketplaces"]["ozon"]["position_limit"])
+        self.assertEqual(102, entitlement["marketplaces"]["ozon_kz"]["position_limit"])
+        self.assertEqual(102, entitlement["marketplaces"]["wildberries"]["position_limit"])
 
     def test_new_approved_company_gets_legacy_compatibility_but_pending_does_not(self) -> None:
         conn = sqlite3.connect(self.db_path)
@@ -479,7 +482,10 @@ class SubscriptionServiceTests(unittest.TestCase):
         conn.commit()
         conn.close()
         service = SubscriptionService(self.db_path)
-        self.assertTrue(service.entitlement(approved)["active"])
+        legacy = service.entitlement(approved)
+        self.assertTrue(legacy["active"])
+        self.assertEqual("legacy", legacy["subscription"]["plan_code"])
+        self.assertIsNone(service.operation_error(approved, "kaspi"))
         self.assertFalse(service.entitlement(pending)["active"])
 
     def test_trial_is_one_time_without_payment_and_creates_expiry_reminder(

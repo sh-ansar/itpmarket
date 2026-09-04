@@ -317,7 +317,7 @@ def amount_in_words(
 
     if currency_code == "KZT":
         suffix = (
-            "\u0442\u0435\u043d\u0433\u0435 "
+            "\u0442\u0435\u04a3\u0433\u0435 "
             f"{fraction:02d} "
             "\u0442\u0438\u044b\u043d"
         )

@@ -4309,12 +4309,13 @@ class BillingService:
                         ),
                     "name":
                         (
-                            "Spyon - "
+                            'Тариф "'
                             + str(
                                 row["plan_name"]
                                 or row["plan_code"]
                                 or ""
                             )
+                            + '"'
                         ),
                     "quantity":
                         months,

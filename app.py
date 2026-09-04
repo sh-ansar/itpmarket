@@ -73,6 +73,7 @@ from tenant_security import (
     has_platform_permission,
 )
 from subscription_service import (
+    NO_ACTIVE_SUBSCRIPTION_MESSAGE,
     SubscriptionError,
     SubscriptionLimitError,
     SubscriptionService,
@@ -3481,7 +3482,10 @@ def api_task_start() -> Any:
         return json_error("Неизвестная операция.")
     access_error = action_access_error(action, user)
     if access_error:
-        return json_error(access_error, 403)
+        return json_error(
+            access_error,
+            409 if access_error == NO_ACTIVE_SUBSCRIPTION_MESSAGE else 403,
+        )
     task_platform = marketplace_for_action(action, ACTION_INFO)
     try:
         requested_seller_id = int(payload.get("tenant_seller_id") or 0)
@@ -4974,8 +4978,7 @@ def api_subscription_addon_request() -> Any:
     try:
         result = subscription_service().request_addon(
             int(user["tenant_id"]), str(payload.get("addon_code") or ""),
-            str(payload.get("marketplace_code") or ""), int(payload.get("quantity") or 1),
-            int(user["id"]),
+            int(payload.get("quantity") or 1), int(user["id"]),
         )
         return json_ok(request=result)
     except SubscriptionError as exc:
@@ -5010,7 +5013,6 @@ def api_addon_billing_order_create() -> Any:
         order = addon_billing_service().create_order(
             int(user["tenant_id"]),
             str(payload.get("addon_code") or ""),
-            str(payload.get("marketplace") or ""),
             int(payload.get("quantity") or 0),
             int(user["id"]),
         )
@@ -5043,7 +5045,6 @@ def api_addon_billing_order_reissue(order_id: int) -> Any:
     try:
         order = addon_billing_service().reissue(
             int(order_id), int(user["id"]), tenant_id=int(user["tenant_id"]),
-            marketplace_code=str(payload.get("marketplace") or "").strip() or None,
             addon_code=str(payload.get("addon_code") or "").strip() or None,
             quantity=(int(payload["quantity"]) if payload.get("quantity") not in (None, "") else None),
         )

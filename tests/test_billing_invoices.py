@@ -270,6 +270,11 @@ class BillingInvoiceTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(
+            'Тариф "Старт"',
+            invoice["line_items"][0]["name"],
+        )
+
         # Double-click / retry must be idempotent.
         same = self.billing.create_invoice(
             int(reviewed["id"]),

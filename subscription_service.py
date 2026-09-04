@@ -50,6 +50,10 @@ DEFAULT_ADDONS = (
     ("positions_1000", "+1 000 позиций", 1000, 30000, 30),
 )
 
+NO_ACTIVE_SUBSCRIPTION_MESSAGE = (
+    "Нет активного пакета. Выберите пакет и дождитесь подтверждения супер-администратора."
+)
+
 
 class SubscriptionError(ValueError):
     pass
@@ -667,9 +671,9 @@ class SubscriptionService:
                     continue
                 key = str(row["marketplace_code"] or "")
                 addon_positions[key] = addon_positions.get(key, 0) + int(row["extra_positions"] or 0) * int(row["quantity"] or 1)
-            # The paid add-on flow is deliberately independent from the
-            # legacy request/review flow.  Its positions apply only to the
-            # exact marketplace recorded in the paid order.
+            # New paid add-ons use the empty key and therefore apply to each
+            # enabled marketplace. Historical rows with a marketplace code
+            # retain their original marketplace-specific semantics.
             for row in conn.execute(
                 """SELECT marketplace_code,positions,quantity,valid_until
                    FROM tenant_addon_orders
@@ -733,7 +737,7 @@ class SubscriptionService:
     def operation_error(self, tenant_id: int, marketplace_code: str) -> str | None:
         value = self.entitlement(tenant_id)
         if not value["active"]:
-            return "Нет активного пакета. Выберите пакет и дождитесь подтверждения супер-администратора."
+            return NO_ACTIVE_SUBSCRIPTION_MESSAGE
         if not value["features"].get("operations", False):
             return "Запуск операций не входит в пакет компании."
         marketplace = value["marketplaces"].get(marketplace_code)
@@ -1747,11 +1751,9 @@ class SubscriptionService:
         )
 
     def request_addon(
-        self, tenant_id: int, addon_code: str, marketplace_code: str,
-        quantity: int, requested_by: int,
+        self, tenant_id: int, addon_code: str, quantity: int, requested_by: int,
+        *, marketplace_code: str | None = None,
     ) -> dict[str, Any]:
-        if marketplace_code not in MARKETPLACE_CODES:
-            raise SubscriptionError("Выберите площадку для дополнительных позиций.")
         quantity = int(quantity or 1)
         if not 1 <= quantity <= 100:
             raise SubscriptionError("Количество дополнений должно быть от 1 до 100.")
@@ -1774,7 +1776,7 @@ class SubscriptionService:
                        created_at,updated_at
                    ) VALUES(?,?,?,?,'pending',?,?,?,?,?,?,?,?)""",
                 (
-                    int(tenant_id), int(subscription["id"]), int(addon["id"]), marketplace_code,
+                    int(tenant_id), int(subscription["id"]), int(addon["id"]), "",
                     quantity, int(requested_by), stamp, float(addon["price_amount"]) * quantity,
                     str(addon["currency"]), int(addon["extra_positions"]), stamp, stamp,
                 ),

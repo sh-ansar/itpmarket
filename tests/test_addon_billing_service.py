@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from addon_billing_service import AddonBillingService
 from auth_service import AuthService
@@ -73,15 +74,16 @@ class AddonBillingServiceTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def _order(self, marketplace: str = "kaspi") -> dict:
+    def _order(self, quantity: int = 2, *, marketplace_code: str | None = None) -> dict:
         return self.service.create_order(
-            self.tenant_id, "positions_100", marketplace, 2, self.actor_id
+            self.tenant_id, "positions_100", quantity, self.actor_id,
+            marketplace_code=marketplace_code,
         )
 
     def test_create_order_snapshots_catalog_and_creates_pdf_invoice(self) -> None:
         order = self._order()
         self.assertEqual("awaiting_payment", order["status"])
-        self.assertEqual("kaspi", order["marketplace_code"])
+        self.assertEqual("", order["marketplace_code"])
         self.assertEqual(100, order["positions"])
         self.assertEqual(2, order["quantity"])
         self.assertEqual(5000.0, order["unit_price"])
@@ -90,14 +92,17 @@ class AddonBillingServiceTests(unittest.TestCase):
         line = order["invoice"]["line_items"][0]
         self.assertEqual("пак.", line["unit_label"])
         self.assertEqual(10000.0, line["amount"])
-        self.assertIn("Kaspi", line["description"])
-        self.assertIn("всего +200 позиций", line["description"])
+        self.assertEqual('Пакет "+100 позиций"', line["name"])
+        self.assertEqual('Пакет "+100 позиций"', line["description"])
+        self.assertEqual(2, line["quantity"])
+        self.assertNotIn("marketplace", line)
+        self.assertNotIn("Spyon", line["description"])
         self.assertTrue(order["invoice"]["pdf_path"])
         self.assertEqual(1, self.pdf.calls)
         self.assertEqual([order["id"]], [item["id"] for item in self.service.list_orders(self.tenant_id)])
 
     def test_replace_proof_and_approve_is_idempotent_and_changes_exact_limit(self) -> None:
-        order = self._order("kaspi")
+        order = self._order()
         first = self.service.upload_payment_proof(
             order["id"], self.tenant_id, self.actor_id,
             original_filename="first.pdf", mime_type="application/pdf", content=b"%PDF-1.4\nfirst",
@@ -118,8 +123,48 @@ class AddonBillingServiceTests(unittest.TestCase):
         self.assertEqual("active", active["status"])
         self.assertEqual("paid", active["invoice"]["status"])
         entitlement = self.subscriptions.entitlement(self.tenant_id)
-        self.assertEqual(300, entitlement["marketplaces"]["kaspi"]["position_limit"])
-        self.assertEqual(100, entitlement["marketplaces"]["wildberries"]["position_limit"])
+        for marketplace in ("kaspi", "ozon", "ozon_kz", "halyk_market", "forte_market", "wildberries"):
+            with self.subTest(marketplace=marketplace):
+                self.assertEqual(100, entitlement["marketplaces"][marketplace]["base_position_limit"])
+                self.assertEqual(200, entitlement["marketplaces"][marketplace]["extra_positions"])
+                self.assertEqual(300, entitlement["marketplaces"][marketplace]["position_limit"])
+
+    def test_legacy_marketplace_argument_is_ignored_and_global_addon_applies_once(self) -> None:
+        order = self._order(1, marketplace_code="kaspi")
+        self.assertEqual("", order["marketplace_code"])
+        proof = self.service.upload_payment_proof(
+            order["id"], self.tenant_id, self.actor_id,
+            original_filename="global.pdf", mime_type="application/pdf",
+            content=b"%PDF-1.4\nglobal",
+        )
+        self.service.approve_payment(proof["id"], self.actor_id)
+        entitlement = self.subscriptions.entitlement(self.tenant_id)
+        for marketplace in ("kaspi", "ozon", "ozon_kz"):
+            with self.subTest(marketplace=marketplace):
+                self.assertEqual(100, entitlement["marketplaces"][marketplace]["extra_positions"])
+                self.assertEqual(200, entitlement["marketplaces"][marketplace]["position_limit"])
+
+    def test_historical_marketplace_scoped_paid_order_keeps_original_semantics(self) -> None:
+        order = self._order(1)
+        proof = self.service.upload_payment_proof(
+            order["id"], self.tenant_id, self.actor_id,
+            original_filename="historical.pdf", mime_type="application/pdf",
+            content=b"%PDF-1.4\nhistorical",
+        )
+        self.service.approve_payment(proof["id"], self.actor_id)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE tenant_addon_orders SET marketplace_code='kaspi' WHERE id=?",
+                (order["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        entitlement = self.subscriptions.entitlement(self.tenant_id)
+        self.assertEqual(100, entitlement["marketplaces"]["kaspi"]["extra_positions"])
+        self.assertEqual(0, entitlement["marketplaces"]["ozon"]["extra_positions"])
+        self.assertEqual(0, entitlement["marketplaces"]["ozon_kz"]["extra_positions"])
 
     def test_reject_then_reissue_supersedes_old_order_and_invoice(self) -> None:
         original = self._order()
@@ -171,7 +216,7 @@ class AddonBillingServiceTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        addon = self.service.create_order(self.tenant_id, "positions_100", "kaspi", 1, self.actor_id)
+        addon = self.service.create_order(self.tenant_id, "positions_100", 1, self.actor_id)
         addon_invoice = addon["invoice"]
         self.assertEqual(subscription_invoice["seller"], addon_invoice["seller"])
         self.assertEqual(16.0, addon_invoice["vat_rate"])
@@ -187,6 +232,39 @@ class AddonBillingServiceTests(unittest.TestCase):
         reissued = self.service.reissue(addon["id"], self.actor_id, tenant_id=self.tenant_id)
         self.assertEqual(addon_invoice["seller"], reissued["invoice"]["seller"])
         self.assertEqual(689.66, reissued["invoice"]["vat_amount"])
+
+    def test_expired_global_order_stops_increasing_every_marketplace(self) -> None:
+        order = self._order()
+        proof = self.service.upload_payment_proof(
+            order["id"], self.tenant_id, self.actor_id,
+            original_filename="payment.pdf", mime_type="application/pdf",
+            content=b"%PDF-1.4\nproof",
+        )
+        self.service.approve_payment(proof["id"], self.actor_id)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE tenant_addon_orders SET valid_until=? WHERE id=?",
+                ((datetime.now().astimezone() - timedelta(days=1)).isoformat(timespec="seconds"), order["id"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        entitlement = self.subscriptions.entitlement(self.tenant_id)
+        for marketplace in ("kaspi", "ozon", "ozon_kz"):
+            self.assertEqual(0, entitlement["marketplaces"][marketplace]["extra_positions"])
+            self.assertEqual(100, entitlement["marketplaces"][marketplace]["position_limit"])
+
+    def test_global_order_uses_postgres_returning_identity_path(self) -> None:
+        # SQLite supports INSERT ... RETURNING and can therefore exercise the
+        # service's PostgreSQL identity branch without a production database.
+        with patch("addon_billing_service.PostgresConnection", sqlite3.Connection):
+            order = self.service.create_order(
+                self.tenant_id, "positions_100", 1, self.actor_id
+            )
+        self.assertGreater(order["id"], 0)
+        self.assertEqual("", order["marketplace_code"])
+        self.assertEqual('Пакет "+100 позиций"', order["invoice"]["line_items"][0]["name"])
 
 
 if __name__ == "__main__":

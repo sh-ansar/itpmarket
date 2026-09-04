@@ -168,7 +168,7 @@ class InvoicePDFServiceTests(
                 "\u0447\u0435\u0442\u044b\u0440\u0435 "
                 "\u0442\u044b\u0441\u044f\u0447\u0438 "
                 "\u0441\u0435\u043c\u044c\u0441\u043e\u0442 "
-                "\u0442\u0435\u043d\u0433\u0435 "
+                "\u0442\u0435\u04a3\u0433\u0435 "
                 "00 "
                 "\u0442\u0438\u044b\u043d"
             ),
@@ -182,7 +182,7 @@ class InvoicePDFServiceTests(
                 "\u041e\u0434\u043d\u0430 "
                 "\u0442\u044b\u0441\u044f\u0447\u0430 "
                 "\u0434\u0432\u0430 "
-                "\u0442\u0435\u043d\u0433\u0435 "
+                "\u0442\u0435\u04a3\u0433\u0435 "
                 "05 "
                 "\u0442\u0438\u044b\u043d"
             ),
@@ -190,6 +190,10 @@ class InvoicePDFServiceTests(
                 "1002.05"
             ),
         )
+
+        kzt_words = amount_in_words(89900, "KZT")
+        self.assertIn("теңге 00 тиын", kzt_words)
+        self.assertNotIn(" тенге ", f" {kzt_words} ")
 
     def test_generate_pdf_and_sha256(self) -> None:
         invoice = self.invoice()

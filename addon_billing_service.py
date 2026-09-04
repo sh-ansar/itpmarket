@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Paid marketplace-position add-ons, separate from legacy addon requests."""
+"""Paid global position add-ons, separate from legacy addon requests."""
 
 import hashlib
 import json
@@ -10,7 +10,6 @@ from typing import Any
 from uuid import uuid4
 
 from billing_service import BillingService, now_iso
-from marketplace_registry import MARKETPLACE_CODES, marketplace_label
 from storage.postgres_compat import PostgresConnection
 from subscription_service import SubscriptionError
 
@@ -166,16 +165,14 @@ class AddonBillingService:
         self,
         tenant_id: int,
         addon_code: str,
-        marketplace_code: str,
         quantity: int,
         actor_user_id: int,
+        *,
+        marketplace_code: str | None = None,
     ) -> dict[str, Any]:
         code = str(addon_code or "").strip().casefold()
-        marketplace = str(marketplace_code or "").strip().casefold()
         if code not in ADDON_CODES:
             raise SubscriptionError("Для оплаты доступны только пакеты positions_100, positions_500 и positions_1000.")
-        if marketplace not in MARKETPLACE_CODES:
-            raise SubscriptionError("Укажите поддерживаемый marketplace для add-on пакета.")
         quantity_value = self._require_quantity(quantity)
         supplier = self._supplier()
         stamp = now_iso()
@@ -212,7 +209,7 @@ class AddonBillingService:
                        unit_price,total_price,currency,valid_until,status,created_by,created_at,updated_at
                    ) VALUES(?,?,?,?,?,?,?,?,?,?,'awaiting_payment',?,?,?)"""
             order_params = (
-                (int(tenant_id), int(addon["id"]), code, marketplace,
+                (int(tenant_id), int(addon["id"]), code, "",
                  int(addon["extra_positions"]), quantity_value, unit_price, total_price,
                  str(addon["currency"]), str(subscription["ends_at"]), int(actor_user_id), stamp, stamp)
             )
@@ -230,17 +227,13 @@ class AddonBillingService:
                 total_price * vat_rate / (100 + vat_rate), 2
             ) if vat_rate > 0 else 0.0
             subtotal_amount = round(total_price - vat_amount, 2)
-            description = (
-                f"Дополнительные позиции Spyon — {marketplace_label(marketplace)}, "
-                f"пакет +{positions} позиций"
-            )
-            if quantity_value > 1:
-                description += f"; всего +{total_positions} позиций"
+            description = f'Пакет "+{positions} позиций"'
             lines = [{
-                "service_code": "addon_positions", "description": description,
+                "service_code": "addon_positions", "name": description,
+                "description": description,
                 "quantity": quantity_value, "unit_label": "пак.",
                 "unit_price": unit_price, "amount": total_price,
-                "currency": str(addon["currency"]), "marketplace": marketplace,
+                "currency": str(addon["currency"]),
                 "positions": positions, "total_positions": total_positions,
             }]
             invoice_insert = """INSERT INTO tenant_addon_invoices(
@@ -330,8 +323,7 @@ class AddonBillingService:
 
     def reissue(
         self, order_id: int, actor_user_id: int, *, tenant_id: int | None = None,
-        marketplace_code: str | None = None, addon_code: str | None = None,
-        quantity: int | None = None,
+        addon_code: str | None = None, quantity: int | None = None,
     ) -> dict[str, Any]:
         previous = self.get_order(int(order_id), tenant_id=tenant_id)
         if not previous:
@@ -358,7 +350,6 @@ class AddonBillingService:
             conn.close()
         replacement = self.create_order(
             int(previous["tenant_id"]), str(addon_code or previous["addon_code"]),
-            str(marketplace_code or previous["marketplace_code"]),
             int(previous["quantity"] if quantity is None else quantity), int(actor_user_id),
         )
         conn = self._connect()

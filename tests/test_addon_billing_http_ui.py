@@ -117,7 +117,7 @@ class AddonBillingHttpUiTests(unittest.TestCase):
     def _create(self) -> dict:
         response = self.client.post(
             "/api/addon-billing/orders", json={
-                "marketplace": "kaspi", "addon_code": "positions_100", "quantity": 2,
+                "addon_code": "positions_100", "quantity": 2,
                 "unit_price": 1, "positions": 1,
             }, headers=self._headers(),
         )
@@ -130,6 +130,7 @@ class AddonBillingHttpUiTests(unittest.TestCase):
         self.assertEqual(200, catalog.status_code)
         self.assertEqual({"positions_100", "positions_500", "positions_1000"}, {item["code"] for item in catalog.get_json()["addons"]})
         order = self._create()
+        self.assertEqual("", order["marketplace"])
         self.assertEqual(200, self.client.get(f"/api/addon-billing/orders/{order['id']}").status_code)
         invoice_response = self.client.get(order["invoice"]["download_url"])
         self.assertEqual(200, invoice_response.status_code)
@@ -142,7 +143,7 @@ class AddonBillingHttpUiTests(unittest.TestCase):
         )
         self.assertEqual(200, reissued.status_code, reissued.get_data(as_text=True))
         order = reissued.get_json()["order"]
-        self.assertEqual("wildberries", order["marketplace"])
+        self.assertEqual("", order["marketplace"])
 
         visible_orders_response = self.client.get(
             "/api/addon-billing/orders"
@@ -216,18 +217,37 @@ class AddonBillingHttpUiTests(unittest.TestCase):
         self._login(self.superadmin)
         self.assertEqual("active", self.client.get(f"/api/addon-billing/orders/{order['id']}").get_json()["order"]["status"])
 
+    def test_create_ignores_cached_frontend_marketplace_field(self) -> None:
+        self._login(self.superadmin)
+        response = self.client.post(
+            "/api/addon-billing/orders",
+            json={
+                "marketplace": "ozon_kz",
+                "marketplace_code": "kaspi",
+                "addon_code": "positions_100",
+                "quantity": 1,
+            },
+            headers=self._headers(),
+        )
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        self.assertEqual("", response.get_json()["order"]["marketplace"])
+
     def test_ui_uses_invoice_backed_addon_flow(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "static" / "js" / "app.js").read_text(encoding="utf-8")
         platform = (Path(__file__).resolve().parents[1] / "static" / "js" / "platform.js").read_text(encoding="utf-8")
         self.assertIn("Купить дополнительные позиции", source)
         self.assertIn("/api/addon-billing/orders", source)
         self.assertNotIn("/api/subscription/addons/request", source)
-        self.assertIn("marketplaceLabel(order.marketplace)", source)
+        self.assertNotIn("addonBillingMarketplace", source)
+        self.assertNotIn("order.marketplace", source)
+        self.assertIn("Дополнительные позиции применяются ко всем подключенным площадкам.", source)
+        self.assertIn("дополнительных позиций", source)
+        self.assertIn("позиций на каждую площадку", source)
         self.assertIn("Скачать PDF", source)
         self.assertIn("PAYMENT CONFIRMATION", source)
         self.assertIn("subscription-proof-file", source)
         self.assertIn("Сформировать счёт", source)
-        self.assertIn("Загрузить платёжный документ", source)
+        self.assertIn("Отправить на проверку", source)
         self.assertIn("/api/platform/billing/addon-payments", platform)
         self.assertIn("Подтвердить оплату", platform)
 
