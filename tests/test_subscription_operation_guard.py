@@ -4,7 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,6 +115,13 @@ class SubscriptionOperationGuardTests(unittest.TestCase):
             patch.object(webapp, "SAAS", self.saas),
             patch.object(webapp, "SUBSCRIPTIONS", self.subscriptions),
             patch.object(webapp, "TASKS", self.tasks),
+            patch.object(
+                webapp,
+                "allowed_marketplaces",
+                return_value={
+                    "halyk_market"
+                },
+            ),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -165,21 +172,178 @@ class SubscriptionOperationGuardTests(unittest.TestCase):
         self.assertEqual([], self.tasks.start_calls)
         self.assertEqual(0, self._usage_count())
 
-    def test_service_reinitialization_auto_creates_legacy_and_allows_operation(self) -> None:
-        self.assertFalse(self.subscriptions.entitlement(self.tenant_id)["active"])
+    def test_service_reinitialization_does_not_grant_legacy_to_unsubscribed_tenant(self) -> None:
+        self.assertFalse(
+            self.subscriptions.entitlement(
+                self.tenant_id
+            )["active"]
+        )
 
-        legacy_service = SubscriptionService(self.db_path)
-        legacy = legacy_service.entitlement(self.tenant_id)
-        self.assertTrue(legacy["active"])
-        self.assertEqual("legacy", legacy["subscription"]["plan_code"])
-        self.assertIsNone(legacy_service.operation_error(self.tenant_id, "halyk_market"))
+        reinitialized = SubscriptionService(
+            self.db_path
+        )
 
-        with patch.object(webapp, "SUBSCRIPTIONS", legacy_service):
+        entitlement = reinitialized.entitlement(
+            self.tenant_id
+        )
+
+        self.assertFalse(
+            entitlement["active"]
+        )
+        self.assertIsNone(
+            entitlement["subscription"]
+        )
+
+        with patch.object(
+            webapp,
+            "SUBSCRIPTIONS",
+            reinitialized,
+        ):
             response = self._start_operation()
 
-        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
-        self.assertEqual(1, len(self.tasks.start_calls))
-        self.assertEqual(1, self._usage_count())
+        self.assertEqual(
+            409,
+            response.status_code,
+        )
+        self.assertEqual(
+            {
+                "ok": False,
+                "error": NO_ACTIVE_SUBSCRIPTION_MESSAGE,
+            },
+            response.get_json(),
+        )
+        self.assertEqual(
+            [],
+            self.tasks.start_calls,
+        )
+        self.assertEqual(
+            0,
+            self._usage_count(),
+        )
+
+    def test_existing_legacy_subscription_remains_operational(self) -> None:
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        try:
+            legacy_id = int(
+                conn.execute(
+                    """
+                    SELECT id
+                    FROM subscription_plans
+                    WHERE code='legacy'
+                    """
+                ).fetchone()[0]
+            )
+
+            now = datetime.now().astimezone()
+            starts = now.isoformat(
+                timespec="seconds"
+            )
+            ends = (
+                now
+                + timedelta(days=3650)
+            ).isoformat(
+                timespec="seconds"
+            )
+
+            conn.execute(
+                """
+                INSERT INTO tenant_subscriptions(
+                    tenant_id,
+                    plan_id,
+                    status,
+                    requested_at,
+                    reviewed_at,
+                    starts_at,
+                    ends_at,
+                    price_amount,
+                    currency,
+                    term_days,
+                    plan_snapshot_json,
+                    review_note,
+                    created_at,
+                    updated_at
+                )
+                VALUES(
+                    ?,?,
+                    'active',
+                    ?,?,?,?,
+                    0,
+                    'KZT',
+                    3650,
+                    '{}',
+                    'Existing legacy customer',
+                    ?,?
+                )
+                """,
+                (
+                    self.tenant_id,
+                    legacy_id,
+                    starts,
+                    starts,
+                    starts,
+                    ends,
+                    starts,
+                    starts,
+                ),
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+        service = SubscriptionService(
+            self.db_path
+        )
+
+        entitlement = service.entitlement(
+            self.tenant_id
+        )
+
+        self.assertTrue(
+            entitlement["active"]
+        )
+        self.assertEqual(
+            "legacy",
+            entitlement[
+                "subscription"
+            ]["plan_code"],
+        )
+
+        self.assertIsNone(
+            service.operation_error(
+                self.tenant_id,
+                "halyk_market",
+            )
+        )
+
+        with patch.object(
+            webapp,
+            "SUBSCRIPTIONS",
+            service,
+        ):
+            response = self._start_operation()
+
+        self.assertEqual(
+            200,
+            response.status_code,
+            response.get_data(
+                as_text=True
+            ),
+        )
+        self.assertEqual(
+            1,
+            len(
+                self.tasks.start_calls
+            ),
+        )
+        self.assertEqual(
+            1,
+            self._usage_count(),
+        )
 
 
 if __name__ == "__main__":

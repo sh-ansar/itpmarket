@@ -294,23 +294,13 @@ class SubscriptionService:
                        ON CONFLICT(code) DO NOTHING""",
                     (code, name, "Дополнительная ёмкость каталога", positions, price, order, stamp, stamp),
                 )
-            # Existing approved workspaces keep their current behaviour until
-            # an administrator explicitly assigns a commercial package.
-            for tenant in conn.execute(
-                """SELECT id,created_at FROM tenants t WHERE status IN ('active','approved','confirmed')
-                   AND NOT EXISTS(SELECT 1 FROM tenant_subscriptions s WHERE s.tenant_id=t.id)"""
-            ).fetchall():
-                start = str(tenant["created_at"] or stamp)
-                end = (datetime.now().astimezone() + timedelta(days=36500)).isoformat(timespec="seconds")
-                snapshot = json.dumps(self._plan_row(conn, legacy_id), ensure_ascii=False, default=str)
-                conn.execute(
-                    """INSERT INTO tenant_subscriptions(
-                           tenant_id,plan_id,status,requested_at,reviewed_at,starts_at,ends_at,
-                           price_amount,currency,term_days,plan_snapshot_json,review_note,
-                           created_at,updated_at
-                       ) VALUES(?,?,'active',?,?,?,?,0,'KZT',36500,?,'Автоматическая миграция',?,?)""",
-                    (int(tenant["id"]), legacy_id, start, stamp, start, end, snapshot, stamp, stamp),
-                )
+            # Existing legacy subscriptions remain valid for backwards
+            # compatibility, but approved/new tenants must not receive an
+            # active free legacy subscription merely because the service
+            # starts or is reinitialized.
+            #
+            # The legacy plan itself remains in storage because historical
+            # tenant_subscriptions may still reference it.
             conn.commit()
         finally:
             conn.close()

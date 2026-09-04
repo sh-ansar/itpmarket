@@ -466,27 +466,132 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertEqual(102, entitlement["marketplaces"]["ozon_kz"]["position_limit"])
         self.assertEqual(102, entitlement["marketplaces"]["wildberries"]["position_limit"])
 
-    def test_new_approved_company_gets_legacy_compatibility_but_pending_does_not(self) -> None:
-        conn = sqlite3.connect(self.db_path)
-        stamp = "2026-08-11T12:00:00+05:00"
-        approved = int(conn.execute(
-            """INSERT INTO tenants(name,slug,status,created_at,updated_at)
-               VALUES('Approved','approved','approved',?,?)""",
-            (stamp, stamp),
-        ).lastrowid)
-        pending = int(conn.execute(
-            """INSERT INTO tenants(name,slug,status,created_at,updated_at)
-               VALUES('Pending','pending','pending',?,?)""",
-            (stamp, stamp),
-        ).lastrowid)
+    def test_new_approved_company_does_not_receive_legacy_automatically(self) -> None:
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        stamp = (
+            "2026-08-11T12:00:00+05:00"
+        )
+
+        approved = int(
+            conn.execute(
+                """
+                INSERT INTO tenants(
+                    name,
+                    slug,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES(
+                    'Approved',
+                    'approved',
+                    'approved',
+                    ?,
+                    ?
+                )
+                """,
+                (
+                    stamp,
+                    stamp,
+                ),
+            ).lastrowid
+        )
+
+        pending = int(
+            conn.execute(
+                """
+                INSERT INTO tenants(
+                    name,
+                    slug,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES(
+                    'Pending',
+                    'pending',
+                    'pending',
+                    ?,
+                    ?
+                )
+                """,
+                (
+                    stamp,
+                    stamp,
+                ),
+            ).lastrowid
+        )
+
         conn.commit()
         conn.close()
-        service = SubscriptionService(self.db_path)
-        legacy = service.entitlement(approved)
-        self.assertTrue(legacy["active"])
-        self.assertEqual("legacy", legacy["subscription"]["plan_code"])
-        self.assertIsNone(service.operation_error(approved, "kaspi"))
-        self.assertFalse(service.entitlement(pending)["active"])
+
+        service = SubscriptionService(
+            self.db_path
+        )
+
+        approved_entitlement = (
+            service.entitlement(
+                approved
+            )
+        )
+
+        pending_entitlement = (
+            service.entitlement(
+                pending
+            )
+        )
+
+        self.assertFalse(
+            approved_entitlement[
+                "active"
+            ]
+        )
+
+        self.assertIsNone(
+            approved_entitlement[
+                "subscription"
+            ]
+        )
+
+        self.assertFalse(
+            pending_entitlement[
+                "active"
+            ]
+        )
+
+        self.assertIsNone(
+            pending_entitlement[
+                "subscription"
+            ]
+        )
+
+        conn = sqlite3.connect(
+            self.db_path
+        )
+
+        try:
+            count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM tenant_subscriptions
+                    WHERE tenant_id=?
+                    """,
+                    (
+                        approved,
+                    ),
+                ).fetchone()[0]
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            0,
+            count,
+        )
 
     def test_trial_is_one_time_without_payment_and_creates_expiry_reminder(
         self,

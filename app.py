@@ -963,15 +963,45 @@ def action_access_error(action: str, user: dict[str, Any]) -> str | None:
         return "Нет разрешения на запуск операций."
     if action == "export_report" and not has_permission(user, "create_reports"):
         return "Нет разрешения на формирование отчётов."
-    platform = marketplace_for_action(action, ACTION_INFO)
-    if platform != "system" and platform not in allowed_marketplaces(user):
-        return "Для компании эта площадка не подключена."
+    platform = marketplace_for_action(
+        action,
+        ACTION_INFO,
+    )
+
+    # An active subscription is the primary commercial
+    # prerequisite for tenant operations. Check it before
+    # marketplace grants so an unsubscribed company receives
+    # the correct billing error instead of a misleading
+    # marketplace-access error.
     if not is_superadmin(user):
-        subscription_error = subscription_service().operation_error(
-            int(user.get("tenant_id") or 0), platform
+        subscription_error = (
+            subscription_service()
+            .operation_error(
+                int(
+                    user.get(
+                        "tenant_id"
+                    )
+                    or 0
+                ),
+                platform,
+            )
         )
+
         if subscription_error:
             return subscription_error
+
+    if (
+        platform != "system"
+        and platform
+        not in allowed_marketplaces(
+            user
+        )
+    ):
+        return (
+            "??? ???????? ??? ???????? "
+            "?? ??????????."
+        )
+
     return None
 
 
@@ -1008,12 +1038,67 @@ def permission_required(permission_code: str) -> Callable[[Callable[..., Any]], 
         @wraps(view)
         @login_required
         def wrapped(*args: Any, **kwargs: Any) -> Any:
-            if not has_permission(current_user(), permission_code):
+            user = current_user() or {}
+
+            if not has_permission(
+                user,
+                permission_code,
+            ):
+                # Subscription permissions are intentionally removed from the
+                # effective frontend/user scope when no commercial package is
+                # active. For an explicit API attempt to start an operation,
+                # return the billing precondition instead of the misleading
+                # generic permission error.
+                if (
+                    permission_code
+                    == "run_operations"
+                    and user.get(
+                        "tenant_id"
+                    )
+                    and not is_superadmin(
+                        user
+                    )
+                ):
+                    entitlement = (
+                        subscription_service()
+                        .entitlement(
+                            int(
+                                user[
+                                    "tenant_id"
+                                ]
+                            )
+                        )
+                    )
+
+                    if not entitlement.get(
+                        "active"
+                    ):
+                        if is_api_request():
+                            return json_error(
+                                NO_ACTIVE_SUBSCRIPTION_MESSAGE,
+                                409,
+                            )
+
+                        abort(403)
+
                 if is_api_request():
-                    return jsonify({"ok": False, "error": "Недостаточно прав."}), 403
+                    return jsonify(
+                        {
+                            "ok": False,
+                            "error":
+                                "???????????? ????.",
+                        }
+                    ), 403
+
                 abort(403)
-            return view(*args, **kwargs)
+
+            return view(
+                *args,
+                **kwargs,
+            )
+
         return wrapped
+
     return decorator
 
 
