@@ -54,18 +54,18 @@
     <div class="panel-head">
       <div>
         <span>LEGAL DOCUMENTS</span>
-        <h2>Версии и публикации</h2>
-        <p>
-          Опубликованные версии неизменяемы.
-          Для изменения условий создайте новую редакцию.
-        </p>
+        <h2>Действующие документы</h2>
+        <p>Актуальные опубликованные юридические документы SPYON. Для каждого документа доступны веб-версия, PDF и история согласий.</p>
       </div>
     </div>
 
     <form
       id="legalDocumentDraftForm"
       class="legal-editor-form"
-    >
+      hidden
+    
+      aria-hidden="true"
+      style="display:none">
       <input
         type="hidden"
         name="version_id"
@@ -188,7 +188,9 @@
 
     </form>
 
-    <div class="legal-version-note">
+    <div class="legal-version-note" hidden
+      aria-hidden="true"
+      style="display:none">
       <strong>Реквизиты оператора</strong>
       <span>
         Для публичной оферты юридические и банковские
