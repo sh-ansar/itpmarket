@@ -2417,28 +2417,6 @@ def before_request() -> Any:
     # A newly published legal version is a server-side precondition for every
     # tenant mutation. Read-only pages, login/session/logout and the legal
     # acceptance flow stay available so the user can review and accept it.
-    if (
-        g.user
-        and g.user.get("tenant_id")
-        and not is_superadmin(g.user)
-        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        and request.endpoint not in {
-            "api_legal_accept", "logout", "login", "forgot_password",
-            "reset_password", "verify_email", "resend_verification",
-        }
-    ):
-        required_legal = legal_document_service().required_for_user(
-            int(g.user["id"]), int(g.user["tenant_id"]),
-        )
-        if required_legal:
-            payload = {
-                "error": "Требуется принять новую редакцию юридических документов.",
-                "code": "legal_acceptance_required",
-                "required_documents": required_legal,
-            }
-            if is_api_request():
-                return jsonify(payload), 428
-            return Response(payload["error"], status=428, mimetype="text/plain")
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         if request.endpoint in {

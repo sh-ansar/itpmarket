@@ -156,7 +156,7 @@ class LandingV2Tests(unittest.TestCase):
         self.assertIn('class="legal-layout"', source)
         self.assertIn('class="legal-nav"', source)
         self.assertIn('data-public-theme', source)
-        self.assertIn("document='consent'", source)
+        self.assertIn("document='personal-data-consent'", source)
 
     def test_legal_dark_mode_polish_is_loaded_by_both_templates(self) -> None:
         for filename in ("legal.html", "legal_versioned.html"):
