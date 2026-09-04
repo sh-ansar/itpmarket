@@ -15,7 +15,11 @@ from billing_service import (
     OPERATOR_LEGAL_FIELDS,
     OPERATOR_LEGAL_PROFILE,
 )
-from legal_documents import LEGAL_DOCUMENTS, LEGAL_DOCUMENT_TYPE_TITLES
+from legal_documents import (
+    LEGAL_DOCUMENTS,
+    LEGAL_DOCUMENT_TYPES,
+    LEGAL_DOCUMENT_TYPE_TITLES,
+)
 from storage.postgres_compat import (
     PostgresConnection,
     configure_connection,
@@ -23,7 +27,7 @@ from storage.postgres_compat import (
 )
 
 
-LEGAL_TYPES = frozenset(LEGAL_DOCUMENT_TYPE_TITLES)
+LEGAL_TYPES = LEGAL_DOCUMENT_TYPES
 
 
 def now_iso() -> str:
@@ -566,10 +570,7 @@ class LegalDocumentService:
         """
         stamp = now_iso()
 
-        for definition in (
-            LEGAL_DOCUMENTS
-            .current_documents()
-        ):
+        for definition in LEGAL_DOCUMENTS.definitions():
             parent = conn.execute(
                 """SELECT id
                    FROM legal_documents
@@ -636,17 +637,14 @@ class LegalDocumentService:
                            effective_at=
                              CASE
                                WHEN effective_at=''
-                               THEN COALESCE(
-                                 published_at,
-                                 ?
-                               )
+                               THEN ?
                                ELSE effective_at
                              END
                        WHERE id=?""",
                     (
                         definition.number,
                         definition.title,
-                        stamp,
+                        definition.effective_at,
                         int(
                             existing["id"]
                         ),
@@ -693,7 +691,7 @@ class LegalDocumentService:
                     definition.version,
                     definition.number,
                     definition.title,
-                    stamp,
+                    definition.effective_at,
                     body,
                     definition.acceptance_text,
                     LEGAL_DOCUMENTS.sha256(
@@ -805,6 +803,12 @@ class LegalDocumentService:
                 ),
             "type":
                 document_type,
+            "slug":
+                (
+                    definition.route_slug
+                    if definition is not None
+                    else document_type.replace("_", "-")
+                ),
             "number":
                 str(
                     row.get(
@@ -857,7 +861,8 @@ class LegalDocumentService:
             "legacy_static":
                 bool(
                     definition is not None
-                    and version == "1.0"
+                    and str(row["content_sha256"])
+                    == definition.expected_sha256
                 ),
             "pdf_available":
                 pdf_available,

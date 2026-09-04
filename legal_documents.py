@@ -1,6 +1,8 @@
 """Immutable, server-side registry for published Spyon legal documents.
 
-The DOCX files in ``docs/legal`` are the single source for the Russian text.
+The versioned DOCX files in ``docs/legal/current`` are the single source for
+the current Russian text. Historical definitions remain addressable so an
+existing acceptance always points to the exact document it recorded.
 The SHA-256 recorded for an acceptance is calculated from the exact versioned
 DOCX byte stream.  A browser never supplies a document number, version or hash.
 """
@@ -21,17 +23,33 @@ from markupsafe import Markup
 ROOT = Path(__file__).resolve().parent
 DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 LEGAL_DOCUMENT_TYPE_TITLES = {
-    "offer": "\u041f\u0443\u0431\u043b\u0438\u0447\u043d\u0430\u044f \u043e\u0444\u0435\u0440\u0442\u0430",
-    "terms": "\u0423\u0441\u043b\u043e\u0432\u0438\u044f \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f \u0441\u0435\u0440\u0432\u0438\u0441\u0430",
-    "privacy": "\u041f\u043e\u043b\u0438\u0442\u0438\u043a\u0430 \u043a\u043e\u043d\u0444\u0438\u0434\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0441\u0442\u0438",
-    "cookies": "\u041f\u043e\u043b\u0438\u0442\u0438\u043a\u0430 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u044f cookie-\u0444\u0430\u0439\u043b\u043e\u0432 \u0438 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e\u0433\u043e \u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f",
-    "personal_data_consent": "\u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u043d\u0430 \u0441\u0431\u043e\u0440 \u0438 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0443 \u043f\u0435\u0440\u0441\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u0434\u0430\u043d\u043d\u044b\u0445",
+    "offer": "Публичная оферта SPYON",
+    "tariff_policy": "Тарифная политика и условия обслуживания SPYON",
+    "acceptable_use": "Правила допустимого использования SPYON",
+    "personal_data_consent": "Согласие на сбор и обработку персональных данных",
+    "privacy": "Политика конфиденциальности SPYON",
 }
+LEGAL_DOCUMENT_TYPES = frozenset({
+    *LEGAL_DOCUMENT_TYPE_TITLES,
+    # Historical lifecycle types are retained for immutable audit evidence.
+    "terms",
+    "cookies",
+})
 OFFER_ACCEPTANCE_TEXT = (
+    "Я подтверждаю, что уполномочен действовать от имени указанной компании, "
+    "ознакомился и принимаю условия Публичной оферты SPYON, Тарифной политики "
+    "и Правил допустимого использования."
+)
+PRIVACY_ACCEPTANCE_TEXT = (
+    "Я ознакомился(ась) с Политикой конфиденциальности SPYON и даю согласие "
+    "на сбор и обработку моих персональных данных в соответствии с Согласием "
+    "на сбор и обработку персональных данных."
+)
+LEGACY_OFFER_ACCEPTANCE_TEXT = (
     "Я подтверждаю, что уполномочен действовать от имени указанной компании, "
     "ознакомился и принимаю условия Публичной оферты Spyon."
 )
-PRIVACY_ACCEPTANCE_TEXT = (
+LEGACY_PRIVACY_ACCEPTANCE_TEXT = (
     "Я ознакомился(ась) с Политикой конфиденциальности Spyon и даю согласие "
     "на сбор и обработку моих персональных данных на изложенных в ней условиях."
 )
@@ -44,6 +62,9 @@ class LegalDefinition:
     version: str
     title: str
     filename: str
+    route_slug: str
+    pdf_filename: str
+    effective_at: str
     acceptance_text: str
     expected_sha256: str
 
@@ -53,7 +74,7 @@ class LegalDefinition:
 
     @property
     def pdf_path(self) -> Path:
-        return ROOT / "static" / "legal" / self.document_type / f"{self.version}.pdf"
+        return ROOT / "static" / "legal" / self.pdf_filename
 
 
 class LegalDocumentRegistry:
@@ -67,34 +88,95 @@ class LegalDocumentRegistry:
         LegalDefinition(
             "offer", "SPYON-OF-001", "1.0", "Публичная оферта Spyon",
             "Spyon_Публичная_оферта_v1.0_для_согласования.docx",
-            OFFER_ACCEPTANCE_TEXT,
+            "offer", "offer/1.0.pdf", "2026-08-31T00:00:00+00:00",
+            LEGACY_OFFER_ACCEPTANCE_TEXT,
             "64ec228d143b624438d31ba13519efda16e3d183e4d4ca280351e6ed03e567c0",
         ),
         LegalDefinition(
             "privacy", "SPYON-PD-001", "1.0",
             "Политика конфиденциальности Spyon",
             "Spyon_Политика_конфиденциальности_и_согласие_v1.0_для_согласования.docx",
-            PRIVACY_ACCEPTANCE_TEXT,
+            "privacy", "privacy/1.0.pdf", "2026-08-31T00:00:00+00:00",
+            LEGACY_PRIVACY_ACCEPTANCE_TEXT,
             "90da2b84982c11ae60318a286845ea594e76f9dfb58039bc3a560544b1fabb39",
+        ),
+        LegalDefinition(
+            "offer", "SPYON-OF-001", "04.09.2026", "Публичная оферта SPYON",
+            "current/public-offer.docx", "offer", "current/public-offer.pdf",
+            "2026-09-04T00:00:00+00:00", OFFER_ACCEPTANCE_TEXT,
+            "f1326386dfedb21cb71028373183416ae3e32de0edf26b31071f1b4eec14581e",
+        ),
+        LegalDefinition(
+            "tariff_policy", "SPYON-TP-001", "04.09.2026",
+            "Тарифная политика и условия обслуживания SPYON",
+            "current/tariff-policy.docx", "tariff-policy",
+            "current/tariff-policy.pdf", "2026-09-04T00:00:00+00:00",
+            OFFER_ACCEPTANCE_TEXT,
+            "6e365017d496c28708e34bf89afb0d244b30e9c162f38c13960c8c933a22af5a",
+        ),
+        LegalDefinition(
+            "acceptable_use", "SPYON-AU-001", "04.09.2026",
+            "Правила допустимого использования SPYON",
+            "current/acceptable-use.docx", "acceptable-use",
+            "current/acceptable-use.pdf", "2026-09-04T00:00:00+00:00",
+            OFFER_ACCEPTANCE_TEXT,
+            "18a2b3b0a3c1b170bee140240af13d6a78762312987cd831784110f341f494e9",
+        ),
+        LegalDefinition(
+            "personal_data_consent", "SPYON-PC-001", "04.09.2026",
+            "Согласие на сбор и обработку персональных данных",
+            "current/personal-data-consent.docx", "personal-data-consent",
+            "current/personal-data-consent.pdf", "2026-09-04T00:00:00+00:00",
+            PRIVACY_ACCEPTANCE_TEXT,
+            "7c6a44ceb0eb12c3ed619d9b9399bba9a0243844ff7928c0d417583e3a507415",
+        ),
+        LegalDefinition(
+            "privacy", "SPYON-PR-001", "04.09.2026",
+            "Политика конфиденциальности SPYON",
+            "current/privacy-policy.docx", "privacy",
+            "current/privacy-policy.pdf", "2026-09-04T00:00:00+00:00",
+            PRIVACY_ACCEPTANCE_TEXT,
+            "c5c11e99b144e5967705c75ef0cc259462832ee2323d6c7dac5a5b5a42a0076f",
         ),
     )
 
     def __init__(self) -> None:
         self._by_key = {(item.document_type, item.version): item for item in self._definitions}
 
+    def definitions(self) -> tuple[LegalDefinition, ...]:
+        return self._definitions
+
     def get(self, document_type: str, version: str | None = None) -> LegalDefinition | None:
         normalized_type = str(document_type or "").strip().casefold()
+        slug_match = next(
+            (item for item in reversed(self._definitions) if item.route_slug == normalized_type),
+            None,
+        )
+        if slug_match is not None:
+            normalized_type = slug_match.document_type
         if version is not None:
             return self._by_key.get((normalized_type, str(version).strip()))
         matches = [item for item in self._definitions if item.document_type == normalized_type]
         return matches[-1] if matches else None
 
     def current_documents(self) -> list[LegalDefinition]:
-        return [self.get("offer"), self.get("privacy")]  # type: ignore[list-item]
+        return [
+            self.get(document_type)
+            for document_type in LEGAL_DOCUMENT_TYPE_TITLES
+        ]  # type: ignore[list-item]
 
     @staticmethod
     def _paragraph_text(node: ET.Element) -> str:
-        return "".join(node.itertext()).strip()
+        result: list[str] = []
+        for child in node.iter():
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "t" and child.text:
+                result.append(child.text)
+            elif tag == "tab":
+                result.append("\t")
+            elif tag in {"br", "cr"}:
+                result.append("\n")
+        return "".join(result).strip()
 
     @staticmethod
     def _style_name(node: ET.Element) -> str:
@@ -116,15 +198,19 @@ class LegalDocumentRegistry:
         for node in body:
             tag = node.tag.rsplit("}", 1)[-1]
             if tag == "p":
-                text = self._paragraph_text(node)
-                if not text:
-                    continue
                 style = self._style_name(node).casefold()
                 is_heading = "heading" in style or "заголов" in style
-                values.append({
-                    "kind": "heading" if is_heading else ("list" if self._is_list(node) else "paragraph"),
-                    "text": text,
-                })
+                lines = [line.strip() for line in self._paragraph_text(node).splitlines()]
+                for text in filter(None, lines):
+                    manual_list = text.startswith(("- ", "• "))
+                    values.append({
+                        "kind": (
+                            "heading" if is_heading else
+                            "list" if self._is_list(node) or manual_list else
+                            "paragraph"
+                        ),
+                        "text": text[2:].strip() if manual_list else text,
+                    })
             elif tag == "tbl":
                 rows: list[list[str]] = []
                 for row in node.findall("./w:tr", DOCX_NS):
@@ -151,6 +237,8 @@ class LegalDocumentRegistry:
             "number": definition.number,
             "version": definition.version,
             "title": definition.title,
+            "slug": definition.route_slug,
+            "effective_at": definition.effective_at,
             "sha256": self.sha256(definition),
             "pdf_available": definition.pdf_path.is_file(),
         }

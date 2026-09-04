@@ -575,6 +575,7 @@
       ?items.map(item=>{
         const draft=
           item.status==='draft';
+        const slug=String(item.slug||item.type||'').replaceAll('_','-');
 
         const effective=
           item.effective_at
@@ -608,11 +609,19 @@
           :`<div class="legal-row-actions">
               <a
                 class="secondary"
-                href="/legal/${encodeURIComponent(item.type)}/${encodeURIComponent(item.version)}"
+                href="/legal/${encodeURIComponent(slug)}/${encodeURIComponent(item.version)}"
                 target="_blank"
                 rel="noopener"
               >
                 Открыть
+              </a>
+              <a
+                class="secondary"
+                href="/legal/${encodeURIComponent(slug)}/${encodeURIComponent(item.version)}.pdf"
+                target="_blank"
+                rel="noopener"
+              >
+                PDF
               </a>
               <button
                 type="button"
@@ -631,7 +640,7 @@
 
           <td>
             <strong>${esc(item.number||'—')}</strong>
-            <small>v${esc(item.version||'—')}</small>
+            <small>Редакция ${esc(item.version||'—')}</small>
           </td>
 
           <td>

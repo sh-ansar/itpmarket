@@ -546,23 +546,23 @@
           <label>
             <input
               type="checkbox"
-              name="privacy_consent"
-              value="1"
-              {% if request.form.get('privacy_consent') %}checked{% endif %}
-              required
-            >
-            <span class="consent-text">Я ознакомился(ась) с <button type="button" class="legal-inline-link" data-legal-modal="privacy">Политикой конфиденциальности Spyon</button> и даю согласие на сбор и обработку моих персональных данных на изложенных в ней условиях.</span>
-          </label>
-
-          <label>
-            <input
-              type="checkbox"
               name="offer_acceptance"
               value="1"
               {% if request.form.get('offer_acceptance') %}checked{% endif %}
               required
             >
-            <span class="consent-text">Я подтверждаю, что уполномочен действовать от имени указанной компании, ознакомился и принимаю условия <button type="button" class="legal-inline-link" data-legal-modal="offer">Публичной оферты Spyon</button>.</span>
+            <span class="consent-text">Я подтверждаю, что уполномочен действовать от имени указанной компании, ознакомился и принимаю условия <a class="legal-inline-link" href="{{ url_for('legal_current_pdf', document='offer') }}" target="_blank" rel="noopener">Публичной оферты SPYON</a>, <a class="legal-inline-link" href="{{ url_for('legal_current_pdf', document='tariff-policy') }}" target="_blank" rel="noopener">Тарифной политики</a> и <a class="legal-inline-link" href="{{ url_for('legal_current_pdf', document='acceptable-use') }}" target="_blank" rel="noopener">Правил допустимого использования</a>.</span>
+          </label>
+
+          <label>
+            <input
+              type="checkbox"
+              name="privacy_consent"
+              value="1"
+              {% if request.form.get('privacy_consent') %}checked{% endif %}
+              required
+            >
+            <span class="consent-text">Я ознакомился(ась) с <a class="legal-inline-link" href="{{ url_for('legal_current_pdf', document='privacy') }}" target="_blank" rel="noopener">Политикой конфиденциальности SPYON</a> и даю согласие на сбор и обработку моих персональных данных в соответствии с <a class="legal-inline-link" href="{{ url_for('legal_current_pdf', document='personal-data-consent') }}" target="_blank" rel="noopener">Согласием на сбор и обработку персональных данных</a>.</span>
           </label>
         </div>
       </section>

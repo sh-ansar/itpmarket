@@ -394,7 +394,9 @@ CREATE TABLE IF NOT EXISTS legal_acceptances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     tenant_id INTEGER NOT NULL,
-    document_type TEXT NOT NULL CHECK(document_type IN ('offer','terms','privacy','cookies','personal_data_consent')),
+    document_type TEXT NOT NULL CHECK(document_type IN (
+        'offer','tariff_policy','acceptable_use','personal_data_consent',
+        'privacy','terms','cookies')),
     document_number TEXT NOT NULL,
     document_version TEXT NOT NULL,
     document_sha256 TEXT NOT NULL,
@@ -1627,17 +1629,22 @@ def ensure_database(path: Path) -> None:
         acceptance_sql = str(conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='legal_acceptances'"
         ).fetchone()[0] or "")
-        if "personal_data_consent" not in acceptance_sql:
+        if not all(
+            document_type in acceptance_sql
+            for document_type in ("tariff_policy", "acceptable_use")
+        ):
             # SQLite cannot widen a CHECK constraint in place.  This is a
             # data-preserving table replacement; historical evidence is copied
             # byte-for-byte and no acceptance rows are recalculated.
+            conn.execute("DROP TABLE IF EXISTS legal_acceptances_v3")
             conn.execute(
-                """CREATE TABLE legal_acceptances_v2 (
+                """CREATE TABLE legal_acceptances_v3 (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     tenant_id INTEGER NOT NULL,
                     document_type TEXT NOT NULL CHECK(document_type IN (
-                        'offer','terms','privacy','cookies','personal_data_consent')),
+                        'offer','tariff_policy','acceptable_use','personal_data_consent',
+                        'privacy','terms','cookies')),
                     document_number TEXT NOT NULL,
                     document_version TEXT NOT NULL,
                     document_sha256 TEXT NOT NULL,
@@ -1653,7 +1660,7 @@ def ensure_database(path: Path) -> None:
                 )"""
             )
             conn.execute(
-                """INSERT INTO legal_acceptances_v2(
+                """INSERT INTO legal_acceptances_v3(
                        id,user_id,tenant_id,document_type,document_number,document_version,
                        document_sha256,accepted_at,ip_address,user_agent,locale,
                        acceptance_text,source,created_at,legal_document_version_id
@@ -1663,7 +1670,7 @@ def ensure_database(path: Path) -> None:
                    FROM legal_acceptances"""
             )
             conn.execute("DROP TABLE legal_acceptances")
-            conn.execute("ALTER TABLE legal_acceptances_v2 RENAME TO legal_acceptances")
+            conn.execute("ALTER TABLE legal_acceptances_v3 RENAME TO legal_acceptances")
             conn.execute(
                 """CREATE INDEX IF NOT EXISTS idx_legal_acceptances_tenant
                    ON legal_acceptances(tenant_id,accepted_at DESC)"""

@@ -2847,7 +2847,7 @@ def robots_txt() -> Response:
 def sitemap_xml() -> Response:
     urls = [url_for("landing", _external=True)]
     urls.extend(
-        url_for("legal_document", document=document["type"], _external=True)
+        url_for("legal_document", document=document["slug"], _external=True)
         for document in legal_document_service().current_documents()
     )
     body = "".join(f"<url><loc>{url}</loc></url>" for url in urls)
@@ -3164,13 +3164,14 @@ def legal_pdf(document: str, version: str) -> Any:
 
 @app.get("/legal/<document>/<version>")
 def legal_document_version(document: str, version: str) -> Any:
-    managed = legal_document_service().get_version(document, version)
+    definition = LEGAL_DOCUMENTS.get(document, version)
+    document_type = definition.document_type if definition is not None else document
+    managed = legal_document_service().get_version(document_type, version)
     if (
         managed is None
         or str(managed.get("status") or "") != "published"
     ):
         abort(404)
-    definition = LEGAL_DOCUMENTS.get(document, version)
     if definition is not None and managed.get("legacy_static"):
         legal = LEGAL_DOCUMENTS.metadata(definition)
         body = LEGAL_DOCUMENTS.html(definition)
@@ -3188,7 +3189,9 @@ def legal_document_version(document: str, version: str) -> Any:
 @app.get("/legal/<document>/pdf")
 def legal_current_pdf(document: str) -> Any:
     """Serve a real PDF when one exists; otherwise open immutable HTML."""
-    managed = legal_document_service().get_version(document)
+    definition = LEGAL_DOCUMENTS.get(document)
+    document_type = definition.document_type if definition is not None else document
+    managed = legal_document_service().get_version(document_type)
 
     if managed is None:
         abort(404)
@@ -3218,9 +3221,14 @@ def legal_current_pdf(document: str) -> Any:
 
 @app.get("/legal/<document>")
 def legal_document(document: str) -> Any:
-    managed = legal_document_service().get_version(document)
+    definition = LEGAL_DOCUMENTS.get(document)
+    document_type = definition.document_type if definition is not None else document
+    managed = legal_document_service().get_version(document_type)
     if managed is not None:
-        return legal_document_version(document, str(managed["version"]))
+        return legal_document_version(
+            str(managed.get("slug") or document),
+            str(managed["version"]),
+        )
     # Lifecycle types exist in admin before publication, but never receive an
     # auto-generated public legal page.
     abort(404)

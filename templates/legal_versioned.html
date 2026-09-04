@@ -17,12 +17,12 @@
   <div class="site-tools"><button class="site-theme" data-public-theme aria-label="Переключить тему"><img class="light-icon" src="{{ url_for('static', filename='icons/sun.svg') }}" alt=""><img class="dark-icon" src="{{ url_for('static', filename='icons/moon.svg') }}" alt=""></button><label class="language-select"><span class="sr-only">Язык</span><select id="languageSelect" aria-label="Язык"><option value="ru">RU</option><option value="kk">KZ</option><option value="en">EN</option></select></label><a class="site-button secondary" href="{{ url_for('landing') }}">На главную</a></div>
 </header>
 <main class="legal-layout">
-  <aside class="legal-nav" aria-label="Юридические документы"><span>ДОКУМЕНТЫ</span><a class="{{ 'active' if legal.type == 'privacy' else '' }}" href="{{ url_for('legal_document', document='privacy') }}">Конфиденциальность</a><a class="{{ 'active' if legal.type == 'offer' else '' }}" href="{{ url_for('legal_document', document='offer') }}">Публичная оферта</a><a href="{{ url_for('legal_document', document='terms') }}">Условия использования</a><a href="{{ url_for('legal_document', document='cookies') }}">Cookies</a><a href="{{ url_for('legal_document', document='consent') }}">Согласие</a></aside>
+  <aside class="legal-nav" aria-label="Юридические документы"><span>ДОКУМЕНТЫ</span><a class="{{ 'active' if legal.type == 'offer' else '' }}" href="{{ url_for('legal_document', document='offer') }}">Публичная оферта</a><a class="{{ 'active' if legal.type == 'tariff_policy' else '' }}" href="{{ url_for('legal_document', document='tariff-policy') }}">Тарифная политика</a><a class="{{ 'active' if legal.type == 'acceptable_use' else '' }}" href="{{ url_for('legal_document', document='acceptable-use') }}">Правила использования</a><a class="{{ 'active' if legal.type == 'privacy' else '' }}" href="{{ url_for('legal_document', document='privacy') }}">Конфиденциальность</a><a class="{{ 'active' if legal.type == 'personal_data_consent' else '' }}" href="{{ url_for('legal_document', document='personal-data-consent') }}">Согласие на персональные данные</a></aside>
   <article class="legal-document legal-versioned-document">
     <header class="legal-document-head">
       <p class="eyebrow">SPYON · LEGAL</p>
       <h1>{{ legal.title }}</h1>
-      <div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div>
+      <div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Редакция {{ legal.version }}</span></div>
       <a class="site-button secondary" href="{{ url_for('legal_current_pdf', document=legal.type, download=1) }}">Скачать PDF</a>
     </header>
     <div class="legal-source-note">Официальная редакция документа доступна на русском языке.</div>
@@ -33,5 +33,5 @@
 <script src="{{ url_for('static', filename='js/public_i18n.js') }}?v={{ version }}"></script><script src="{{ url_for('static', filename='js/public_i18n_runtime.js') }}?v={{ version }}"></script><script src="{{ url_for('static', filename='js/public.js') }}?v={{ version }}"></script>
 </body></html>
 {% else %}
-<article class="legal-document legal-versioned-document"><header class="legal-document-head"><p class="eyebrow">SPYON · LEGAL</p><h1>{{ legal.title }}</h1><div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Версия {{ legal.version }}</span></div></header><section class="legal-source-content">{{ document_html }}</section></article>
+<article class="legal-document legal-versioned-document"><header class="legal-document-head"><p class="eyebrow">SPYON · LEGAL</p><h1>{{ legal.title }}</h1><div class="legal-document-facts"><span>№ {{ legal.number }}</span><span>Редакция {{ legal.version }}</span></div></header><section class="legal-source-content">{{ document_html }}</section></article>
 {% endif %}

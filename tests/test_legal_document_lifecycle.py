@@ -181,28 +181,42 @@ class LegalDocumentLifecycleTests(
         conn.close()
 
         self.service = LegalDocumentService(self.db_path)
+        for document_type in LEGAL_DOCUMENT_TYPE_TITLES:
+            self.service.accept(
+                self.user_id,
+                self.tenant_id,
+                document_type,
+                ip_address="127.0.0.1",
+                user_agent="baseline-test",
+                locale="ru",
+            )
 
     def test_all_five_document_types_share_draft_publish_and_acceptance_lifecycle(self) -> None:
         self.assertEqual(
-            ["offer", "terms", "privacy", "cookies", "personal_data_consent"],
+            [
+                "offer",
+                "tariff_policy",
+                "acceptable_use",
+                "personal_data_consent",
+                "privacy",
+            ],
             [item["type"] for item in self.service.document_types()],
         )
         self.assertEqual(
-            "Политика использования cookie-файлов и локального хранения",
-            LEGAL_DOCUMENT_TYPE_TITLES["cookies"],
+            "Тарифная политика и условия обслуживания SPYON",
+            LEGAL_DOCUMENT_TYPE_TITLES["tariff_policy"],
         )
         for document_type, title in LEGAL_DOCUMENT_TYPE_TITLES.items():
-            version = "2.0" if document_type in {"offer", "privacy"} else "1.0"
-            if document_type not in {"offer", "privacy"}:
-                self.assertIsNone(self.service.get_version(document_type))
+            current = self.service.get_version(document_type)
+            self.assertIsNotNone(current)
+            self.assertEqual("04.09.2026", current["version"])
+            version = "99.0"
             draft = self.service.save_draft({
                 "type": document_type, "number": f"TEST-{document_type}",
                 "version": version, "title": title, "body_text": "Test-approved legal body.",
                 "acceptance_text": "Test acceptance.", "requires_acceptance": True,
             }, self.user_id)
             self.assertEqual("draft", draft["status"])
-            if document_type not in {"offer", "privacy"}:
-                self.assertIsNone(self.service.get_version(document_type))
             published = self.service.publish(int(draft["id"]), self.user_id)
             self.assertEqual("published", published["status"])
             self.assertEqual(title, published["title"])
