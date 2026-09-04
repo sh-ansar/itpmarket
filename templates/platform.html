@@ -20,7 +20,7 @@
 </header>
 
 <main class="platform-main">
-  <section class="platform-title"><div><span>ADMIN CONTROL</span><h1>{% if platform_section == 'packages' %}Пакеты и лимиты{% elif platform_section == 'link-rules' %}Правила ссылок{% elif platform_section == 'legal-documents' %}Юридические документы{% elif platform_section == 'payments' %}Оплаты и сроки{% else %}Компании{% endif %}</h1><p>{% if platform_section == 'packages' %}Функции, площадки, лимиты позиций и запусков.{% elif platform_section == 'link-rules' %}Распознавание магазинов и формирование ссылок для каждой площадки.{% elif platform_section == 'legal-documents' %}Черновики, публикации, неизменяемые версии и история согласий пользователей.{% elif platform_section == 'payments' %}Счета, платёжные документы, подтверждения и история оплат.{% else %}Рабочие пространства, пакеты, площадки и пользователи в одном списке.{% endif %}</p></div><button id="refreshPlatform" data-i18n="platform_refresh">Обновить</button></section>
+  <section class="platform-title"><div><span>ADMIN CONTROL</span><h1>{% if platform_section == 'packages' %}Пакеты и лимиты{% elif platform_section == 'link-rules' %}Правила ссылок{% elif platform_section == 'legal-documents' %}Юридические документы{% elif platform_section == 'payments' %}Оплаты и сроки{% else %}Компании{% endif %}</h1><p>{% if platform_section == 'packages' %}Функции, площадки, лимиты позиций и запусков.{% elif platform_section == 'link-rules' %}Распознавание магазинов и формирование ссылок для каждой площадки.{% elif platform_section == 'legal-documents' %}Актуальные юридические документы и история согласий пользователей.{% elif platform_section == 'payments' %}Счета, платёжные документы, подтверждения и история оплат.{% else %}Рабочие пространства, пакеты, площадки и пользователи в одном списке.{% endif %}</p></div><button id="refreshPlatform" data-i18n="platform_refresh">Обновить</button></section>
   {% if platform_section == 'companies' %}
   <section class="platform-kpis" id="platformKpis"><article><small>—</small><b>—</b></article></section>
 
@@ -63,7 +63,6 @@
       id="legalDocumentDraftForm"
       class="legal-editor-form"
       hidden
-    
       aria-hidden="true"
       style="display:none">
       <input
