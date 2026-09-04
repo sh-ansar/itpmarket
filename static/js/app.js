@@ -411,7 +411,7 @@
     ].filter(Boolean);
 
     if(parts.length){
-      return parts.join(' ? ');
+      return parts.join(' \u00b7 ');
     }
 
     return String(
@@ -444,7 +444,7 @@
         ),
         esc(
           taskPhaseText(task)
-          ||'?'
+          ||'\u2014'
         )
       ],
       [
@@ -455,7 +455,7 @@
         esc(
           task?.started_at
             ?dateText(task.started_at)
-            :'?'
+            :'\u2014'
         )
       ],
       [
@@ -466,7 +466,7 @@
         esc(
           task?.finished_at
             ?dateText(task.finished_at)
-            :'?'
+            :'\u2014'
         )
       ]
     ];
@@ -538,7 +538,7 @@
       );
     }
 
-    return parts.join(' ? ');
+    return parts.join(' \u00b7 ');
   };
 
   const taskHistoryHtml = (
@@ -1051,6 +1051,77 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
   const relationLabel = v => ({KASPI_SAME_CARD:'Та же карточка Kaspi',EXACT_MODEL:'Точный товар',REVIEW:'Требует проверки',accepted:'Подтверждено',review:'Проверка',rejected:'Отклонено'}[v]||v||'Точный кандидат');
   function historySvg(points){ const vals=points.map(x=>Number(x.price_kzt??x.price)).filter(x=>x>0);if(vals.length<2)return '<span class="muted">Недостаточно данных для графика</span>';const min=Math.min(...vals),max=Math.max(...vals),w=700,h=170,pad=18;const pts=vals.map((v,i)=>`${pad+i*(w-pad*2)/(vals.length-1)},${h-pad-(v-min)/(max-min||1)*(h-pad*2)}`).join(' ');return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#06a9e7" stop-opacity=".32"/><stop offset="1" stop-color="#06a9e7" stop-opacity="0"/></linearGradient></defs><polyline points="${pts} ${w-pad},${h-pad} ${pad},${h-pad}" fill="url(#g)" stroke="none"/><polyline points="${pts}" fill="none" stroke="#06a9e7" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>`; }
 
+  const PRICE_ACTIONS_REQUIRING_CATALOG = new Set([
+    'kaspi_price_actualize',
+    'ozon_price_actualize',
+    'ozon_kz_price_actualize',
+    'halyk_price_actualize',
+    'forte_price_actualize',
+    'wb_price_actualize'
+  ]);
+
+  const priceActionNeedsCatalog = action =>
+    PRICE_ACTIONS_REQUIRING_CATALOG.has(
+      String(action||'')
+    );
+
+  const catalogReadyForPlatform = (
+    platform,
+    sellerId=''
+  ) => {
+    if(
+      user.platform_role==='superadmin'
+    ){
+      return true;
+    }
+
+    const sellers=
+      user.marketplace_sellers
+      ?.[platform]
+      ||[];
+
+    if(sellerId){
+      const seller=
+        sellers.find(
+          item=>
+            String(item.id)
+            ===String(sellerId)
+        );
+
+      if(seller){
+        return Boolean(
+          seller.catalog_ready
+        );
+      }
+    }
+
+    return Boolean(
+      state.onboarding
+      ?.catalog_ready
+      ?.[platform]
+    );
+  };
+
+  const operationCatalogBlocked = (
+    action,
+    platform,
+    sellerId=''
+  ) =>
+    priceActionNeedsCatalog(
+      action
+    )
+    &&!catalogReadyForPlatform(
+      platform,
+      sellerId
+    );
+
+  const operationCatalogRequiredText = () =>
+    t(
+      'operation_catalog_required',
+      'Run catalogue collection first.'
+    );
+
+
   function updateOperationScope(ids){
     const actionNode=$('#'+ids.action),scopeNode=$('#'+ids.scope);
     if(!actionNode||!scopeNode)return;
@@ -1059,23 +1130,156 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     if(!filterable)scopeNode.value='all';
   }
   function updateOperationLauncher(ids){
-    const platformNode=$('#'+ids.platform), actionNode=$('#'+ids.action), scopeNode=$('#'+ids.scope);
-    if(!platformNode||!actionNode||!scopeNode)return;
-    const platform=platformNode.value;
-    const sellerNode=$('#'+ids.seller),sellerField=$('#'+ids.seller+'Field');
-    const sellers=(user.marketplace_sellers?.[platform]||[]);
-    if(sellerNode){
-      const previousSeller=sellerNode.value;
-      sellerNode.innerHTML=sellers.map(item=>`<option value="${Number(item.id)}">${esc(item.display_name||item.external_seller_id||`#${item.id}`)}</option>`).join('');
-      if([...sellerNode.options].some(option=>option.value===previousSeller))sellerNode.value=previousSeller;
-      if(sellerField)sellerField.hidden=sellers.length<=1||platform==='system';
+    const platformNode=
+      $('#'+ids.platform);
+
+    const actionNode=
+      $('#'+ids.action);
+
+    const scopeNode=
+      $('#'+ids.scope);
+
+    const launchNode=
+      $('#'+ids.launch);
+
+    if(
+      !platformNode
+      ||!actionNode
+      ||!scopeNode
+    ){
+      return;
     }
-    const previous=actionNode.value;
-    actionNode.innerHTML=(ACTIONS[platform]||[]).filter(([id])=>(id!=='backup_database'||user.platform_role==='superadmin')&&(id!=='full_sync_all'||visibleMarketplaceCodes().length>1)).map(([id,label])=>`<option value="${id}">${esc(actionLabel(id,label))}</option>`).join('');
-    if([...actionNode.options].some(option=>option.value===previous))actionNode.value=previous;
-    actionNode.onchange=()=>updateOperationScope(ids);
-    updateOperationScope(ids);
+
+    const platform=
+      platformNode.value;
+
+    const sellerNode=
+      $('#'+ids.seller);
+
+    const sellerField=
+      $('#'+ids.seller+'Field');
+
+    const sellers=
+      user.marketplace_sellers
+      ?.[platform]
+      ||[];
+
+    if(sellerNode){
+      const previousSeller=
+        sellerNode.value;
+
+      sellerNode.innerHTML=
+        sellers.map(
+          item=>
+            `<option value="${Number(item.id)}">${esc(
+              item.display_name
+              ||item.external_seller_id
+              ||`#${item.id}`
+            )}</option>`
+        ).join('');
+
+      if(
+        [...sellerNode.options]
+        .some(
+          option=>
+            option.value
+            ===previousSeller
+        )
+      ){
+        sellerNode.value=
+          previousSeller;
+      }
+
+      if(sellerField){
+        sellerField.hidden=
+          sellers.length<=1
+          ||platform==='system';
+      }
+    }
+
+    const previous=
+      actionNode.value;
+
+    actionNode.innerHTML=
+      (
+        ACTIONS[platform]
+        ||[]
+      )
+      .filter(
+        ([id])=>
+          (
+            id!=='backup_database'
+            ||user.platform_role
+              ==='superadmin'
+          )
+          &&(
+            id!=='full_sync_all'
+            ||visibleMarketplaceCodes()
+              .length>1
+          )
+      )
+      .map(
+        ([id,label])=>
+          `<option value="${id}">${esc(
+            actionLabel(
+              id,
+              label
+            )
+          )}</option>`
+      )
+      .join('');
+
+    if(
+      [...actionNode.options]
+      .some(
+        option=>
+          option.value
+          ===previous
+      )
+    ){
+      actionNode.value=
+        previous;
+    }
+
+    const refreshAvailability=()=>{
+      updateOperationScope(
+        ids
+      );
+
+      const blocked=
+        operationCatalogBlocked(
+          actionNode.value,
+          platformNode.value,
+          sellerNode?.value||''
+        );
+
+      if(launchNode){
+        launchNode.disabled=
+          blocked;
+
+        launchNode.setAttribute(
+          'aria-disabled',
+          String(blocked)
+        );
+
+        launchNode.title=
+          blocked
+            ?operationCatalogRequiredText()
+            :'';
+      }
+    };
+
+    actionNode.onchange=
+      refreshAvailability;
+
+    if(sellerNode){
+      sellerNode.onchange=
+        refreshAvailability;
+    }
+
+    refreshAvailability();
   }
+
   function updateOperationActions(){ operationLaunchers.forEach(updateOperationLauncher); }
   async function startTask(action,scope='all',codes=[],filters=null,options={}){
     try{
@@ -1129,7 +1333,21 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       const tone=active?taskStatusTone(active.status):'neutral';
       const toneClass = tone==='success'?'success':tone==='danger'?'danger':tone==='warning'?'warning':'info';
       const runningIds = activeTasks.map(t=>t.id||'').filter(Boolean).join(',');
-      const startBtn = !activeTasks.length?`<button class="primary start-op" data-action="${esc(item.id)}">${esc(t('start','Запустить'))}</button>`:'';
+      const catalogBlocked=
+        operationCatalogBlocked(
+          item.id,
+          item.platform
+        );
+
+      const prerequisiteText=
+        catalogBlocked
+          ?operationCatalogRequiredText()
+          :'';
+
+      const startBtn=
+        !activeTasks.length
+          ?`<button class="primary start-op" data-action="${esc(item.id)}" ${catalogBlocked?'disabled aria-disabled="true"':''} title="${esc(prerequisiteText)}">${esc(t('start','\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c'))}</button>`
+          :'';
       const stopBtn = activeTasks.length?`<button class="danger stop-op" data-task-ids="${esc(runningIds)}">${esc(t('stop','Остановить'))}</button>`:'';
       const percent=active?taskProgressPercent(active):null;
       const progressText=active?taskSecondaryText(active):'';
@@ -1137,7 +1355,7 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
       return `
         <section class="operation-launch-card ${esc(toneClass)} ${activeTasks.length?'is-running':''}" ${active?.id?`data-open-task="${esc(active.id)}"`:''}>
           <div class="operation-card-body">
-            <div class="operation-info"><b>${esc(actionLabel(item.id,item.label))}</b>${actionDescription(item.id)?`<small class="operation-description">${esc(actionDescription(item.id))}</small>`:''}<small class="operation-meta">${esc(lastStatus)} · ${esc(lastTime)}</small></div>
+            <div class="operation-info"><b>${esc(actionLabel(item.id,item.label))}</b>${actionDescription(item.id)?`<small class="operation-description">${esc(actionDescription(item.id))}</small>`:''}${prerequisiteText?`<small class="operation-prerequisite">${esc(prerequisiteText)}</small>`:''}<small class="operation-meta">${esc(lastStatus)} \u00b7 ${esc(lastTime)}</small></div>
             <div class="operation-actions">${startBtn}${stopBtn}</div>
           </div>
           ${progressHtml}
@@ -2387,6 +2605,12 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
         onboarding
       );
 
+      if(
+        state.page==='operations'
+      ){
+        renderTasks();
+      }
+
       return onboarding;
 
     }catch(error){
@@ -2425,8 +2649,8 @@ async function stopProduct(code){ try{ const d=await api('/api/tasks/stop_by_pro
     },
     {
       code:'marketplaces',
-      label:'\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
-      title:'\u041f\u043b\u043e\u0449\u0430\u0434\u043a\u0438 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      label:'\u0418\u043d\u0442\u0435\u0440\u043d\u0435\u0442-\u043c\u0430\u0433\u0430\u0437\u0438\u043d\u044b \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
+      title:'\u0418\u043d\u0442\u0435\u0440\u043d\u0435\u0442-\u043c\u0430\u0433\u0430\u0437\u0438\u043d\u044b \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438',
       description:'\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u0439\u0442\u0435 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u044b, \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0439\u0442\u0435 \u043f\u0440\u043e\u0434\u0430\u0432\u0446\u043e\u0432 \u0438 \u0443\u043f\u0440\u0430\u0432\u043b\u044f\u0439\u0442\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u0430\u043c\u0438 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430.'
     },
     {

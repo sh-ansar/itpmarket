@@ -16,6 +16,7 @@ from catalog_configuration_service import CatalogConfigurationService
 from data_service import DataService
 from saas_service import SaaSService
 from schema import ensure_database
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 class FakeTasks:
@@ -35,6 +36,17 @@ class FakeTasks:
             },
         ]
 
+    def progress_history(self, task_id, lines=2000):
+        return [{"phase": "catalog", "state": "running", "current": 1}]
+
+    def tail(self, task_id, lines=800):
+        return (
+            'JOB_CONTEXT {"source_url":"https://internal.example/job",'
+            '"token":"plain-token"}\n'
+            'Authorization: Bearer bearer-secret\n'
+            'client_secret=client-secret password: password-secret'
+        )
+
 
 class SecurityMarketplaceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -47,6 +59,9 @@ class SecurityMarketplaceTests(unittest.TestCase):
         )
         self.admin = admin
         self.tenant_id = int(admin["tenant_id"])
+        activate_legacy_subscription(
+            self.db_path, self.tenant_id, actor_user_id=int(admin["id"])
+        )
         SaaSService(self.db_path).update_tenant_profile(
             self.tenant_id,
             {
@@ -154,6 +169,30 @@ class SecurityMarketplaceTests(unittest.TestCase):
             "actual-secret",
             webapp.redact_log_text("client_secret=actual-secret token: second-secret"),
         )
+
+    def test_task_log_hides_raw_log_from_tenant_and_redacts_superadmin(self) -> None:
+        tenant_response = self.client.get("/api/tasks/halyk-task/log")
+        self.assertEqual(200, tenant_response.status_code)
+        tenant_payload = tenant_response.get_json()
+        self.assertTrue(tenant_payload["history"])
+        self.assertFalse(tenant_payload["show_technical_log"])
+        self.assertEqual("", tenant_payload["technical_log"])
+        self.assertEqual("", tenant_payload["log"])
+        self.assertNotIn("JOB_CONTEXT", json.dumps(tenant_payload))
+        self.assertNotIn("internal.example", json.dumps(tenant_payload))
+
+        with self.client.session_transaction() as session:
+            session["user_id"] = int(self.admin["id"])
+        superadmin_response = self.client.get("/api/tasks/halyk-task/log")
+        self.assertEqual(200, superadmin_response.status_code)
+        superadmin_payload = superadmin_response.get_json()
+        self.assertTrue(superadmin_payload["show_technical_log"])
+        self.assertIn("JOB_CONTEXT", superadmin_payload["technical_log"])
+        for secret in (
+            "plain-token", "bearer-secret", "client-secret", "password-secret"
+        ):
+            self.assertNotIn(secret, superadmin_payload["technical_log"])
+        self.assertIn("[REDACTED]", superadmin_payload["technical_log"])
 
     def test_permission_override_blocks_direct_operation_api(self) -> None:
         self.auth.update_user(
@@ -346,6 +385,7 @@ class SecurityMarketplaceTests(unittest.TestCase):
             "operator", int(admin["id"]), tenant_id=tenant_two,
         )
         ensure_database(self.db_path)
+        activate_legacy_subscription(self.db_path, tenant_two)
         conn = sqlite3.connect(self.db_path)
         try:
             active_tenants = {

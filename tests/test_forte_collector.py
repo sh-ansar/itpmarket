@@ -10,6 +10,7 @@ from unittest.mock import patch
 from collectors.forte import forte_collector as forte
 from data_service import DataService
 from schema import ensure_database
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 def collector_args(db_path: Path, **changes: object) -> argparse.Namespace:
@@ -134,6 +135,7 @@ class ForteCollectorTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM forte_price_history WHERE product_id=?", (product_id,)
                 ).fetchone()[0]
                 tenant_id = int(conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()[0])
+                activate_legacy_subscription(db_path, tenant_id)
                 args.tenant_id = tenant_id
                 saved = forte.materialize_tenant_catalog(conn, db_path, args)
                 snapshot = conn.execute(

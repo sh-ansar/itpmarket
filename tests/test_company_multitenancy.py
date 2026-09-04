@@ -14,6 +14,7 @@ from schema import ensure_database
 from saas_service import SaaSService
 from tenant_security import company_is_approved, has_permission
 from collectors.forte import forte_collector as forte
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 class CompanyMultitenancyTests(unittest.TestCase):
@@ -36,6 +37,12 @@ class CompanyMultitenancyTests(unittest.TestCase):
         conn.commit()
         conn.close()
         ensure_database(self.db_path)
+        activate_legacy_subscription(
+            self.db_path, self.tenant_a, actor_user_id=int(self.admin_a["id"])
+        )
+        activate_legacy_subscription(
+            self.db_path, self.tenant_b, actor_user_id=int(self.admin_a["id"])
+        )
         self.user_b, _ = self.auth.create_user(
             "operator-b@example.com", "Operator B", "StrongPassword456!",
             "operator", int(self.admin_a["id"]), tenant_id=self.tenant_b,

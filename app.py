@@ -277,13 +277,53 @@ def addon_order_public(order: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def catalog_ready_for_price_action(
+    user: dict[str, Any],
+    marketplace_code: str,
+    tenant_seller_id: int | None = None,
+) -> bool:
+    if is_superadmin(user):
+        return True
+
+    tenant_id = int(
+        user.get("tenant_id")
+        or 0
+    )
+
+    code = str(
+        marketplace_code
+        or ""
+    ).strip().casefold()
+
+    if (
+        tenant_id <= 0
+        or code not in MARKETPLACE_CODES
+    ):
+        return False
+
+    return bool(
+        CATALOG.catalog_memberships(
+            tenant_id,
+            [code],
+            tenant_seller_id,
+        )
+    )
+
+
 def tenant_onboarding_state(
     user: dict[str, Any],
 ) -> dict[str, Any]:
-    """Return persistent onboarding state for a tenant workspace."""
-    tenant_id = int(user.get("tenant_id") or 0)
+    """Return persistent onboarding and operation prerequisite state."""
+    tenant_id = int(
+        user.get("tenant_id")
+        or 0
+    )
 
-    if tenant_id <= 0 or is_superadmin(user):
+    if (
+        tenant_id <= 0
+        or is_superadmin(user)
+    ):
         return {
             "visible": False,
             "company_approved": True,
@@ -291,6 +331,10 @@ def tenant_onboarding_state(
             "connected_marketplace_count": 0,
             "subscription_active": True,
             "has_started_operation": True,
+            "catalog_ready": {
+                code: True
+                for code in MARKETPLACE_CODES
+            },
             "marketplace_sellers": {},
         }
 
@@ -301,16 +345,38 @@ def tenant_onboarding_state(
 
     connected = sorted({
         str(
-            seller.get("marketplace_code")
+            seller.get(
+                "marketplace_code"
+            )
             or ""
         ).strip().casefold()
         for seller in sellers
         if str(
-            seller.get("marketplace_code")
+            seller.get(
+                "marketplace_code"
+            )
             or ""
         ).strip().casefold()
         in MARKETPLACE_CODES
     })
+
+    platform_memberships = (
+        CATALOG.catalog_memberships(
+            tenant_id,
+            list(MARKETPLACE_CODES),
+        )
+    )
+
+    ready_platforms = {
+        marketplace
+        for marketplace, _source
+        in platform_memberships
+    }
+
+    catalog_ready = {
+        code: code in ready_platforms
+        for code in MARKETPLACE_CODES
+    }
 
     marketplace_sellers = {
         code: []
@@ -319,27 +385,51 @@ def tenant_onboarding_state(
 
     for seller in sellers:
         code = str(
-            seller.get("marketplace_code")
+            seller.get(
+                "marketplace_code"
+            )
             or ""
         ).strip().casefold()
 
         if code not in marketplace_sellers:
             continue
 
-        marketplace_sellers[code].append({
-            "id": int(seller["id"]),
+        seller_id = int(
+            seller["id"]
+        )
+
+        seller_catalog_ready = bool(
+            CATALOG.catalog_memberships(
+                tenant_id,
+                [code],
+                seller_id,
+            )
+        )
+
+        marketplace_sellers[
+            code
+        ].append({
+            "id": seller_id,
             "external_seller_id": str(
-                seller.get("external_seller_id")
+                seller.get(
+                    "external_seller_id"
+                )
                 or ""
             ),
             "display_name": str(
-                seller.get("display_name")
+                seller.get(
+                    "display_name"
+                )
                 or ""
             ),
             "source_url": str(
-                seller.get("source_url")
+                seller.get(
+                    "source_url"
+                )
                 or ""
             ),
+            "catalog_ready":
+                seller_catalog_ready,
         })
 
     has_started_operation = False
@@ -350,7 +440,10 @@ def tenant_onboarding_state(
     )
 
     try:
-        if table_exists(conn, "app_events"):
+        if table_exists(
+            conn,
+            "app_events",
+        ):
             has_started_operation = bool(
                 conn.execute(
                     """SELECT 1
@@ -358,7 +451,9 @@ def tenant_onboarding_state(
                        WHERE tenant_id=?
                          AND event_type='task_started'
                        LIMIT 1""",
-                    (tenant_id,),
+                    (
+                        tenant_id,
+                    ),
                 ).fetchone()
             )
     finally:
@@ -366,26 +461,37 @@ def tenant_onboarding_state(
 
     entitlement = (
         subscription_service()
-        .entitlement(tenant_id)
+        .entitlement(
+            tenant_id
+        )
     )
 
     return {
         "visible": True,
         "company_approved":
             company_is_approved(
-                user.get("tenant_status")
+                user.get(
+                    "tenant_status"
+                )
             ),
         "connected_marketplaces":
             connected,
         "connected_marketplace_count":
             len(connected),
         "subscription_active":
-            bool(entitlement.get("active")),
+            bool(
+                entitlement.get(
+                    "active"
+                )
+            ),
         "has_started_operation":
             has_started_operation,
+        "catalog_ready":
+            catalog_ready,
         "marketplace_sellers":
             marketplace_sellers,
     }
+
 
 
 def subscription_snapshot(
@@ -740,8 +846,8 @@ RECOVERY_MAX_ATTEMPTS = 5
 REGISTRATION_MAX_ATTEMPTS = 8
 CODE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,96}$")
 SENSITIVE_LOG_RE = re.compile(
-    r"(?i)(authorization|api[_-]?key|client[_-]?secret|password|passwd|token|cookie)"
-    r"(\s*[:=]\s*|\s+)([^\s,;]+)"
+    r'''(?i)(["']?(?:authorization|api[_-]?key|client[_-]?secret|password|passwd|token|cookie)["']?)'''
+    r'''(\s*[:=]\s*|\s+)(?:bearer\s+)?(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)'''
 )
 
 ACTION_INFO = {
@@ -851,6 +957,7 @@ FILTERABLE_ACTIONS = {
     "ozon_price_actualize", "ozon_enrich", "ozon_market_search", "ozon_refresh_prices",
     "ozon_refresh_stale", "ozon_retry",
     "ozon_kz_price_actualize",
+    "ozon_kz_refresh_prices",
     "halyk_price_actualize", "halyk_refresh_offers",
     "forte_price_actualize", "forte_refresh_offers",
     "export_report",
@@ -864,6 +971,26 @@ FORCE_ALL_ACTIONS = {
     "forte_probe", "forte_catalog_collect", "forte_sync_catalog", "forte_full_sync",
     "wb_catalog_collect", "wb_price_actualize", "wb_full_sync",
     "audit_catalog", "backup_database",
+}
+
+
+PRICE_ACTUALIZE_ACTIONS = {
+    "kaspi_price_actualize",
+    "update_own_prices",
+    "scan_market",
+    "refresh_market",
+    "retry_errors",
+    "ozon_price_actualize",
+    "ozon_market_search",
+    "ozon_refresh_prices",
+    "ozon_refresh_stale",
+    "ozon_retry",
+    "ozon_kz_price_actualize",
+    "halyk_price_actualize",
+    "halyk_refresh_offers",
+    "forte_price_actualize",
+    "forte_refresh_offers",
+    "wb_price_actualize",
 }
 
 
@@ -1136,8 +1263,12 @@ def action_access_error(action: str, user: dict[str, Any]) -> str | None:
         )
     ):
         return (
-            "??? ???????? ??? ???????? "
-            "?? ??????????."
+            "\u0414\u043b\u044f "
+            "\u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 "
+            "\u044d\u0442\u0430 "
+            "\u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0430 "
+            "\u043d\u0435 "
+            "\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0430."
         )
 
     return None
@@ -1224,7 +1355,7 @@ def permission_required(permission_code: str) -> Callable[[Callable[..., Any]], 
                         {
                             "ok": False,
                             "error":
-                                "???????????? ????.",
+                                "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u043f\u0440\u0430\u0432.",
                         }
                     ), 403
 
@@ -3761,6 +3892,23 @@ def api_task_start() -> Any:
             except ValueError as exc:
                 return json_error(str(exc), 409)
     effective_seller_id = int((selected_seller or {}).get("id") or 0)
+    # CATALOG_REQUIRED_FOR_PRICE_ACTUALIZATION
+    if (
+        action in PRICE_ACTUALIZE_ACTIONS
+        and not is_superadmin(user)
+        and not catalog_ready_for_price_action(
+            user,
+            task_platform,
+            effective_seller_id or None,
+        )
+    ):
+        return json_error(
+            "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 "
+            "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 "
+            "\u0441\u0431\u043e\u0440 "
+            "\u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430.",
+            409,
+        )
     codes = clean_codes(payload.get("codes"))
     access_error = product_codes_access_error(codes, user)
     if access_error:
@@ -4018,20 +4166,22 @@ def api_task_log(
     technical_log = ""
 
     if show_technical_log:
-        technical_log = TASKS.tail(
-            task_id,
-            lines=min(
-                2000,
-                max(
-                    50,
-                    int(
-                        request.args.get(
-                            "lines",
-                            800,
-                        )
+        technical_log = redact_log_text(
+            TASKS.tail(
+                task_id,
+                lines=min(
+                    2000,
+                    max(
+                        50,
+                        int(
+                            request.args.get(
+                                "lines",
+                                800,
+                            )
+                        ),
                     ),
                 ),
-            ),
+            )
         )
 
     return json_ok(

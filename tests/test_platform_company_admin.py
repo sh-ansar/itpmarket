@@ -15,6 +15,7 @@ from auth_service import AuthService
 from ozon_source_verification import OzonSourceVerificationError
 from saas_service import SaaSService
 from schema import ensure_database
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 class PlatformCompanyAdminTests(unittest.TestCase):
@@ -39,6 +40,9 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         conn.commit()
         conn.close()
         ensure_database(self.db_path)
+        activate_legacy_subscription(
+            self.db_path, self.tenant_b, actor_user_id=int(self.root["id"])
+        )
         self.company_admin, _ = self.auth.create_user(
             "admin-b@example.com", "Admin B", "StrongPassword456!", "admin",
             int(self.root["id"]), tenant_id=self.tenant_b,
@@ -363,11 +367,19 @@ class PlatformCompanyAdminTests(unittest.TestCase):
         page = self.client.get("/app")
         self.assertEqual(200, page.status_code)
         html = page.get_data(as_text=True)
-        self.assertIn('<option value="kaspi">Kaspi</option>', html)
-        self.assertIn('<option value="ozon">Ozon.ru</option>', html)
-        self.assertNotIn('<option value="ozon_kz">', html)
-        self.assertNotIn('<option value="halyk_market">', html)
-        self.assertNotIn('<option value="forte_market">', html)
+        settings_script = (
+            Path(__file__).resolve().parents[1]
+            / "static"
+            / "js"
+            / "marketplace_settings.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('id="tenantMarketplaceCards"', html)
+        self.assertIn("Интернет-магазины компании", html)
+        self.assertNotIn("Площадки компании", html)
+        self.assertIn("marketplace_settings.js", html)
+        self.assertIn("data.marketplace_access", settings_script)
+        self.assertIn("data.integration_catalog", settings_script)
+        self.assertIn("data-marketplace-code", settings_script)
         session_user = self.client.get("/api/session").get_json()["user"]
         self.assertEqual({}, session_user["marketplaces"])
         self.assertEqual({"kaspi": True, "ozon": True}, session_user["available_marketplaces"])

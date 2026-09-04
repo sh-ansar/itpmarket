@@ -23,6 +23,7 @@ from catalog_configuration_service import (
 from data_service import DataService
 from saas_service import SaaSService
 from schema import ensure_database
+from tests.subscription_fixtures import activate_trial_subscription
 
 
 SCENARIOS = (
@@ -93,8 +94,17 @@ def run_scenario(
         saas.review_registration_v2(
             request_id, "approved", int(platform_admin["id"])
         )
+        saas.set_marketplace_access(
+            tenant_id, [scenario["code"]], int(platform_admin["id"])
+        )
+        activate_trial_subscription(
+            db_path, tenant_id, int(platform_admin["id"])
+        )
         granted = saas.marketplace_access(tenant_id, include_unavailable=False)
-        if [item["code"] for item in granted] != [scenario["code"]]:
+        effective_grants = [
+            item["code"] for item in granted if item["is_allowed"]
+        ]
+        if effective_grants != [scenario["code"]]:
             raise AssertionError(f"Requested grant mismatch for company {index}: {granted}")
         user, _ = auth.create_user(
             f"admin-{index}@example.com", f"Company {index} Admin",
@@ -106,11 +116,6 @@ def run_scenario(
         )
         if not detected["verified"] and detected.get("verification_state") != "parsed":
             raise AssertionError(f"Seller was not detected for {scenario['code']}")
-        connected = saas.connect_marketplace(
-            tenant_id, scenario["url"], int(user["id"]), scenario["code"]
-        )
-        if connected.get("approval_status") != "pending":
-            raise AssertionError(f"Marketplace was not submitted for {scenario['code']}")
         if scenario["code"] in {"ozon", "ozon_kz"}:
             with patch("saas_service.verify_ozon_storefront", return_value={
                 "canonical_seller_id": str(detected["seller_identifier"]),
@@ -118,13 +123,22 @@ def run_scenario(
                 "seller_name": str(detected["seller_name"]),
                 "catalogue_empty": "false",
             }):
-                saas.review_marketplace_connection(
-                    tenant_id, scenario["code"], "approved", int(platform_admin["id"])
+                checked = saas.check_marketplace_source(
+                    tenant_id, scenario["url"], int(user["id"]), scenario["code"]
+                )
+                connected = saas.connect_marketplace(
+                    tenant_id,
+                    scenario["url"],
+                    int(user["id"]),
+                    scenario["code"],
+                    str(checked["verification_proof"]),
                 )
         else:
-            saas.review_marketplace_connection(
-                tenant_id, scenario["code"], "approved", int(platform_admin["id"])
+            connected = saas.connect_marketplace(
+                tenant_id, scenario["url"], int(user["id"]), scenario["code"]
             )
+        if connected.get("approval_status") != "approved":
+            raise AssertionError(f"Marketplace was not approved for {scenario['code']}")
         user = auth.get_user(int(user["id"])) or user
         users.append(user)
 

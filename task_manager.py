@@ -40,6 +40,17 @@ def now_iso() -> str:
 
 RESULT_PREFIX = "SPYON_RESULT "
 PROGRESS_PREFIX = "SPYON_PROGRESS "
+
+
+_PROCESS_STATE_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_STATE_LOCKS_GUARD = threading.Lock()
+
+
+def _process_state_lock(path: Path) -> threading.RLock:
+    """Return the process-wide lock shared by managers for one state file."""
+    key = os.path.normcase(str(path.resolve(strict=False)))
+    with _PROCESS_STATE_LOCKS_GUARD:
+        return _PROCESS_STATE_LOCKS.setdefault(key, threading.RLock())
 RESULT_MESSAGES = {
     "ozon_challenge": "Ozon требует подтверждения. Откройте окно Ozon, пройдите проверку и повторите синхронизацию.",
     "browser_not_open": "Браузер Ozon не открыт. Откройте браузер Ozon и повторите синхронизацию.",
@@ -249,7 +260,7 @@ class TaskManager:
         self.max_queue = max(1, int(max_queue))
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.lock = threading.RLock()
+        self.lock = _process_state_lock(self.state_path)
         self._guard_local = threading.local()
         self._state_lock_path = self.state_path.with_suffix(
             self.state_path.suffix + ".lock"

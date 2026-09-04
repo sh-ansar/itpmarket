@@ -164,6 +164,19 @@ class CatalogConfigurationService:
         placeholders = ",".join("?" for _ in allowed)
         conn = self._connect()
         try:
+            if tenant_seller_id is not None:
+                params: list[Any] = [int(tenant_id), int(tenant_seller_id)]
+                params.extend(sorted(allowed))
+                return {
+                    (str(row["marketplace_code"]), str(row["source_product_code"]))
+                    for row in conn.execute(
+                        f"""SELECT marketplace_code,source_product_code
+                            FROM tenant_seller_catalog_products
+                            WHERE tenant_id=? AND tenant_seller_id=? AND active=1
+                              AND marketplace_code IN ({placeholders})""",
+                        params,
+                    ).fetchall()
+                }
             seller_rows_exist = conn.execute(
                 """SELECT 1 FROM tenant_seller_catalog_products
                    WHERE tenant_id=? AND active=1 LIMIT 1""",
@@ -172,9 +185,6 @@ class CatalogConfigurationService:
             if seller_rows_exist:
                 seller_where = "tenant_id=? AND active=1"
                 params: list[Any] = [int(tenant_id)]
-                if tenant_seller_id is not None:
-                    seller_where += " AND tenant_seller_id=?"
-                    params.append(int(tenant_seller_id))
                 seller_where += f" AND marketplace_code IN ({placeholders})"
                 params.extend(sorted(allowed))
                 return {

@@ -14,6 +14,7 @@ from auth_service import AuthService
 from catalog_configuration_service import CatalogConfigurationService
 from collectors.wildberries import wildberries_collector as collector
 from schema import ensure_database
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 def wb_product(product_id: int, *, price: int = 12_345_600) -> dict:
@@ -116,6 +117,10 @@ class WildberriesCollectorTests(unittest.TestCase):
             conn.commit()
             conn.close()
             ensure_database(db_path)
+            activate_legacy_subscription(
+                db_path, tenant_a, actor_user_id=int(admin["id"])
+            )
+            activate_legacy_subscription(db_path, tenant_b)
             service = CatalogConfigurationService(db_path)
             service.replace_catalog_products(
                 tenant_b, "wildberries",

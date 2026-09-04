@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from schema import ensure_database
 from subscription_service import SubscriptionLimitError, SubscriptionService
 from task_manager import TaskManager
 import storage.postgres_compat as postgres_compat
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +90,9 @@ class MultiSellerDatabaseTests(unittest.TestCase):
             "owner@example.test", "Owner", "StrongPassword123!"
         )
         self.tenant_id = int(self.admin["tenant_id"])
+        activate_legacy_subscription(
+            self.db_path, self.tenant_id, actor_user_id=int(self.admin["id"])
+        )
         self.saas = SaaSService(self.db_path)
         self.saas.update_tenant_profile(
             self.tenant_id,
@@ -172,6 +177,7 @@ class MultiSellerDatabaseTests(unittest.TestCase):
     def test_same_external_seller_id_in_different_tenants_does_not_collide(self) -> None:
         tenant_b = add_approved_tenant(self.db_path, "tenant-b")
         ensure_database(self.db_path)
+        activate_legacy_subscription(self.db_path, tenant_b)
         seller_b = add_seller(
             self.db_path, tenant_b, "kaspi", "shared-external", "Tenant B seller"
         )
@@ -404,6 +410,7 @@ class MultiSellerDatabaseTests(unittest.TestCase):
         )
         tenant_b = add_approved_tenant(self.db_path, "acceptance-b")
         ensure_database(self.db_path)
+        activate_legacy_subscription(self.db_path, tenant_b)
         seller_b1 = add_seller(
             self.db_path, tenant_b, "kaspi", "b1", "Kaspi B1"
         )
@@ -510,9 +517,12 @@ class TaskAndRuntimeIsolationTests(unittest.TestCase):
         javascript = (
             Path(__file__).resolve().parents[1] / "static" / "js" / "app.js"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            "sellerField.hidden=sellers.length<=1||platform==='system'",
+        self.assertRegex(
             javascript,
+            re.compile(
+                r"sellerField\.hidden\s*=\s*sellers\.length\s*<=\s*1"
+                r"\s*\|\|\s*platform\s*===\s*'system'"
+            ),
         )
         self.assertIn("field.hidden=sellers.length<=1", javascript)
 

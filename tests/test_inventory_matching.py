@@ -316,11 +316,12 @@ class InventoryPermissionAndUiTests(unittest.TestCase):
         )
         self.assertIn("registration_guide.css", template)
         self.assertEqual(
-            4,
+            3,
             template.count("data-registration-step"),
         )
-        for step in ("company", "marketplaces", "plan", "account"):
+        for step in ("company", "plan", "account"):
             self.assertIn(f'data-step-code="{step}"', template)
+        self.assertNotIn('data-step-code="marketplaces"', template)
         self.assertIn('id="registrationGuide"', template)
         self.assertIn(".registration-fields input", css)
         self.assertIn("position: sticky", css)

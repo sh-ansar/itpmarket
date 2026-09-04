@@ -4286,15 +4286,15 @@ html[data-theme="dark"] .profile i img {
 .operation-description{
   display:block!important;
   width:100%;
-  margin:2px 0 3px;
-  padding:7px 9px;
-  border:1px solid #cbe9d9;
-  border-radius:9px;
-  background:#edf9f3;
-  color:#247151!important;
-  font-size:10px!important;
-  line-height:1.4!important;
-  font-weight:600!important;
+  margin:4px 0 3px;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:var(--muted)!important;
+  font-size:11px!important;
+  line-height:1.45!important;
+  font-weight:500!important;
 }
 
 html[data-theme="dark"]
@@ -4319,9 +4319,9 @@ html[data-theme="dark"]
 }
 
 html[data-theme="dark"] .operation-description{
-  border-color:#285b45;
-  background:#153126;
-  color:#9bd8b7!important;
+  border:0;
+  background:transparent;
+  color:var(--muted)!important;
 }
 
 
@@ -4454,4 +4454,18 @@ html[data-theme="dark"]
     flex-direction:column;
     gap:2px;
   }
+}
+
+
+.operation-prerequisite{
+  display:block;
+  margin:3px 0 2px;
+  color:#8a6515;
+  font-size:10px;
+  line-height:1.4;
+  font-weight:600;
+}
+
+html[data-theme="dark"] .operation-prerequisite{
+  color:#dfbd67;
 }

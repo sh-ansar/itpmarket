@@ -8,6 +8,7 @@ from pathlib import Path
 from collectors.halyk import halyk_collector as halyk
 from data_service import DataService
 from schema import ensure_database
+from tests.subscription_fixtures import activate_legacy_subscription
 
 
 class HalykCollectorTests(unittest.TestCase):
@@ -46,6 +47,7 @@ class HalykCollectorTests(unittest.TestCase):
                 )
                 conn.commit()
                 tenant_id = int(conn.execute("SELECT id FROM tenants ORDER BY id LIMIT 1").fetchone()[0])
+                activate_legacy_subscription(db_path, tenant_id)
                 saved = halyk.materialize_tenant_catalog(
                     conn, db_path,
                     argparse.Namespace(tenant_id=tenant_id, seller_name="Unityre"),

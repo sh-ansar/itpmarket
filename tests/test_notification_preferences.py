@@ -106,7 +106,12 @@ class NotificationPreferencesTests(unittest.TestCase):
         styles = (root / "static" / "css" / "app.css").read_text(encoding="utf-8")
 
         self.assertIn('id="subscriptionStatusBanner"', template)
-        self.assertIn("function renderSubscriptionStatusBanner(snapshot)", script)
+        self.assertIn("function renderOnboardingBanner(payload)", script)
+        self.assertIn("async function loadOnboarding()", script)
+        self.assertIn("renderOnboardingBanner(", script)
+        self.assertIn('id="subscriptionStatusBannerTitle"', template)
+        self.assertIn('id="subscriptionStatusBannerMessage"', template)
+        self.assertIn('id="subscriptionStatusBannerAction"', template)
         self.assertIn("html[data-theme=\"dark\"] .profile i img", styles)
         self.assertIn("filter: brightness(0) !important", styles)
 
